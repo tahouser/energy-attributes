@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Energy Attribution",
+        "description": "Select the Home Assistant sensor that provides whole-home power.",
+        "data": {
+          "power_entity": "Whole-home power sensor"
+        }
+      },
+      "entities": {
+        "title": "Select devices to monitor",
+        "description": "Select the Home Assistant entities that have useful power or energy information for attribution training.",
+        "data": {
+          "monitored_entities": "Entities to monitor"
+        }
+      }
+    }
+  }
+}

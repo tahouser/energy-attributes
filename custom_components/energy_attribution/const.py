@@ -1,0 +1,5 @@
+"""Constants for Energy Attribution."""
+
+DOMAIN = "energy_attribution"
+CONF_POWER_ENTITY = "power_entity"
+CONF_MONITORED_ENTITIES = "monitored_entities"
