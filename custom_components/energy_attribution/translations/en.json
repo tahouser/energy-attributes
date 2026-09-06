@@ -20,6 +20,27 @@
           "monitored_devices": "Devices to monitor",
           "action": "Training / save action"
         }
+      },
+      "training_prepare": {
+        "title": "Prepare training",
+        "description": "Device: {device}\nCategory: {category}\nArea: {area}\nEntity: {entities}\n\nThe whole-home power monitor is ready to watch this device. Check Ready, then continue to Start.",
+        "data": {
+          "ready": "Ready to begin"
+        }
+      },
+      "training_active": {
+        "title": "Training active",
+        "description": "Training is active for {device} ({category}). Operate the device now. For a short test, turn it on and off as instructed. For a full-cycle appliance, run the complete cycle. The training state is retained while Configure is closed. When finished, check Finish.",
+        "data": {
+          "finish": "Finish training capture"
+        }
+      },
+      "training_review": {
+        "title": "Review training",
+        "description": "Captured training for {device} ({category}). Observed peak change: {delta} W. Does the captured event resemble this device?",
+        "data": {
+          "confirm": "Yes \u2014 save training"
+        }
       }
     }
   },

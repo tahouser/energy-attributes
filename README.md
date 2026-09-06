@@ -67,3 +67,19 @@ interactive waveform/confirmation experience without changing this data model.
 Training actions are restricted to devices currently classified as **Monitor**.
 Ignored devices remain adopted in the private environment but do not appear in
 the training list.
+
+
+## v0.7.0
+
+The Configure workspace now routes the Train action into a persistent,
+multi-step training wizard:
+
+1. Prepare / identify the device.
+2. Arm and start training.
+3. Active training state.
+4. Review and confirm or retry.
+
+The training state is stored in the config entry so a long-cycle capture can
+remain active while the Configure page is closed. The current evaluation build
+uses the whole-home sensor as the capture source; live transition sampling and
+waveform rendering are the next implementation layer.

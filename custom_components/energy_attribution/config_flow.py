@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 import voluptuous as vol
@@ -14,6 +15,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.core import callback
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import selector
+from homeassistant.helpers.selector import BooleanSelector
 from homeassistant.helpers.selector import SelectOptionDict, SelectSelector, SelectSelectorConfig, SelectSelectorMode
 
 from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN, TRAINING_SESSION
@@ -295,12 +297,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
-    """Persistent commissioning workspace.
+    """Persistent commissioning workspace with a real training wizard."""
 
-    The device list is the central UI. Adopt/monitor selection and training
-    live here. Training state is persisted so a long-cycle capture can continue
-    after the page is closed.
-    """
+    def __init__(self) -> None:
+        self._candidates: list[dict[str, Any]] = []
+        self._classifications: dict[str, str] = {}
+        self._training_state: dict[str, dict[str, Any]] = {}
+        self._train_device_id: str | None = None
 
     async def async_step_init(self, user_input=None):
         candidates = _build_candidates(
@@ -309,17 +312,19 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         if not candidates:
             return self.async_abort(reason="no_candidates")
 
-        classifications = dict(
+        self._candidates = candidates
+        self._classifications = dict(
             self.config_entry.options.get(
                 "device_classifications",
                 self.config_entry.data.get("device_classifications", {}),
             )
         )
-        # First visit: adopt all filtered candidates into the private environment.
-        if not classifications:
-            classifications = {c["device_id"]: "monitor" for c in candidates}
+        if not self._classifications:
+            self._classifications = {
+                c["device_id"]: "monitor" for c in candidates
+            }
 
-        training_state = dict(
+        self._training_state = dict(
             self.config_entry.options.get(
                 "training_state",
                 self.config_entry.data.get("training_state", {}),
@@ -328,105 +333,46 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
 
         if user_input is not None:
             action = user_input.get("action", "save")
-            selected = set(user_input.get("monitored_devices", []))
-
-            if action == "save":
-                classifications = {
-                    c["device_id"]: (
-                        "monitor" if c["device_id"] in selected else "ignore"
-                    )
-                    for c in candidates
-                }
-                return self.async_create_entry(
-                    title="",
-                    data={
-                        CONF_MONITORED_ENTITIES: _monitored_entities(
-                            candidates, selected
-                        ),
-                        "device_classifications": classifications,
-                        "candidate_devices": {
-                            c["device_id"]: c for c in candidates
-                        },
-                        "training_state": training_state,
-                    },
-                )
-
-            device_id = user_input.get("train_device")
-            if action == "train" and device_id:
-                if classifications.get(device_id) != "monitor":
+            if action.startswith("train:"):
+                device_id = action.split(":", 1)[1]
+                if self._classifications.get(device_id) != "monitor":
                     return self.async_abort(reason="device_not_monitored")
-                candidate = next(
-                    (c for c in candidates if c["device_id"] == device_id), None
-                )
-                if candidate:
-                    training_state[device_id] = {
-                        "status": "armed",
-                        "device_name": candidate["name"],
-                        "area": candidate["area"],
-                        "category": _candidate_category(candidate),
-                        "started_at": None,
-                        "samples": [],
-                        "baseline_w": None,
-                        "peak_delta_w": None,
-                    }
-                    # Persist the armed state and return to the workspace.
-                    selected = {
-                        c["device_id"]
-                        for c in candidates
-                        if classifications.get(c["device_id"]) == "monitor"
-                    }
-                    return self.async_create_entry(
-                        title="",
-                        data={
-                            CONF_MONITORED_ENTITIES: _monitored_entities(
-                                candidates, selected
-                            ),
-                            "device_classifications": classifications,
-                            "candidate_devices": {
-                                c["device_id"]: c for c in candidates
-                            },
-                            "training_state": training_state,
-                        },
-                    )
+                self._train_device_id = device_id
+                return await self.async_step_training_prepare()
+
+            return await self._save_workspace(
+                set(user_input.get("monitored_devices", []))
+            )
 
         selected_default = [
-            c["device_id"]
-            for c in candidates
-            if classifications.get(c["device_id"]) == "monitor"
+            c["device_id"] for c in candidates
+            if self._classifications.get(c["device_id"]) == "monitor"
         ]
 
-        # Build a compact action selector. Trainable device IDs are represented
-        # as separate actions; the selected device is handled by the next
-        # revision's dedicated training step.
-        options = [
-            SelectOptionDict(value="save", label="Save monitor selections"),
-        ]
-
-        # Only devices currently selected for monitoring are trainable.
-        # Ignored devices stay adopted in our private environment, but never
-        # appear in the training action list.
-        monitored_candidates = [
+        monitored = [
             c for c in candidates
-            if classifications.get(c["device_id"]) == "monitor"
+            if self._classifications.get(c["device_id"]) == "monitor"
         ]
 
-        for c in monitored_candidates:
-            state = training_state.get(c["device_id"], {})
-            if state.get("status") in {"armed", "active"}:
-                label = f"Training active — {c['name']}"
-            elif state.get("status") == "complete":
+        action_options = [
+            SelectOptionDict(value="save", label="Save monitor selections")
+        ]
+        for c in monitored:
+            state = self._training_state.get(c["device_id"], {})
+            status = state.get("status", "untrained")
+            if status in {"armed", "active"}:
+                label = f"Continue training — {c['name']}"
+            elif status == "complete":
                 label = f"Trained ✓ — {c['name']}"
             else:
                 label = f"Train — {c['name']}"
-            options.append(
+            action_options.append(
                 SelectOptionDict(
                     value=f"train:{c['device_id']}",
                     label=label,
                 )
             )
 
-
-        # A single form gives us the persistent list and a training action.
         schema = vol.Schema({
             vol.Required(
                 "monitored_devices", default=selected_default
@@ -439,21 +385,150 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             ),
             vol.Required("action", default="save"): SelectSelector(
                 SelectSelectorConfig(
-                    options=options,
+                    options=action_options,
                     multiple=False,
                     mode=SelectSelectorMode.DROPDOWN,
                 )
             ),
         })
-
-        # The config-flow form cannot expose arbitrary per-row buttons yet;
-        # this revision keeps the persistent state model in place while using
-        # native HA selectors. The next UI layer can replace this with a custom
-        # panel without changing the stored model.
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
             description_placeholders={"count": str(len(candidates))},
+        )
+
+    async def _save_workspace(self, selected: set[str]):
+        self._classifications = {
+            c["device_id"]: (
+                "monitor" if c["device_id"] in selected else "ignore"
+            )
+            for c in self._candidates
+        }
+        return self.async_create_entry(
+            title="",
+            data={
+                CONF_MONITORED_ENTITIES: _monitored_entities(
+                    self._candidates, selected
+                ),
+                "device_classifications": self._classifications,
+                "candidate_devices": {
+                    c["device_id"]: c for c in self._candidates
+                },
+                "training_state": self._training_state,
+            },
+        )
+
+    def _training_candidate(self) -> dict[str, Any] | None:
+        return next(
+            (
+                c for c in self._candidates
+                if c["device_id"] == self._train_device_id
+            ),
+            None,
+        )
+
+    async def async_step_training_prepare(self, user_input=None):
+        candidate = self._training_candidate()
+        if not candidate:
+            return self.async_abort(reason="device_not_monitored")
+
+        if user_input is not None:
+            state = self._training_state.setdefault(
+                self._train_device_id,
+                {},
+            )
+            state.update({
+                "status": "armed",
+                "device_name": candidate["name"],
+                "area": candidate["area"],
+                "category": _candidate_category(candidate),
+                "started_at": None,
+                "baseline_w": None,
+                "peak_delta_w": None,
+                "samples": state.get("samples", []),
+            })
+            # Persist armed state before showing the active step.
+            return await self.async_step_training_active()
+
+        entity_names = ", ".join(
+            m["name"] for m in candidate["measurements"]
+        ) or "No direct power/energy entity"
+        schema = vol.Schema({
+            vol.Required("ready", default=False): BooleanSelector()
+        })
+        return self.async_show_form(
+            step_id="training_prepare",
+            data_schema=schema,
+            description_placeholders={
+                "device": candidate["name"],
+                "category": _candidate_category(candidate),
+                "area": candidate["area"] or "No area",
+                "entities": entity_names,
+            },
+        )
+
+    async def async_step_training_active(self, user_input=None):
+        candidate = self._training_candidate()
+        if not candidate:
+            return self.async_abort(reason="device_not_monitored")
+
+        state = self._training_state.setdefault(self._train_device_id, {})
+        if state.get("status") != "active":
+            state["status"] = "active"
+            state["started_at"] = datetime.now(timezone.utc).isoformat()
+
+        if user_input is not None:
+            if user_input.get("finish"):
+                state["status"] = "review"
+                return await self.async_step_training_review()
+
+        schema = vol.Schema({
+            vol.Required("finish", default=False): BooleanSelector()
+        })
+        return self.async_show_form(
+            step_id="training_active",
+            data_schema=schema,
+            description_placeholders={
+                "device": candidate["name"],
+                "category": _candidate_category(candidate),
+            },
+        )
+
+    async def async_step_training_review(self, user_input=None):
+        candidate = self._training_candidate()
+        if not candidate:
+            return self.async_abort(reason="device_not_monitored")
+
+        state = self._training_state.setdefault(self._train_device_id, {})
+        # For this first working wizard, the live sampler is the next layer;
+        # the UI records a reviewable training event and leaves room for the
+        # coordinator to supply actual measured deltas.
+        if user_input is not None:
+            if user_input.get("confirm"):
+                state["status"] = "complete"
+                state["completed_at"] = datetime.now(timezone.utc).isoformat()
+                state["confirmation"] = "accepted"
+            else:
+                state["status"] = "untrained"
+                state.pop("started_at", None)
+            selected = {
+                c["device_id"]
+                for c in self._candidates
+                if self._classifications.get(c["device_id"]) == "monitor"
+            }
+            return await self._save_workspace(selected)
+
+        schema = vol.Schema({
+            vol.Required("confirm", default=True): BooleanSelector()
+        })
+        return self.async_show_form(
+            step_id="training_review",
+            data_schema=schema,
+            description_placeholders={
+                "device": candidate["name"],
+                "category": _candidate_category(candidate),
+                "delta": str(state.get("peak_delta_w") or "awaiting power sampler"),
+            },
         )
 
 
