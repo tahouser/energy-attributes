@@ -70,7 +70,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             state={"status":"active","phase":"baseline","method":method,"device_id":device_id,
                    "device_name":candidate.get("name",device_id),"area":candidate.get("area",""),
                    "started_at":self.hass.loop.time(),"baseline_w":None,"peak_delta_w":None,
-                   "events_detected":0,"result":None}
+                   "events_detected":0,"result":None,"learned":False}
             self.training_state[device_id]=state
             self._training_engine=engine
             self._training_device=device_id
@@ -103,11 +103,19 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                             await self._call_power(auto_controls, False)
                             turned_on = False
                             state["instruction"] = "I turned the device OFF automatically. Confirming the return to baseline…"
+                    if result.get("failed"):
+                        state["status"] = "error"
+                        state["instruction"] = result.get("failure_reason", "Training could not be completed.")
+                        state["error"] = result.get("failure_reason", "Training timeout")
+                        await self._persist(force=True)
+                        return
                     if result.get("completed"):
                         state["status"] = "complete"
                         state["instruction"] = "Training Complete. Review the measured signature below."
                         if auto_controls and turned_on:
                             await self._call_power(auto_controls, False)
+                        state["learned"] = True
+                        state["completed_at"] = self.hass.loop.time()
                         state["learned_signature"] = {
                             "method": method,
                             "baseline_w": result.get("baseline_w"),
@@ -159,6 +167,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         state=self.training_state.get(device_id)
         if state and state.get("status")=="active":
             state["status"]="stopped"
+            state["instruction"]="Training stopped. No learned signature was saved."
+            state["learned"] = False
         await self._persist()
 
     @callback
