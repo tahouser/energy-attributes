@@ -1,23 +1,35 @@
 {
   "config": {
+    "flow_title": "Energy Attribution",
     "step": {
       "user": {
-        "title": "Energy Attribution \u2014 Whole-home meter",
-        "description": "Choose the HA power sensor that represents the whole home. We will then scan HA and build a filtered electrical-load commissioning list.",
+        "title": "Choose whole-home meter",
+        "description": "Select the HA power sensor that represents total whole-home consumption. We will then build a filtered electrical-load list.",
         "data": {
           "power_entity": "Whole-home power sensor"
         }
       },
       "commission": {
-        "title": "Electrical-load commissioning \u00b7 {progress}",
-        "description": "{device_name}\n\n{details}\n\nChoose how this device should be treated. Devices with direct power/energy measurements are shown first. Obvious battery/environmental-only devices are filtered out automatically.",
+        "title": "Electrical-load commissioning",
+        "description": "{count} electrical-load candidates passed the filter. All are adopted into the Energy Attribution environment and selected by default. Uncheck anything you do not want monitored, then submit. This is a bulk selection step \u2014 there is no one-device-at-a-time commissioning.",
         "data": {
-          "classification": "Treatment"
+          "monitored_devices": "Devices to monitor"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Electrical-load commissioning",
+        "description": "{count} current electrical-load candidates are shown. Check the devices you want monitored. Changes here only affect Energy Attribution; Home Assistant devices are not modified.",
+        "data": {
+          "monitored_devices": "Devices to monitor"
         }
       }
     }
   },
   "abort": {
-    "no_candidates": "No suitable electrical-load candidates were found."
+    "no_candidates": "No direct power or energy load measurements were found after filtering."
   }
 }
