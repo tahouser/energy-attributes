@@ -28,6 +28,7 @@ class EnergyAttributionPanel extends HTMLElement {
   async _load() {
     if (!this._hass) return;
     try {
+      await this._cmd({type:"ping"});
       const data = await Promise.race([
         this._cmd({type:"energy_attribution/list_entries"}),
         new Promise((_, reject) => setTimeout(() => reject(new Error("The Energy Attribution WebSocket command did not respond.")), 8000))
@@ -42,7 +43,7 @@ class EnergyAttributionPanel extends HTMLElement {
       if (this._timer) clearInterval(this._timer);
       this._timer = setInterval(() => this._refresh(), 1000);
     } catch (e) {
-      this._error = e?.message || String(e);
+      this._error = `Backend request failed: ${e?.message || String(e)}`;
       this._render();
     }
   }
