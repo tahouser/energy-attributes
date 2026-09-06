@@ -1,7 +1,7 @@
 {
   "domain": "energy_attribution",
   "name": "Energy Attribution",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "documentation": "https://github.com/tahouser/energy-attributes",
   "issue_tracker": "https://github.com/tahouser/energy-attributes/issues",
   "codeowners": [],
