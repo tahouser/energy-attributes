@@ -22,6 +22,8 @@ def _coordinator(hass: HomeAssistant, entry_id: str):
 async def ws_list_entries(hass, connection, msg):
     entries = []
     for entry_id, coordinator in hass.data.get(DOMAIN, {}).items():
+        if not hasattr(coordinator, "entry"):
+            continue
         entries.append({
             "entry_id": entry_id,
             "title": coordinator.entry.title,

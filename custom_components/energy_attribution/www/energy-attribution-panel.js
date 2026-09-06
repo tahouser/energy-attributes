@@ -120,4 +120,6 @@ class EnergyAttributionPanel extends HTMLElement {
       <p>Review the measured result before accepting it as this device's learned signature.</p><div class="row"><button data-close>Close</button><button class="secondary" data-retry='${JSON.stringify(d).replaceAll("'","&apos;")}'>Retry training</button></div></div>`;
   }
 }
-customElements.define('energy-attribution-panel', EnergyAttributionPanel);
+if (!customElements.get('energy-attribution-panel')) {
+  customElements.define('energy-attribution-panel', EnergyAttributionPanel);
+}

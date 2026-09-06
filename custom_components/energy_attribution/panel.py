@@ -17,7 +17,7 @@ async def async_register_panel(hass: HomeAssistant) -> None:
         hass,
         webcomponent_name="energy-attribution-panel",
         frontend_url_path=DOMAIN_PANEL,
-        module_url="/energy-attribution-static/energy-attribution-panel.js?v=0.9.4",
+        module_url="/energy-attribution-static/energy-attribution-panel.js?v=0.9.5",
         sidebar_title="Energy Attribution",
         sidebar_icon="mdi:flash-outline",
         require_admin=False,
