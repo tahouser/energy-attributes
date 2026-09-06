@@ -85,7 +85,7 @@ if (!customElements.get(TAG)) {
       html+=`</table><button id="save">Save monitoring selections</button>`;
       if(active) {
         const t=active.training;
-        html+=`<div class="training-box"><h2>Training in progress</h2><h3>${this._esc(active.name)}</h3><p>${this._esc(this._phaseText(t))}</p>${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.peak_delta_w!=null?`<p>Detected load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}<button data-stop="${this._esc(active.device_id)}">Stop</button></div>`;
+        html+=`<div class="training-box"><h2>Training in progress</h2><h3>${this._esc(active.name)}</h3><p>${this._esc(this._phaseText(t))}</p>${t.method==='quick'&&t.cycles_required?`<p>Cycle: <b>${t.cycles_completed||0} of ${t.cycles_required}</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.peak_delta_w!=null?`<p>Detected load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}<button data-stop="${this._esc(active.device_id)}">Stop</button></div>`;
       }
       if(!active && resultDevice) {
         const t=resultDevice.training; const complete=t.status==='complete' && t.learned;
@@ -104,7 +104,7 @@ if (!customElements.get(TAG)) {
       this.querySelector('#close-result')?.addEventListener('click',()=>{this._closedResult=true;this._render();});
       this.querySelector('#dismiss-result')?.addEventListener('click',()=>{this._closedResult=true;this._render();});
     }
-    _phaseText(t){const map={baseline:'Establishing the normal background load…',waiting_for_on:'Baseline established. Preparing the automatic ON test…',on_stabilizing:'Power change detected. Measuring and stabilizing…',waiting_for_off:'ON measurement captured. Turning the device OFF…',waiting_for_start:'Baseline established. Start the appliance now. Monitoring will continue in the background.',capturing:'Cycle detected. Monitoring the complete cycle…',complete:'Training Complete. Review the measured signature, then close this result.',timeout:'Training timed out.'};return t.instruction||map[t.phase]||t.phase||'Waiting…';}
+    _phaseText(t){const map={baseline:'Establishing the normal background load…',request_on:'Baseline established. Starting test cycle…',waiting_for_on:'Device is ON. Measuring the power increase…',request_off:'Power increase captured. Turning the device OFF…',waiting_for_off:'Device is OFF. Confirming the return to normal power…',cooldown:'Cycle complete. Preparing the next cycle…',waiting_for_start:'Baseline established. Start the appliance now. Monitoring will continue in the background.',capturing:'Cycle detected. Monitoring the complete cycle…',complete:'Training Complete. Review the measured signature, then close this result.',timeout:'Training timed out.'};return t.instruction||map[t.phase]||t.phase||'Waiting…';}
     _duration(s){const n=Math.round(s);if(n<60)return `${n}s`;if(n<3600)return `${Math.floor(n/60)}m ${n%60}s`;return `${Math.floor(n/3600)}h ${Math.floor((n%3600)/60)}m`;}
     _esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   }

@@ -78,52 +78,53 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self._training_task=self.hass.async_create_task(self._training_loop(device_id,method))
             return state
 
-    async def _training_loop(self, device_id:str, method:str):
-        # Baseline is established first. For quick controllable loads, the
-        # integration performs the ON/OFF test itself after baseline capture.
+    async def _training_loop(self, device_id: str, method: str):
         try:
-            auto_controls=self._auto_control_entities(device_id)
-            turned_on=False
-            turned_off=False
-            while self._training_engine and self._training_device==device_id:
-                whole=self.hass.states.get(self.power_entity)
-                try: watts=float(whole.state) if whole else None
-                except (TypeError,ValueError): watts=None
+            controls = self._auto_control_entities(device_id)
+            if method == "quick" and not controls:
+                raise RuntimeError("This device has no known controllable entity for Quick ON/OFF training.")
+            control_state = "off"
+            while self._training_engine and self._training_device == device_id:
+                whole = self.hass.states.get(self.power_entity)
+                try:
+                    watts = float(whole.state) if whole else None
+                except (TypeError, ValueError):
+                    watts = None
                 if watts is not None:
-                    result=self._training_engine.add_sample(self.hass.loop.time(),watts)
-                    state=self.training_state[device_id]
-                    state.update({k:result.get(k) for k in ("phase","baseline_w","peak_delta_w","events_detected","duration_s","energy_wh") if k in result})
-                    state["result"]=result
-                    if method == "quick" and auto_controls:
-                        if result["phase"] == "waiting_for_on" and not turned_on:
-                            await self._call_power(auto_controls, True)
-                            turned_on = True
-                            state["instruction"] = "I turned the device ON automatically. Measuring the actual whole-home response…"
-                        elif result["phase"] == "waiting_for_off" and turned_on:
-                            await self._call_power(auto_controls, False)
-                            turned_on = False
-                            state["instruction"] = "I turned the device OFF automatically. Confirming the return to baseline…"
+                    result = self._training_engine.add_sample(self.hass.loop.time(), watts)
+                    state = self.training_state[device_id]
+                    state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed")})
+                    state["result"] = result
+                    if method == "quick" and result.get("action"):
+                        action = result["action"]
+                        if action == "turn_on" and control_state == "off":
+                            state["instruction"] = "Turning the test device ON automatically…"
+                            await self._call_power(controls, True)
+                            control_state = "on"
+                            self._training_engine.control_action_consumed("turn_on", self.hass.loop.time())
+                        elif action == "turn_off" and control_state == "on":
+                            state["instruction"] = "Turning the test device OFF automatically…"
+                            await self._call_power(controls, False)
+                            control_state = "off"
+                            self._training_engine.control_action_consumed("turn_off", self.hass.loop.time())
                     if result.get("failed"):
                         state["status"] = "error"
                         state["instruction"] = result.get("failure_reason", "Training could not be completed.")
-                        state["error"] = result.get("failure_reason", "Training timeout")
+                        state["error"] = state["instruction"]
                         await self._persist(force=True)
                         return
                     if result.get("completed"):
+                        if control_state == "on":
+                            await self._call_power(controls, False)
+                            control_state = "off"
                         state["status"] = "complete"
-                        state["instruction"] = "Training Complete. Review the measured signature below."
-                        if auto_controls and turned_on:
-                            await self._call_power(auto_controls, False)
+                        state["instruction"] = "Training Complete. Three controlled measurements were captured and saved."
                         state["learned"] = True
                         state["completed_at"] = self.hass.loop.time()
                         state["learned_signature"] = {
-                            "method": method,
-                            "baseline_w": result.get("baseline_w"),
-                            "load_w": result.get("peak_delta_w"),
-                            "duration_s": result.get("duration_s"),
-                            "energy_wh": result.get("energy_wh"),
-                            "events_detected": result.get("events_detected", 0),
-                            "observations": result.get("observations", []),
+                            "method": method, "baseline_w": result.get("baseline_w"), "load_w": result.get("peak_delta_w"),
+                            "duration_s": result.get("duration_s"), "energy_wh": result.get("energy_wh"),
+                            "events_detected": result.get("events_detected", 0), "observations": result.get("observations", []),
                         }
                         await self._persist(force=True)
                         return
@@ -133,10 +134,11 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             raise
         except Exception as err:
             _LOGGER.exception("Training failed")
-            state=self.training_state.get(device_id,{})
-            state["status"]="error"
-            state["error"]=str(err)
-            await self._persist()
+            state = self.training_state.get(device_id, {})
+            state["status"] = "error"
+            state["error"] = str(err)
+            state["instruction"] = str(err)
+            await self._persist(force=True)
 
     def _auto_control_entities(self, device_id:str)->list[str]:
         candidate=self.candidate_devices.get(device_id,{})
