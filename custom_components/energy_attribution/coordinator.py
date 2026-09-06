@@ -40,6 +40,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         if isinstance(saved, dict):
             self.training_state=saved.get("training_state", self.training_state)
             self.training_samples=saved.get("training_samples", self.training_samples)
+            self.last_training_device_id=saved.get("last_training_device_id", self.last_training_device_id)
             active=saved.get("active")
             if active and active.get("status")=="active":
                 # Do not silently operate a device after HA restarts. Retain the
@@ -56,6 +57,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         await self._store.async_save({
             "training_state":self.training_state,
             "training_samples":self.training_samples,
+            "last_training_device_id": self.last_training_device_id,
             "active": self.training_state.get(self._training_device) if self._training_device else None,
         })
 
