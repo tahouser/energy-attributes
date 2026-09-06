@@ -3,7 +3,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .coordinator import EnergyAttributionCoordinator
-from .panel import async_register_panel
 from .websocket import async_register as async_register_websocket
 
 PLATFORMS=["sensor"]
@@ -14,9 +13,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     if not data.get("_websocket_registered"):
         async_register_websocket(hass)
         data["_websocket_registered"] = True
-    if not data.get("_panel_registered"):
-        await async_register_panel(hass)
-        data["_panel_registered"] = True
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
