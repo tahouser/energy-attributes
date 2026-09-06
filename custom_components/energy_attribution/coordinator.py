@@ -31,6 +31,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self._training_device: str|None=None
         self._training_task: asyncio.Task|None=None
         self._training_lock=asyncio.Lock()
+        self._last_persist=0.0
         super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
 
     async def async_load_training(self):
@@ -46,7 +47,11 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 self.training_state[active["device_id"]]=active
                 await self._persist()
 
-    async def _persist(self):
+    async def _persist(self, force: bool = False):
+        now = self.hass.loop.time()
+        if not force and now - self._last_persist < 5.0:
+            return
+        self._last_persist = now
         await self._store.async_save({
             "training_state":self.training_state,
             "training_samples":self.training_samples,
@@ -69,7 +74,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self.training_state[device_id]=state
             self._training_engine=engine
             self._training_device=device_id
-            await self._persist()
+            await self._persist(force=True)
             self._training_task=self.hass.async_create_task(self._training_loop(device_id,method))
             return state
 
@@ -89,20 +94,30 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                     state=self.training_state[device_id]
                     state.update({k:result.get(k) for k in ("phase","baseline_w","peak_delta_w","events_detected","duration_s","energy_wh") if k in result})
                     state["result"]=result
-                    if method=="quick" and auto_controls and result["phase"]=="waiting_for_on" and not turned_on:
-                        await self._call_power(auto_controls,True)
-                        turned_on=True
-                        turned_off=False
-                        state["instruction"]="I turned the device ON automatically. Measuring the actual whole-home response…"
-                    elif method=="quick" and turned_on and result["phase"]=="waiting_for_off":
-                        await self._call_power(auto_controls,False)
-                        turned_on=False
-                        turned_off=True
-                        state["instruction"]="I turned the device OFF automatically. Confirming that power returned to baseline…"
+                    if method == "quick" and auto_controls:
+                        if result["phase"] == "waiting_for_on" and not turned_on:
+                            await self._call_power(auto_controls, True)
+                            turned_on = True
+                            state["instruction"] = "I turned the device ON automatically. Measuring the actual whole-home response…"
+                        elif result["phase"] == "waiting_for_off" and turned_on:
+                            await self._call_power(auto_controls, False)
+                            turned_on = False
+                            state["instruction"] = "I turned the device OFF automatically. Confirming the return to baseline…"
                     if result.get("completed"):
-                        state["status"]="complete"
-                        await self._call_power(auto_controls,False) if auto_controls and turned_on else None
-                        await self._persist()
+                        state["status"] = "complete"
+                        state["instruction"] = "Training Complete. Review the measured signature below."
+                        if auto_controls and turned_on:
+                            await self._call_power(auto_controls, False)
+                        state["learned_signature"] = {
+                            "method": method,
+                            "baseline_w": result.get("baseline_w"),
+                            "load_w": result.get("peak_delta_w"),
+                            "duration_s": result.get("duration_s"),
+                            "energy_wh": result.get("energy_wh"),
+                            "events_detected": result.get("events_detected", 0),
+                            "observations": result.get("observations", []),
+                        }
+                        await self._persist(force=True)
                         return
                     await self._persist()
                 await asyncio.sleep(1.0)

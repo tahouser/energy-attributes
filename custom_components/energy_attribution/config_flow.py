@@ -297,13 +297,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
-    """Persistent commissioning workspace with a real training wizard."""
+    """Persistent commissioning workspace.
 
-    def __init__(self) -> None:
-        self._candidates: list[dict[str, Any]] = []
-        self._classifications: dict[str, str] = {}
-        self._training_state: dict[str, dict[str, Any]] = {}
-        self._train_device_id: str | None = None
+    Live training is deliberately handled by the dedicated Energy Attribution
+    sidebar workspace; this Options Flow only controls which candidates are
+    monitored. That keeps the HA Configure action on the supported Options
+    Flow path instead of trying to embed a live application inside a form.
+    """
 
     async def async_step_init(self, user_input=None):
         candidates = _build_candidates(
@@ -312,312 +312,43 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         if not candidates:
             return self.async_abort(reason="no_candidates")
 
-        self._candidates = candidates
-        self._classifications = dict(
-            self.config_entry.options.get(
-                "device_classifications",
-                self.config_entry.data.get("device_classifications", {}),
-            )
-        )
-        if not self._classifications:
-            self._classifications = {
-                c["device_id"]: "monitor" for c in candidates
-            }
-
-        self._training_state = dict(
-            self.config_entry.options.get(
-                "training_state",
-                self.config_entry.data.get("training_state", {}),
-            )
-        )
-
-        if user_input is not None:
-            action = user_input.get("action", "save")
-            if action.startswith("train:"):
-                device_id = action.split(":", 1)[1]
-                if self._classifications.get(device_id) != "monitor":
-                    return self.async_abort(reason="device_not_monitored")
-                self._train_device_id = device_id
-                return await self.async_step_training_prepare()
-
-            return await self._save_workspace(
-                set(user_input.get("monitored_devices", []))
-            )
-
+        current = dict(self.config_entry.options.get(
+            "device_classifications",
+            self.config_entry.data.get("device_classifications", {}),
+        ))
         selected_default = [
             c["device_id"] for c in candidates
-            if self._classifications.get(c["device_id"]) == "monitor"
+            if current.get(c["device_id"], "monitor") == "monitor"
         ]
 
-        monitored = [
-            c for c in candidates
-            if self._classifications.get(c["device_id"]) == "monitor"
-        ]
-
-        action_options = [
-            SelectOptionDict(value="save", label="Save monitor selections")
-        ]
-        for c in monitored:
-            state = self._training_state.get(c["device_id"], {})
-            status = state.get("status", "untrained")
-            if status in {"armed", "active"}:
-                label = f"Continue training — {c['name']}"
-            elif status == "complete":
-                label = f"Trained ✓ — {c['name']}"
-            else:
-                label = f"Train — {c['name']}"
-            action_options.append(
-                SelectOptionDict(
-                    value=f"train:{c['device_id']}",
-                    label=label,
-                )
-            )
+        if user_input is not None:
+            selected = set(user_input.get("monitored_devices", []))
+            classifications = {
+                c["device_id"]: ("monitor" if c["device_id"] in selected else "ignore")
+                for c in candidates
+            }
+            return self.async_create_entry(data={
+                CONF_MONITORED_ENTITIES: _monitored_entities(candidates, selected),
+                "device_classifications": classifications,
+                "candidate_devices": {c["device_id"]: c for c in candidates},
+            })
 
         schema = vol.Schema({
-            vol.Required(
-                "monitored_devices", default=selected_default
-            ): SelectSelector(
+            vol.Required("monitored_devices", default=selected_default): SelectSelector(
                 SelectSelectorConfig(
                     options=_candidate_options(candidates),
                     multiple=True,
                     mode=SelectSelectorMode.LIST,
                 )
             ),
-            vol.Required("action", default="save"): SelectSelector(
-                SelectSelectorConfig(
-                    options=action_options,
-                    multiple=False,
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
-            ),
         })
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
-            description_placeholders={"count": str(len(candidates))},
-        )
-
-    async def _save_workspace(self, selected: set[str]):
-        self._classifications = {
-            c["device_id"]: (
-                "monitor" if c["device_id"] in selected else "ignore"
-            )
-            for c in self._candidates
-        }
-        return self.async_create_entry(
-            title="",
-            data={
-                CONF_MONITORED_ENTITIES: _monitored_entities(
-                    self._candidates, selected
-                ),
-                "device_classifications": self._classifications,
-                "candidate_devices": {
-                    c["device_id"]: c for c in self._candidates
-                },
-                "training_state": self._training_state,
-            },
-        )
-
-    def _training_candidate(self) -> dict[str, Any] | None:
-        return next(
-            (
-                c for c in self._candidates
-                if c["device_id"] == self._train_device_id
-            ),
-            None,
-        )
-
-    async def async_step_training_prepare(self, user_input=None):
-        """Explain the training plan and choose an appropriate method."""
-        candidate = self._training_candidate()
-        if not candidate:
-            return self.async_abort(reason="device_not_monitored")
-
-        suggested = _training_method(candidate)
-        if user_input is not None:
-            method = user_input.get("method", suggested)
-            state = self._training_state.setdefault(self._train_device_id, {})
-            state.update({
-                "status": "armed",
-                "method": method,
-                "device_name": candidate["name"],
-                "area": candidate["area"],
-                "category": _candidate_category(candidate),
-                "started_at": None,
-                "baseline_w": None,
-                "peak_delta_w": None,
-                "events_detected": 0,
-                "samples": state.get("samples", []),
-            })
-            return await self.async_step_training_start()
-
-        method_options = [
-            SelectOptionDict(
-                value="quick",
-                label="Quick ON/OFF test",
-            ),
-            SelectOptionDict(
-                value="full_cycle",
-                label="Full cycle",
-            ),
-        ]
-        schema = vol.Schema({
-            vol.Required("method", default=suggested): SelectSelector(
-                SelectSelectorConfig(
-                    options=method_options,
-                    multiple=False,
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
-            )
-        })
-        return self.async_show_form(
-            step_id="training_prepare",
-            data_schema=schema,
             description_placeholders={
-                "device": candidate["name"],
-                "category": _candidate_category(candidate),
-                "area": candidate["area"] or "No area",
-                "entities": ", ".join(
-                    m["name"] for m in candidate["measurements"]
-                ) or "No direct power/energy entity",
-                "plan": _training_plan_text(suggested),
+                "count": str(len(candidates)),
             },
         )
-
-    async def async_step_training_start(self, user_input=None):
-        """Explicitly start active capture after the user is ready."""
-        candidate = self._training_candidate()
-        if not candidate:
-            return self.async_abort(reason="device_not_monitored")
-
-        state = self._training_state.setdefault(self._train_device_id, {})
-        method = state.get("method", "quick")
-
-        if user_input is not None:
-            if user_input.get("start"):
-                state["status"] = "active"
-                state["started_at"] = datetime.now(timezone.utc).isoformat()
-                return await self.async_step_training_monitoring()
-            return await self._return_to_workspace()
-
-        if method == "full_cycle":
-            instructions = (
-                "Press START when you are ready to begin the complete cycle. "
-                "Run the appliance normally. You may close Configure while "
-                "training is active."
-            )
-        else:
-            instructions = (
-                "Press START when you are ready. The monitor will begin "
-                "watching whole-home power. After START, follow the on-screen "
-                "ON/OFF instructions."
-            )
-
-        schema = vol.Schema({
-            vol.Required("start", default=False): BooleanSelector()
-        })
-        return self.async_show_form(
-            step_id="training_start",
-            data_schema=schema,
-            description_placeholders={
-                "device": candidate["name"],
-                "instructions": instructions,
-            },
-        )
-
-    async def async_step_training_monitoring(self, user_input=None):
-        """Guide active capture without assuming a fixed number of events."""
-        candidate = self._training_candidate()
-        if not candidate:
-            return self.async_abort(reason="device_not_monitored")
-
-        state = self._training_state.setdefault(self._train_device_id, {})
-        method = state.get("method", "quick")
-
-        if user_input is not None:
-            if user_input.get("finish"):
-                state["status"] = "review"
-                return await self.async_step_training_review()
-
-        if method == "full_cycle":
-            instruction = (
-                "Training is running in the background. Run the complete "
-                "cycle normally. Do not repeat or interrupt the appliance "
-                "unless you normally would."
-            )
-        else:
-            instruction = (
-                "Training is watching for a clear load transition. Turn the "
-                "device ON when instructed, then OFF. The system will decide "
-                "when it has enough consistent observations; there is no "
-                "fixed number of repetitions."
-            )
-
-        schema = vol.Schema({
-            vol.Required("finish", default=False): BooleanSelector()
-        })
-        return self.async_show_form(
-            step_id="training_monitoring",
-            data_schema=schema,
-            description_placeholders={
-                "device": candidate["name"],
-                "category": _candidate_category(candidate),
-                "instruction": instruction,
-            },
-        )
-
-    async def async_step_training_review(self, user_input=None):
-        """Present captured results and let the user accept or retry."""
-        candidate = self._training_candidate()
-        if not candidate:
-            return self.async_abort(reason="device_not_monitored")
-
-        state = self._training_state.setdefault(self._train_device_id, {})
-        events = state.get("events_detected", 0)
-        peak = state.get("peak_delta_w")
-        method = state.get("method", "quick")
-
-        if user_input is not None:
-            if user_input.get("confirm"):
-                state["status"] = "complete"
-                state["completed_at"] = datetime.now(timezone.utc).isoformat()
-                state["confirmation"] = "accepted"
-            else:
-                state["status"] = "untrained"
-                state["confirmation"] = "retry"
-                state.pop("started_at", None)
-            return await self._return_to_workspace()
-
-        if peak is None:
-            observation = "No measured load event has been supplied yet."
-        else:
-            observation = f"Observed peak change: {peak:.1f} W"
-
-        method_name = "Full-cycle" if method == "full_cycle" else "Quick"
-        schema = vol.Schema({
-            vol.Required("confirm", default=True): BooleanSelector()
-        })
-        return self.async_show_form(
-            step_id="training_review",
-            data_schema=schema,
-            description_placeholders={
-                "device": candidate["name"],
-                "category": _candidate_category(candidate),
-                "method": method_name,
-                "events": str(events),
-                "observation": observation,
-            },
-        )
-
-    async def _return_to_workspace(self):
-        """Save state and reopen the commissioning workspace."""
-        selected = {
-            c["device_id"]
-            for c in self._candidates
-            if self._classifications.get(c["device_id"]) == "monitor"
-        }
-        return await self._save_workspace(selected)
-
 
 
 def _training_method(candidate: dict[str, Any]) -> str:

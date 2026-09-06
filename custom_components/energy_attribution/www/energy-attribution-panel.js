@@ -1,125 +1,61 @@
-class EnergyAttributionPanel extends HTMLElement {
-  set hass(value) {
-    this._hass = value;
-    this._render();
-    if (!this._loaded) {
-      this._loaded = true;
-      this._load();
+const TAG = "energy-attribution-panel-v10";
+if (!customElements.get(TAG)) {
+  class EnergyAttributionPanel extends HTMLElement {
+    set hass(hass) { this._hass = hass; if (!this._loaded) this._load(); }
+    connectedCallback() { this._renderLoading(); if (this._hass) this._load(); }
+    disconnectedCallback() { if (this._timer) clearInterval(this._timer); }
+    _renderLoading() { this.innerHTML = `<ha-card style="display:block;padding:24px"><h2>Energy Attribution</h2><p>Loading workspace…</p></ha-card>`; }
+    async _load() {
+      if (this._loading) return; this._loading = true;
+      try {
+        const r = await this._hass.callWS({type:"energy_attribution/list_entries"});
+        if (!r.entries.length) throw new Error("Energy Attribution is not configured.");
+        this.entryId = r.entries[0].entry_id;
+        await this._refresh();
+        this._loaded = true;
+        this._timer = setInterval(() => this._refresh(), 1000);
+      } catch (e) { this.innerHTML = `<ha-card style="display:block;padding:24px"><h2>Energy Attribution</h2><p style="color:var(--error-color)">${this._esc(e.message || e)}</p></ha-card>`; }
+      finally { this._loading = false; }
     }
-  }
-  set narrow(value) { this._narrow = value; this._render(); }
-  connectedCallback() {
-    this._selected = null;
-    this._entry = null;
-    this._workspace = null;
-    this._timer = null;
-    this._error = null;
-    // Home Assistant may set the hass property before or after connectedCallback.
-    // Do not reset _loaded in a way that can strand the panel on the loading screen.
-    if (this._loaded !== true) this._loaded = false;
-    this._render();
-    if (this._hass && !this._loaded) {
-      this._loaded = true;
-      this._load();
+    async _refresh() {
+      if (!this._hass || !this.entryId) return;
+      try { this.data = await this._hass.callWS({type:"energy_attribution/workspace",entry_id:this.entryId}); this._render(); } catch(e) { console.error(e); }
     }
-  }
-  disconnectedCallback() { if (this._timer) clearInterval(this._timer); }
-  async _cmd(msg) { return this._hass.connection.sendMessagePromise(msg); }
-  async _load() {
-    if (!this._hass) return;
-    try {
-      await this._cmd({type:"ping"});
-      const data = await Promise.race([
-        this._cmd({type:"energy_attribution/list_entries"}),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("The Energy Attribution WebSocket command did not respond.")), 8000))
-      ]);
-      this._entry = data.entries?.[0]?.entry_id || null;
-      if (!this._entry) {
-        this._error = "Energy Attribution is installed, but no loaded configuration entry was found.";
-        this._render();
-        return;
-      }
+    async _save() {
+      const ids=[...this.querySelectorAll('input[data-device]:checked')].map(x=>x.dataset.device);
+      await this._hass.callWS({type:"energy_attribution/set_monitoring",entry_id:this.entryId,device_ids:ids});
       await this._refresh();
-      if (this._timer) clearInterval(this._timer);
-      this._timer = setInterval(() => this._refresh(), 1000);
-    } catch (e) {
-      this._error = `Backend request failed: ${e?.message || String(e)}`;
-      this._render();
     }
+    async _train(id, method) {
+      this._closedResult=false;
+      const d=this.data.devices.find(x=>x.device_id===id); if(!d) return;
+      if(method==='quick') {
+        const ok=confirm(`Energy Attribution will automatically turn “${d.name}” ON and OFF during training. Make sure it is safe to operate. Continue?`);
+        if(!ok) return;
+      }
+      await this._hass.callWS({type:"energy_attribution/start_training",entry_id:this.entryId,device_id:id,method});
+      await this._refresh();
+    }
+    async _retry(id) {
+      this._closedResult=false; await this._hass.callWS({type:"energy_attribution/retry_training",entry_id:this.entryId,device_id:id}); await this._refresh(); }
+    async _stop(id) { await this._hass.callWS({type:"energy_attribution/stop_training",entry_id:this.entryId,device_id:id}); await this._refresh(); }
+    _render() {
+      const d=this.data; const active=d.devices.find(x=>x.training?.status==='active');
+      let html=`<style>ha-card{display:block;margin:16px;padding:20px}button{margin:4px;padding:8px 12px}table{width:100%;border-collapse:collapse}td,th{padding:8px;border-bottom:1px solid var(--divider-color);text-align:left}.muted{color:var(--secondary-text-color)}.complete{padding:16px;border:1px solid var(--primary-color);border-radius:8px;margin-top:16px}</style><ha-card><h1>Energy Attribution</h1><p class="muted">Whole-home power: <b>${this._esc(d.whole_home_power ?? '—')} W</b></p><h2>Commissioned loads</h2><p>Monitor any candidates you want the attribution system to learn. Ignored devices remain available later.</p><table><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Evidence</th><th>Training</th></tr>`;
+      for(const x of d.devices){ const t=x.training||{}; let action=''; if(x.classification==='monitor'){ if(t.status==='active') action=`<span>${this._phaseText(t)}</span> <button data-stop="${x.device_id}">Stop</button>`; else if(t.status==='complete') action=`<button data-retry="${x.device_id}">Retrain</button>`; else action=`<button data-quick="${x.device_id}">Quick ON/OFF</button> <button data-full="${x.device_id}">Full Cycle</button>`; } html+=`<tr><td><input type="checkbox" data-device="${x.device_id}" ${x.classification==='monitor'?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="muted">${this._esc(x.model||'')}</span></td><td>${this._esc(x.area||'')}</td><td>${this._esc(x.evidence||'')}</td><td>${action}</td></tr>`; }
+      html+=`</table><button id="save">Save monitoring selections</button>`;
+      if(active){ const t=active.training; html+=`<div class="complete"><h2>${t.status==='complete'?'Training Complete':'Training in progress'}</h2><p><b>${this._esc(active.name)}</b></p><p>${this._esc(this._phaseText(t))}</p>${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.peak_delta_w!=null?`<p>Detected load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}${t.energy_wh!=null&&t.energy_wh>0?`<p>Additional energy: <b>${(t.energy_wh/1000).toFixed(2)} kWh</b></p>`:''}${t.status==='complete' && !this._closedResult?`<p><button id="close-result">CLOSE</button></p>`:''}</div>`; }
+      this.innerHTML=html+`</ha-card>`;
+      this.querySelector('#save')?.addEventListener('click',()=>this._save());
+      this.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>this._train(b.dataset.quick,'quick'));
+      this.querySelectorAll('[data-full]').forEach(b=>b.onclick=()=>this._train(b.dataset.full,'full_cycle'));
+      this.querySelectorAll('[data-retry]').forEach(b=>b.onclick=()=>this._retry(b.dataset.retry));
+      this.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>this._stop(b.dataset.stop));
+      this.querySelector('#close-result')?.addEventListener('click',()=>{this._closedResult=true;this._render();});
+    }
+    _phaseText(t){const map={baseline:'Establishing the normal background load…',waiting_for_on:'Baseline established. Preparing the automatic ON test…',on_stabilizing:'Power change detected. Measuring and stabilizing…',waiting_for_off:'ON measurement captured. Turning the device OFF…',waiting_for_start:'Baseline established. Start the appliance now. Monitoring will continue in the background.',capturing:'Cycle detected. Monitoring the complete cycle…',complete:'Training Complete. Review the measured signature, then close this result.'};return t.instruction||map[t.phase]||t.phase||'Waiting…';}
+    _duration(s){const n=Math.round(s);if(n<60)return `${n}s`;if(n<3600)return `${Math.floor(n/60)}m ${n%60}s`;return `${Math.floor(n/3600)}h ${Math.floor((n%3600)/60)}m`;}
+    _esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   }
-  async _refresh() {
-    if (!this._entry) return;
-    try { this._workspace = await this._cmd({type:"energy_attribution/workspace", entry_id:this._entry}); this._render(); }
-    catch(e) { this._error = e.message || String(e); this._render(); }
-  }
-  async _start(device, method) {
-    this._selected = {device_id:device.device_id, method};
-    await this._cmd({type:"energy_attribution/start_training", entry_id:this._entry, device_id:device.device_id, method});
-    await this._refresh();
-  }
-  async _retry(device) {
-    await this._cmd({type:"energy_attribution/retry_training", entry_id:this._entry, device_id:device.device_id});
-    await this._refresh();
-  }
-  async _stop(device) {
-    await this._cmd({type:"energy_attribution/stop_training", entry_id:this._entry, device_id:device.device_id});
-    await this._refresh();
-  }
-  _render() {
-    if (!this._hass) return;
-    const w=this._workspace;
-    this.innerHTML=`<style>
-      :host{display:block;padding:24px;box-sizing:border-box;color:var(--primary-text-color);font-family:var(--paper-font-body1_-_font-family,Roboto,sans-serif)}
-      .wrap{max-width:1100px;margin:auto}.muted{color:var(--secondary-text-color)}
-      .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
-      .card{background:var(--card-background-color);border-radius:14px;padding:18px;box-shadow:var(--ha-card-box-shadow,0 1px 3px #0002)}
-      button{min-height:44px;border:0;border-radius:10px;padding:9px 15px;background:var(--primary-color);color:white;font-size:15px;cursor:pointer}
-      button.secondary{background:var(--secondary-background-color);color:var(--primary-text-color)}
-      .value{font-size:30px;font-weight:600}.phase{font-weight:600;text-transform:capitalize}.ok{color:var(--success-color,#2e7d32)}
-      .dialog{border:2px solid var(--primary-color)}.bar{height:8px;background:var(--divider-color);border-radius:8px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--primary-color);width:50%}
-    </style><div class="wrap">${this._content(w)}</div>`;
-    this.querySelectorAll('[data-start]').forEach(b=>b.addEventListener('click',()=>this._start(JSON.parse(b.dataset.start),b.dataset.method)));
-    this.querySelectorAll('[data-retry]').forEach(b=>b.addEventListener('click',()=>this._retry(JSON.parse(b.dataset.retry))));
-    this.querySelectorAll('[data-stop]').forEach(b=>b.addEventListener('click',()=>this._stop(JSON.parse(b.dataset.stop))));
-    this.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>{this._selected=null;this._render()}));
-    this.querySelectorAll('[data-reload]').forEach(b=>b.addEventListener('click',()=>{this._error=null;this._loaded=false;this._load();}));
-  }
-  _content(w) {
-    if(this._error) return `<h1>Energy Attribution</h1><div class="card dialog"><h2>Unable to load the training workspace</h2><p>${this._error}</p><p class="muted">The panel is running, but its backend connection did not respond.</p><button data-reload>Retry</button></div>`;
-    if(!w) return '<h1>Energy Attribution</h1><p class="muted">Loading the training workspace…</p>';
-    const active=w.devices?.find(d=>d.training?.status==='active');
-    const complete=w.devices?.find(d=>d.training?.status==='complete');
-    if(active) return this._training(active,w);
-    if(complete && this._selected?.device_id===complete.device_id) return this._complete(complete);
-    return `<h1>Energy Attribution</h1><p class="muted">Whole-home power: ${w.whole_home_power ?? '—'} W</p><div class="grid">${w.devices.map(d=>this._device(d)).join('')}</div>`;
-  }
-  _device(d) {
-    const disabled=d.classification!=='monitor'; const t=d.training||{};
-    return `<div class="card"><div class="row"><div><strong>${d.name}</strong><div class="muted">${d.area||'No area'} · ${d.evidence||'Load-style device'}</div></div></div>
-      <p>${t.status==='complete'?'<span class="ok">✓ Trained</span>':t.status==='interrupted'?'Interrupted':'Not trained'}</p>
-      <div class="row"><button ${disabled?'disabled':''} data-start='${JSON.stringify(d).replaceAll("'","&apos;")}' data-method="quick">Quick ON/OFF</button><button class="secondary" ${disabled?'disabled':''} data-start='${JSON.stringify(d).replaceAll("'","&apos;")}' data-method="full_cycle">Full Cycle</button></div></div>`;
-  }
-  _training(d,w) {
-    const t=d.training||{}; const r=t.result||{}; const peak=r.peak_delta_w ?? t.peak_delta_w; const base=r.baseline_w ?? t.baseline_w;
-    let instruction=t.instruction||'Monitoring whole-home power…';
-    if(t.method==='quick' && t.phase==='baseline') instruction='Establishing the normal household power baseline…';
-    if(t.method==='quick' && t.phase==='waiting_for_on') instruction='Baseline established. Preparing to turn the device ON automatically…';
-    if(t.method==='quick' && t.phase==='on_stabilizing') instruction='Device is ON. Measuring and waiting for the power level to stabilize…';
-    if(t.method==='quick' && t.phase==='waiting_for_off') instruction='The ON power has been measured. Turning the device OFF automatically…';
-    if(t.method==='full_cycle' && t.phase==='waiting_for_start') instruction='Baseline established. Start the appliance normally. I will capture the entire cycle.';
-    if(t.method==='full_cycle' && t.phase==='capturing') instruction='Full cycle captured in the background. Keep the appliance running normally until it finishes.';
-    return `<div class="card dialog"><h1>Training ${d.name}</h1><p class="phase">${t.phase||'starting'}</p><p>${instruction}</p>
-      <div class="row"><div><div class="muted">Whole-home power</div><div class="value">${w.whole_home_power??'—'} W</div></div><div><div class="muted">Baseline</div><div class="value">${base==null?'—':base.toFixed(1)} W</div></div><div><div class="muted">Detected load</div><div class="value">${peak==null?'—':peak.toFixed(1)} W</div></div></div>
-      <p class="muted">Events detected: ${r.events_detected??t.events_detected??0} · Energy: ${r.energy_wh==null?'—':r.energy_wh.toFixed(2)+' Wh'}</p>
-      <div class="bar"><i></i></div></div>`;
-  }
-  _complete(d) {
-    const t=d.training||{}, r=t.result||{}; const peak=r.peak_delta_w??t.peak_delta_w;
-    return `<div class="card dialog"><h1>Training Complete</h1><p><strong>${d.name}</strong> has a captured electrical signature.</p>
-      <div class="row"><div><div class="muted">Baseline</div><div class="value">${r.baseline_w==null?'—':r.baseline_w.toFixed(1)} W</div></div><div><div class="muted">Detected load</div><div class="value">${peak==null?'—':peak.toFixed(1)} W</div></div><div><div class="muted">Energy</div><div class="value">${r.energy_wh==null?'—':r.energy_wh.toFixed(2)} Wh</div></div></div>
-      <p>Review the measured result before accepting it as this device's learned signature.</p><div class="row"><button data-close>Close</button><button class="secondary" data-retry='${JSON.stringify(d).replaceAll("'","&apos;")}'>Retry training</button></div></div>`;
-  }
-}
-if (!customElements.get('energy-attribution-panel')) {
-  customElements.define('energy-attribution-panel', EnergyAttributionPanel);
+  customElements.define(TAG, EnergyAttributionPanel);
 }
