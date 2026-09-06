@@ -20,8 +20,8 @@ def _coordinator(hass: HomeAssistant, entry_id: str):
 
 
 @websocket_api.websocket_command({vol.Required("type"): "energy_attribution/list_entries"})
-@websocket_api.async_response
 @websocket_api.require_admin
+@websocket_api.async_response
 async def ws_list_entries(hass, connection, msg):
     entries = []
     for entry_id, coordinator in hass.data.get(DOMAIN, {}).items():
@@ -37,8 +37,8 @@ async def ws_list_entries(hass, connection, msg):
     vol.Required("type"): "energy_attribution/workspace",
     vol.Required("entry_id"): str,
 })
-@websocket_api.async_response
 @websocket_api.require_admin
+@websocket_api.async_response
 async def ws_workspace(hass, connection, msg):
     coordinator = _coordinator(hass, msg["entry_id"])
     rows = []
@@ -69,8 +69,8 @@ async def ws_workspace(hass, connection, msg):
     vol.Required("entry_id"): str,
     vol.Required("device_ids"): [str],
 })
-@websocket_api.async_response
 @websocket_api.require_admin
+@websocket_api.async_response
 async def ws_set_monitoring(hass, connection, msg):
     coordinator = _coordinator(hass, msg["entry_id"])
     selected = set(msg["device_ids"])
@@ -103,8 +103,8 @@ async def ws_set_monitoring(hass, connection, msg):
     vol.Required("device_id"): str,
     vol.Required("method"): vol.In(["quick", "full_cycle"]),
 })
-@websocket_api.async_response
 @websocket_api.require_admin
+@websocket_api.async_response
 async def ws_start_training(hass, connection, msg):
     coordinator = _coordinator(hass, msg["entry_id"])
     if coordinator.device_classifications.get(msg["device_id"]) != "monitor":
@@ -118,8 +118,8 @@ async def ws_start_training(hass, connection, msg):
     vol.Required("entry_id"): str,
     vol.Required("device_id"): str,
 })
-@websocket_api.async_response
 @websocket_api.require_admin
+@websocket_api.async_response
 async def ws_retry_training(hass, connection, msg):
     coordinator = _coordinator(hass, msg["entry_id"])
     method = coordinator.training_state.get(msg["device_id"], {}).get("method", "quick")
@@ -133,8 +133,8 @@ async def ws_retry_training(hass, connection, msg):
     vol.Required("entry_id"): str,
     vol.Required("device_id"): str,
 })
-@websocket_api.async_response
 @websocket_api.require_admin
+@websocket_api.async_response
 async def ws_stop_training(hass, connection, msg):
     coordinator = _coordinator(hass, msg["entry_id"])
     await coordinator.async_stop_training(msg["device_id"])
