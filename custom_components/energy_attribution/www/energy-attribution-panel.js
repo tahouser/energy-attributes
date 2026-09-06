@@ -13,18 +13,38 @@ class EnergyAttributionPanel extends HTMLElement {
     this._entry = null;
     this._workspace = null;
     this._timer = null;
-    this._loaded = false;
+    this._error = null;
+    // Home Assistant may set the hass property before or after connectedCallback.
+    // Do not reset _loaded in a way that can strand the panel on the loading screen.
+    if (this._loaded !== true) this._loaded = false;
     this._render();
+    if (this._hass && !this._loaded) {
+      this._loaded = true;
+      this._load();
+    }
   }
   disconnectedCallback() { if (this._timer) clearInterval(this._timer); }
   async _cmd(msg) { return this._hass.connection.sendMessagePromise(msg); }
   async _load() {
     if (!this._hass) return;
-    const data = await this._cmd({type:"energy_attribution/list_entries"});
-    this._entry = data.entries?.[0]?.entry_id || null;
-    if (this._entry) await this._refresh();
-    if (this._timer) clearInterval(this._timer);
-    this._timer = setInterval(() => this._refresh(), 1000);
+    try {
+      const data = await Promise.race([
+        this._cmd({type:"energy_attribution/list_entries"}),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("The Energy Attribution WebSocket command did not respond.")), 8000))
+      ]);
+      this._entry = data.entries?.[0]?.entry_id || null;
+      if (!this._entry) {
+        this._error = "Energy Attribution is installed, but no loaded configuration entry was found.";
+        this._render();
+        return;
+      }
+      await this._refresh();
+      if (this._timer) clearInterval(this._timer);
+      this._timer = setInterval(() => this._refresh(), 1000);
+    } catch (e) {
+      this._error = e?.message || String(e);
+      this._render();
+    }
   }
   async _refresh() {
     if (!this._entry) return;
@@ -61,8 +81,10 @@ class EnergyAttributionPanel extends HTMLElement {
     this.querySelectorAll('[data-retry]').forEach(b=>b.addEventListener('click',()=>this._retry(JSON.parse(b.dataset.retry))));
     this.querySelectorAll('[data-stop]').forEach(b=>b.addEventListener('click',()=>this._stop(JSON.parse(b.dataset.stop))));
     this.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>{this._selected=null;this._render()}));
+    this.querySelectorAll('[data-reload]').forEach(b=>b.addEventListener('click',()=>{this._error=null;this._loaded=false;this._load();}));
   }
   _content(w) {
+    if(this._error) return `<h1>Energy Attribution</h1><div class="card dialog"><h2>Unable to load the training workspace</h2><p>${this._error}</p><p class="muted">The panel is running, but its backend connection did not respond.</p><button data-reload>Retry</button></div>`;
     if(!w) return '<h1>Energy Attribution</h1><p class="muted">Loading the training workspace…</p>';
     const active=w.devices?.find(d=>d.training?.status==='active');
     const complete=w.devices?.find(d=>d.training?.status==='complete');
