@@ -428,33 +428,47 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         )
 
     async def async_step_training_prepare(self, user_input=None):
+        """Explain the training plan and choose an appropriate method."""
         candidate = self._training_candidate()
         if not candidate:
             return self.async_abort(reason="device_not_monitored")
 
+        suggested = _training_method(candidate)
         if user_input is not None:
-            state = self._training_state.setdefault(
-                self._train_device_id,
-                {},
-            )
+            method = user_input.get("method", suggested)
+            state = self._training_state.setdefault(self._train_device_id, {})
             state.update({
                 "status": "armed",
+                "method": method,
                 "device_name": candidate["name"],
                 "area": candidate["area"],
                 "category": _candidate_category(candidate),
                 "started_at": None,
                 "baseline_w": None,
                 "peak_delta_w": None,
+                "events_detected": 0,
                 "samples": state.get("samples", []),
             })
-            # Persist armed state before showing the active step.
-            return await self.async_step_training_active()
+            return await self.async_step_training_start()
 
-        entity_names = ", ".join(
-            m["name"] for m in candidate["measurements"]
-        ) or "No direct power/energy entity"
+        method_options = [
+            SelectOptionDict(
+                value="quick",
+                label="Quick ON/OFF test",
+            ),
+            SelectOptionDict(
+                value="full_cycle",
+                label="Full cycle",
+            ),
+        ]
         schema = vol.Schema({
-            vol.Required("ready", default=False): BooleanSelector()
+            vol.Required("method", default=suggested): SelectSelector(
+                SelectSelectorConfig(
+                    options=method_options,
+                    multiple=False,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
         })
         return self.async_show_form(
             step_id="training_prepare",
@@ -463,46 +477,106 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 "device": candidate["name"],
                 "category": _candidate_category(candidate),
                 "area": candidate["area"] or "No area",
-                "entities": entity_names,
+                "entities": ", ".join(
+                    m["name"] for m in candidate["measurements"]
+                ) or "No direct power/energy entity",
+                "plan": _training_plan_text(suggested),
             },
         )
 
-    async def async_step_training_active(self, user_input=None):
+    async def async_step_training_start(self, user_input=None):
+        """Explicitly start active capture after the user is ready."""
         candidate = self._training_candidate()
         if not candidate:
             return self.async_abort(reason="device_not_monitored")
 
         state = self._training_state.setdefault(self._train_device_id, {})
-        if state.get("status") != "active":
-            state["status"] = "active"
-            state["started_at"] = datetime.now(timezone.utc).isoformat()
+        method = state.get("method", "quick")
+
+        if user_input is not None:
+            if user_input.get("start"):
+                state["status"] = "active"
+                state["started_at"] = datetime.now(timezone.utc).isoformat()
+                return await self.async_step_training_monitoring()
+            return await self._return_to_workspace()
+
+        if method == "full_cycle":
+            instructions = (
+                "Press START when you are ready to begin the complete cycle. "
+                "Run the appliance normally. You may close Configure while "
+                "training is active."
+            )
+        else:
+            instructions = (
+                "Press START when you are ready. The monitor will begin "
+                "watching whole-home power. After START, follow the on-screen "
+                "ON/OFF instructions."
+            )
+
+        schema = vol.Schema({
+            vol.Required("start", default=False): BooleanSelector()
+        })
+        return self.async_show_form(
+            step_id="training_start",
+            data_schema=schema,
+            description_placeholders={
+                "device": candidate["name"],
+                "instructions": instructions,
+            },
+        )
+
+    async def async_step_training_monitoring(self, user_input=None):
+        """Guide active capture without assuming a fixed number of events."""
+        candidate = self._training_candidate()
+        if not candidate:
+            return self.async_abort(reason="device_not_monitored")
+
+        state = self._training_state.setdefault(self._train_device_id, {})
+        method = state.get("method", "quick")
 
         if user_input is not None:
             if user_input.get("finish"):
                 state["status"] = "review"
                 return await self.async_step_training_review()
 
+        if method == "full_cycle":
+            instruction = (
+                "Training is running in the background. Run the complete "
+                "cycle normally. Do not repeat or interrupt the appliance "
+                "unless you normally would."
+            )
+        else:
+            instruction = (
+                "Training is watching for a clear load transition. Turn the "
+                "device ON when instructed, then OFF. The system will decide "
+                "when it has enough consistent observations; there is no "
+                "fixed number of repetitions."
+            )
+
         schema = vol.Schema({
             vol.Required("finish", default=False): BooleanSelector()
         })
         return self.async_show_form(
-            step_id="training_active",
+            step_id="training_monitoring",
             data_schema=schema,
             description_placeholders={
                 "device": candidate["name"],
                 "category": _candidate_category(candidate),
+                "instruction": instruction,
             },
         )
 
     async def async_step_training_review(self, user_input=None):
+        """Present captured results and let the user accept or retry."""
         candidate = self._training_candidate()
         if not candidate:
             return self.async_abort(reason="device_not_monitored")
 
         state = self._training_state.setdefault(self._train_device_id, {})
-        # For this first working wizard, the live sampler is the next layer;
-        # the UI records a reviewable training event and leaves room for the
-        # coordinator to supply actual measured deltas.
+        events = state.get("events_detected", 0)
+        peak = state.get("peak_delta_w")
+        method = state.get("method", "quick")
+
         if user_input is not None:
             if user_input.get("confirm"):
                 state["status"] = "complete"
@@ -510,14 +584,16 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 state["confirmation"] = "accepted"
             else:
                 state["status"] = "untrained"
+                state["confirmation"] = "retry"
                 state.pop("started_at", None)
-            selected = {
-                c["device_id"]
-                for c in self._candidates
-                if self._classifications.get(c["device_id"]) == "monitor"
-            }
-            return await self._save_workspace(selected)
+            return await self._return_to_workspace()
 
+        if peak is None:
+            observation = "No measured load event has been supplied yet."
+        else:
+            observation = f"Observed peak change: {peak:.1f} W"
+
+        method_name = "Full-cycle" if method == "full_cycle" else "Quick"
         schema = vol.Schema({
             vol.Required("confirm", default=True): BooleanSelector()
         })
@@ -527,10 +603,48 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             description_placeholders={
                 "device": candidate["name"],
                 "category": _candidate_category(candidate),
-                "delta": str(state.get("peak_delta_w") or "awaiting power sampler"),
+                "method": method_name,
+                "events": str(events),
+                "observation": observation,
             },
         )
 
+    async def _return_to_workspace(self):
+        """Save state and reopen the commissioning workspace."""
+        selected = {
+            c["device_id"]
+            for c in self._candidates
+            if self._classifications.get(c["device_id"]) == "monitor"
+        }
+        return await self._save_workspace(selected)
+
+
+
+def _training_method(candidate: dict[str, Any]) -> str:
+    """Suggest training based on device semantics, not a fixed repetition count."""
+    domains = {c["domain"] for c in candidate.get("controls", [])}
+    name = candidate.get("name", "").casefold()
+    cycle_words = (
+        "dishwasher", "dryer", "washer", "washing machine", "oven",
+        "range", "heat pump", "furnace", "air conditioner", "hvac",
+    )
+    if domains & {"climate", "water_heater"} or any(
+        word in name for word in cycle_words
+    ):
+        return "full_cycle"
+    return "quick"
+
+
+def _training_plan_text(method: str) -> str:
+    if method == "full_cycle":
+        return (
+            "Suggested method: Full cycle. This device may change load "
+            "throughout operation, so the entire cycle is captured."
+        )
+    return (
+        "Suggested method: Quick ON/OFF test. The system will watch for "
+        "consistent transitions and will not assume a fixed number of repeats."
+    )
 
 def _candidate_category(candidate: dict[str, Any]) -> str:
     """Classify a candidate using HA entity domains, not AI guesses."""

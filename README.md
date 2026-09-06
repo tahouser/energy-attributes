@@ -83,3 +83,19 @@ The training state is stored in the config entry so a long-cycle capture can
 remain active while the Configure page is closed. The current evaluation build
 uses the whole-home sensor as the capture source; live transition sampling and
 waveform rendering are the next implementation layer.
+
+
+## v0.8.0 training interaction
+
+Training no longer uses ambiguous Ready/Finish/Confirm switches. The wizard
+explicitly explains the action at each stage:
+
+- choose Quick ON/OFF or Full cycle;
+- explicitly START active monitoring;
+- follow device-specific instructions;
+- finish the capture;
+- review the captured behavior and explicitly save or retry.
+
+There is no hard-coded requirement to toggle a device three times. Quick tests
+look for consistent transitions; full-cycle loads are captured as a complete
+temporal sequence.

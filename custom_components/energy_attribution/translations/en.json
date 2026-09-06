@@ -22,10 +22,10 @@
         }
       },
       "training_prepare": {
-        "title": "Prepare training",
-        "description": "Device: {device}\nCategory: {category}\nArea: {area}\nEntity: {entities}\n\nThe whole-home power monitor is ready to watch this device. Check Ready, then continue to Start.",
+        "title": "Train {device}",
+        "description": "Category: {category}\nArea: {area}\nEntity: {entities}\n\n{plan}\n\nChoose the training method. For variable/cycle loads, use Full cycle.",
         "data": {
-          "ready": "Ready to begin"
+          "method": "Training method"
         }
       },
       "training_active": {
@@ -36,10 +36,24 @@
         }
       },
       "training_review": {
-        "title": "Review training",
-        "description": "Captured training for {device} ({category}). Observed peak change: {delta} W. Does the captured event resemble this device?",
+        "title": "Review \u2014 {device}",
+        "description": "Category: {category}\nMethod: {method}\nDetected events: {events}\n{observation}\n\nDoes this captured behavior resemble the selected device? Save it only if the observed load belongs to this device.",
         "data": {
-          "confirm": "Yes \u2014 save training"
+          "confirm": "YES \u2014 save training"
+        }
+      },
+      "training_start": {
+        "title": "Ready to start \u2014 {device}",
+        "description": "{instructions}\n\nThis is the point where active monitoring begins. Nothing is captured until you press START.",
+        "data": {
+          "start": "START TRAINING"
+        }
+      },
+      "training_monitoring": {
+        "title": "Training active \u2014 {device}",
+        "description": "{instruction}\n\nTraining remains stored while Configure is closed. When the training activity is complete, return here and finish the capture.",
+        "data": {
+          "finish": "Finish training capture"
         }
       }
     }
