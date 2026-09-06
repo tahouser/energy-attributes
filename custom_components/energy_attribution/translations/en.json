@@ -24,6 +24,7 @@
     }
   },
   "abort": {
-    "no_candidates": "No electrical-load candidates were found after filtering."
+    "no_candidates": "No electrical-load candidates were found after filtering.",
+    "device_not_monitored": "That device is not selected for monitoring."
   }
 }

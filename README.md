@@ -60,3 +60,10 @@ device identity, HA-derived category, baseline, peak delta and captured
 samples. The current prototype exposes training state for evaluation; a
 future custom frontend can provide per-row Train buttons and the full
 interactive waveform/confirmation experience without changing this data model.
+
+
+## v0.6.1
+
+Training actions are restricted to devices currently classified as **Monitor**.
+Ignored devices remain adopted in the private environment but do not appear in
+the training list.

@@ -353,6 +353,8 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
 
             device_id = user_input.get("train_device")
             if action == "train" and device_id:
+                if classifications.get(device_id) != "monitor":
+                    return self.async_abort(reason="device_not_monitored")
                 candidate = next(
                     (c for c in candidates if c["device_id"] == device_id), None
                 )
@@ -399,15 +401,30 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         options = [
             SelectOptionDict(value="save", label="Save monitor selections"),
         ]
-        for c in candidates:
+
+        # Only devices currently selected for monitoring are trainable.
+        # Ignored devices stay adopted in our private environment, but never
+        # appear in the training action list.
+        monitored_candidates = [
+            c for c in candidates
+            if classifications.get(c["device_id"]) == "monitor"
+        ]
+
+        for c in monitored_candidates:
             state = training_state.get(c["device_id"], {})
-            if state.get("status") == "armed":
+            if state.get("status") in {"armed", "active"}:
                 label = f"Training active — {c['name']}"
             elif state.get("status") == "complete":
                 label = f"Trained ✓ — {c['name']}"
             else:
                 label = f"Train — {c['name']}"
-            options.append(SelectOptionDict(value=f"train:{c['device_id']}", label=label))
+            options.append(
+                SelectOptionDict(
+                    value=f"train:{c['device_id']}",
+                    label=label,
+                )
+            )
+
 
         # A single form gives us the persistent list and a training action.
         schema = vol.Schema({
