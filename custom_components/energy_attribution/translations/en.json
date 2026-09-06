@@ -2,19 +2,22 @@
   "config": {
     "step": {
       "user": {
-        "title": "Energy Attribution",
-        "description": "Select the Home Assistant sensor that provides whole-home power.",
+        "title": "Energy Attribution \u2014 Whole-home meter",
+        "description": "Choose the HA power sensor that represents the whole home. We will then scan HA and build a filtered electrical-load commissioning list.",
         "data": {
           "power_entity": "Whole-home power sensor"
         }
       },
-      "entities": {
-        "title": "Select devices to monitor",
-        "description": "Select the Home Assistant entities that have useful power or energy information for attribution training.",
+      "commission": {
+        "title": "Electrical-load commissioning \u00b7 {progress}",
+        "description": "{device_name}\n\n{details}\n\nChoose how this device should be treated. Devices with direct power/energy measurements are shown first. Obvious battery/environmental-only devices are filtered out automatically.",
         "data": {
-          "monitored_entities": "Entities to monitor"
+          "classification": "Treatment"
         }
       }
     }
+  },
+  "abort": {
+    "no_candidates": "No suitable electrical-load candidates were found."
   }
 }
