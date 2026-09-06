@@ -40,3 +40,23 @@ vacuums and water heaters are also included so the user can decide what is
 worth monitoring.
 
 The underlying Home Assistant entities and devices are never modified.
+
+
+## v0.5.0 workspace workflow
+
+Initial setup only chooses the whole-home meter. The integration's Configure action is the persistent workspace and offers two paths: **Adopt / review devices** and **Train a device**. Adoption is a bulk selection screen. Training is a separate controlled workflow for one monitored device at a time.
+
+
+## v0.6.0 evaluation workflow
+
+Configure is the permanent commissioning workspace. The selected device
+environment is retained independently of the initial installation flow.
+
+Training is modeled as persistent device state (`idle`, `armed`, `active`,
+`complete`). An armed/active long-cycle training session is stored in the
+config entry so the Configure page can be closed while the coordinator
+continues monitoring the whole-home power stream. Training metadata includes
+device identity, HA-derived category, baseline, peak delta and captured
+samples. The current prototype exposes training state for evaluation; a
+future custom frontend can provide per-row Train buttons and the full
+interactive waveform/confirmation experience without changing this data model.

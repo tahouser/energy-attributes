@@ -12,10 +12,11 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.core import callback
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers import selector
 from homeassistant.helpers.selector import SelectOptionDict, SelectSelector, SelectSelectorConfig, SelectSelectorMode
 
-from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN
+from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN, TRAINING_SESSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -294,11 +295,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
-    """The reusable commissioning interface.
+    """Persistent commissioning workspace.
 
-    This is intentionally an options/configuration interface, not part of
-    initial installation. It can be reopened whenever the user wants to
-    change what Energy Attribution monitors.
+    The device list is the central UI. Adopt/monitor selection and training
+    live here. Training state is persisted so a long-cycle capture can continue
+    after the page is closed.
     """
 
     async def async_step_init(self, user_input=None):
@@ -308,68 +309,155 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         if not candidates:
             return self.async_abort(reason="no_candidates")
 
-        saved_classifications = self.config_entry.options.get(
-            "device_classifications",
-            self.config_entry.data.get("device_classifications", {}),
-        )
-        saved_monitored = set(
+        classifications = dict(
             self.config_entry.options.get(
-                CONF_MONITORED_ENTITIES,
-                self.config_entry.data.get(CONF_MONITORED_ENTITIES, []),
+                "device_classifications",
+                self.config_entry.data.get("device_classifications", {}),
             )
         )
+        # First visit: adopt all filtered candidates into the private environment.
+        if not classifications:
+            classifications = {c["device_id"]: "monitor" for c in candidates}
 
-        # Previously selected devices remain selected. On first commissioning,
-        # every filtered candidate is selected by default.
-        if saved_classifications:
-            default_devices = [
-                c["device_id"]
-                for c in candidates
-                if saved_classifications.get(c["device_id"]) == "monitor"
-            ]
-        elif saved_monitored:
-            default_devices = [
-                c["device_id"]
-                for c in candidates
-                if any(
-                    m["entity_id"] in saved_monitored
-                    for m in c["measurements"]
-                )
-            ]
-        else:
-            default_devices = [c["device_id"] for c in candidates]
+        training_state = dict(
+            self.config_entry.options.get(
+                "training_state",
+                self.config_entry.data.get("training_state", {}),
+            )
+        )
 
         if user_input is not None:
+            action = user_input.get("action", "save")
             selected = set(user_input.get("monitored_devices", []))
-            return self.async_create_entry(
-                title="",
-                data={
-                    CONF_MONITORED_ENTITIES: _monitored_entities(candidates, selected),
-                    "device_classifications": {
-                        c["device_id"]: (
-                            "monitor" if c["device_id"] in selected else "ignore"
-                        )
-                        for c in candidates
-                    },
-                    "commissioned_devices": _device_data(candidates, selected),
-                    "candidate_devices": {
-                        c["device_id"]: c for c in candidates
-                    },
-                },
-            )
 
+            if action == "save":
+                classifications = {
+                    c["device_id"]: (
+                        "monitor" if c["device_id"] in selected else "ignore"
+                    )
+                    for c in candidates
+                }
+                return self.async_create_entry(
+                    title="",
+                    data={
+                        CONF_MONITORED_ENTITIES: _monitored_entities(
+                            candidates, selected
+                        ),
+                        "device_classifications": classifications,
+                        "candidate_devices": {
+                            c["device_id"]: c for c in candidates
+                        },
+                        "training_state": training_state,
+                    },
+                )
+
+            device_id = user_input.get("train_device")
+            if action == "train" and device_id:
+                candidate = next(
+                    (c for c in candidates if c["device_id"] == device_id), None
+                )
+                if candidate:
+                    training_state[device_id] = {
+                        "status": "armed",
+                        "device_name": candidate["name"],
+                        "area": candidate["area"],
+                        "category": _candidate_category(candidate),
+                        "started_at": None,
+                        "samples": [],
+                        "baseline_w": None,
+                        "peak_delta_w": None,
+                    }
+                    # Persist the armed state and return to the workspace.
+                    selected = {
+                        c["device_id"]
+                        for c in candidates
+                        if classifications.get(c["device_id"]) == "monitor"
+                    }
+                    return self.async_create_entry(
+                        title="",
+                        data={
+                            CONF_MONITORED_ENTITIES: _monitored_entities(
+                                candidates, selected
+                            ),
+                            "device_classifications": classifications,
+                            "candidate_devices": {
+                                c["device_id"]: c for c in candidates
+                            },
+                            "training_state": training_state,
+                        },
+                    )
+
+        selected_default = [
+            c["device_id"]
+            for c in candidates
+            if classifications.get(c["device_id"]) == "monitor"
+        ]
+
+        # Build a compact action selector. Trainable device IDs are represented
+        # as separate actions; the selected device is handled by the next
+        # revision's dedicated training step.
+        options = [
+            SelectOptionDict(value="save", label="Save monitor selections"),
+        ]
+        for c in candidates:
+            state = training_state.get(c["device_id"], {})
+            if state.get("status") == "armed":
+                label = f"Training active — {c['name']}"
+            elif state.get("status") == "complete":
+                label = f"Trained ✓ — {c['name']}"
+            else:
+                label = f"Train — {c['name']}"
+            options.append(SelectOptionDict(value=f"train:{c['device_id']}", label=label))
+
+        # A single form gives us the persistent list and a training action.
         schema = vol.Schema({
-            vol.Required("monitored_devices", default=default_devices): SelectSelector(
+            vol.Required(
+                "monitored_devices", default=selected_default
+            ): SelectSelector(
                 SelectSelectorConfig(
                     options=_candidate_options(candidates),
                     multiple=True,
                     mode=SelectSelectorMode.LIST,
                 )
-            )
+            ),
+            vol.Required("action", default="save"): SelectSelector(
+                SelectSelectorConfig(
+                    options=options,
+                    multiple=False,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
         })
+
+        # The config-flow form cannot expose arbitrary per-row buttons yet;
+        # this revision keeps the persistent state model in place while using
+        # native HA selectors. The next UI layer can replace this with a custom
+        # panel without changing the stored model.
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
             description_placeholders={"count": str(len(candidates))},
         )
+
+
+def _candidate_category(candidate: dict[str, Any]) -> str:
+    """Classify a candidate using HA entity domains, not AI guesses."""
+    domains = {c["domain"] for c in candidate.get("controls", [])}
+    if "climate" in domains:
+        return "HVAC"
+    if "light" in domains:
+        return "Lighting"
+    if "media_player" in domains:
+        return "Media"
+    if "vacuum" in domains:
+        return "Appliance"
+    if "water_heater" in domains:
+        return "Appliance"
+    if "humidifier" in domains:
+        return "Appliance"
+    if "fan" in domains:
+        return "Fan"
+    if "switch" in domains:
+        return "Appliance"
+    return "Electrical Load"
 

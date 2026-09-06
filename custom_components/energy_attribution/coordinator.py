@@ -21,6 +21,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.device_classifications = entry.options.get("device_classifications", entry.data.get("device_classifications", {}))
         self.commissioned_devices = entry.options.get("commissioned_devices", entry.data.get("commissioned_devices", {}))
         self.candidate_devices = entry.options.get("candidate_devices", entry.data.get("candidate_devices", {}))
+        self.training_state = entry.options.get("training_state", entry.data.get("training_state", {}))
+        self.training_samples = entry.options.get("training_samples", entry.data.get("training_samples", {}))
         super().__init__(
             hass,
             logger=__import__("logging").getLogger(__name__),

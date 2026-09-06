@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Choose whole-home meter",
-        "description": "Select the HA power sensor that represents total whole-home consumption. Energy Attribution will automatically adopt the filtered electrical-load candidates into its private environment. You will choose what to monitor later from Configure.",
+        "description": "Select the HA power sensor that represents total whole-home consumption. Commissioning is available later from Configure.",
         "data": {
           "power_entity": "Whole-home power sensor"
         }
@@ -14,10 +14,11 @@
   "options": {
     "step": {
       "init": {
-        "title": "Electrical-load commissioning",
-        "description": "{count} potential electrical-load devices were found and adopted into the Energy Attribution environment. All are selected by default. Uncheck anything you do not want monitored, then submit. You can reopen this screen later from Configure.",
+        "title": "Energy Attribution \u2014 Commissioning",
+        "description": "{count} electrical-load candidates are in the private Energy Attribution environment. Select the devices to monitor. Training state is retained so longer-cycle training can continue in the background.",
         "data": {
-          "monitored_devices": "Devices to monitor"
+          "monitored_devices": "Devices to monitor",
+          "action": "Training / save action"
         }
       }
     }

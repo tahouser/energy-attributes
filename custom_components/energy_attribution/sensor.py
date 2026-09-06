@@ -36,3 +36,38 @@ class WholeHomePowerSensor(CoordinatorEntity[EnergyAttributionCoordinator], Sens
     def native_value(self):
         """Return the current whole-home power."""
         return self.coordinator.data.get("whole_home_power")
+
+
+class TrainingStatusSensor(SensorEntity):
+    """Expose the persistent training state for the hub."""
+
+    _attr_name = "Energy Attribution Training"
+    _attr_icon = "mdi:school"
+
+    def __init__(self, coordinator):
+        self.coordinator = coordinator
+        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_training"
+
+    @property
+    def native_value(self):
+        states = self.coordinator.training_state or {}
+        active = [
+            s for s in states.values()
+            if s.get("status") in {"armed", "active"}
+        ]
+        if active:
+            return "active"
+        complete = [
+            s for s in states.values()
+            if s.get("status") == "complete"
+        ]
+        return "complete" if complete else "idle"
+
+    @property
+    def extra_state_attributes(self):
+        return {"training": self.coordinator.training_state or {}}
+
+    async def async_added_to_hass(self):
+        self.async_on_remove(
+            self.coordinator.async_add_listener(self.async_write_ha_state)
+        )
