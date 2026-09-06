@@ -23,3 +23,20 @@ After setup, the same bulk commissioning screen is available from the Energy Att
 ## Current status
 
 v0.3.0 establishes the filtered, device-level commissioning environment. Attribution/NILM training and the dashboard are built on top of this base.
+
+
+## v0.4.0 commissioning workflow
+
+Initial installation only asks for the whole-home aggregate power sensor.
+The integration then adopts all devices that pass the electrical-load filter
+into its private Energy Attribution environment.
+
+Commissioning is intentionally separate from installation. Open the
+Energy Attribution integration's **Configure** action to review the complete
+candidate list on one bulk-selection screen. Candidates with direct
+power/energy measurements are shown first; controllable load-style devices
+such as lights, switches/outlets, fans, climate devices, media players/TVs,
+vacuums and water heaters are also included so the user can decide what is
+worth monitoring.
+
+The underlying Home Assistant entities and devices are never modified.

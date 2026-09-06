@@ -20,6 +20,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.monitored_entities = entry.options.get(CONF_MONITORED_ENTITIES, entry.data.get(CONF_MONITORED_ENTITIES, []))
         self.device_classifications = entry.options.get("device_classifications", entry.data.get("device_classifications", {}))
         self.commissioned_devices = entry.options.get("commissioned_devices", entry.data.get("commissioned_devices", {}))
+        self.candidate_devices = entry.options.get("candidate_devices", entry.data.get("candidate_devices", {}))
         super().__init__(
             hass,
             logger=__import__("logging").getLogger(__name__),

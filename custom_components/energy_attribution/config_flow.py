@@ -87,7 +87,13 @@ def _is_battery_entity(hass, entry: er.RegistryEntry) -> bool:
 
 
 def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[str, Any]]:
-    """Build a strict device-level list of electrical loads worth monitoring."""
+    """Build the Energy Attribution device environment.
+
+    A device is a candidate if it has direct power/energy evidence OR a
+    controllable appliance/load-style entity. This intentionally includes
+    lights, switches/outlets, fans, climate devices, media players (TV/audio),
+    vacuums, water heaters and similar loads so the user can decide later.
+    """
     devices = dr.async_get(hass)
     entities = er.async_get(hass)
     areas = ar.async_get(hass)
@@ -100,20 +106,40 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
         if entry.device_id:
             by_device.setdefault(entry.device_id, []).append(entry)
 
+    # Domains that represent a controllable thing that can itself be an
+    # electrical load, even when it has no direct power sensor.
+    load_domains = {
+        "light", "switch", "fan", "climate", "humidifier", "media_player",
+        "vacuum", "water_heater",
+    }
+
+    # Domains that are explicitly not electrical-load candidates by themselves.
+    ignored_domains = {
+        "binary_sensor", "button", "camera", "event", "image", "input_boolean",
+        "input_button", "input_datetime", "input_number", "input_select",
+        "input_text", "number", "remote", "scene", "select", "sensor",
+        "text", "update", "weather", "device_tracker",
+    }
+
     candidates: list[dict[str, Any]] = []
+
     for device in devices.devices.values():
-        # The selected whole-home meter is the aggregate source, not an
-        # appliance candidate. Do not offer its device for attribution.
+        # Never treat the whole-home meter device (including its phase
+        # channels) as an appliance/load.
         if whole_home_device_id and device.id == whole_home_device_id:
             continue
 
         measurements: list[dict[str, str]] = []
+        controls: list[dict[str, str]] = []
         battery = False
+
         for entry in by_device.get(device.id, []):
             if _is_ignored_entity(entry):
                 continue
+
             battery = battery or _is_battery_entity(hass, entry)
             kind = _measurement_kind(hass, entry)
+
             if kind:
                 measurements.append({
                     "entity_id": entry.entity_id,
@@ -122,21 +148,40 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
                     "unit": entry.unit_of_measurement or "",
                 })
 
-        # v0.3 intentionally requires direct power/energy evidence. This is
-        # the main filter that prevents motion sensors, switches, remotes,
-        # thermostats without measurement, and other non-load devices from
-        # entering the commissioning environment.
-        if not measurements:
+            if entry.domain in load_domains:
+                controls.append({
+                    "entity_id": entry.entity_id,
+                    "name": _entity_name(hass, entry),
+                    "domain": entry.domain,
+                })
+
+        # Measurement evidence is strongest. Otherwise a controllable
+        # load-style entity is enough to put the device into our review
+        # environment. This is deliberate: the user decides what is useful.
+        if not measurements and not controls:
             continue
 
-        # A battery flag does not disqualify a device if it also has a real
-        # electrical measurement; it is common for hybrid devices to expose
-        # both battery and power/energy entities.
+        # A device that is only a battery/environmental sensor still does not
+        # qualify. Hybrid devices with both useful load evidence and battery
+        # entities remain candidates.
+        if not measurements and battery and not controls:
+            continue
+
         area_entry = areas.async_get_area(device.area_id) if device.area_id else None
         area_name = area_entry.name if area_entry else ""
         name = device.name_by_user or device.name or "Unnamed device"
         power_count = sum(m["kind"] == "power" for m in measurements)
         energy_count = sum(m["kind"] == "energy" for m in measurements)
+
+        evidence = []
+        if measurements:
+            if power_count:
+                evidence.append(f"{power_count} power")
+            if energy_count:
+                evidence.append(f"{energy_count} energy")
+        if controls:
+            domains = sorted({c["domain"] for c in controls})
+            evidence.append("control: " + ", ".join(domains))
 
         candidates.append({
             "device_id": device.id,
@@ -147,32 +192,36 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
             "area_id": device.area_id or "",
             "parent_device_id": getattr(device, "parent_device_id", None),
             "measurements": measurements,
+            "controls": controls,
             "battery": battery,
             "power_count": power_count,
             "energy_count": energy_count,
+            "evidence": "; ".join(evidence),
         })
 
-    candidates.sort(key=lambda c: (c["area"].casefold(), c["name"].casefold()))
+    # Put measured loads first, then controllable loads without measurement.
+    candidates.sort(
+        key=lambda c: (
+            0 if c["measurements"] else 1,
+            c["area"].casefold(),
+            c["name"].casefold(),
+        )
+    )
     return candidates
 
-
 def _candidate_options(candidates: list[dict[str, Any]]) -> list[SelectOptionDict]:
+    """Create readable bulk-selection options."""
     options: list[SelectOptionDict] = []
     for candidate in candidates:
-        evidence = []
-        if candidate["power_count"]:
-            evidence.append(f"{candidate['power_count']} power")
-        if candidate["energy_count"]:
-            evidence.append(f"{candidate['energy_count']} energy")
         area = f" · {candidate['area']}" if candidate["area"] else ""
+        evidence = candidate.get("evidence") or "load-style device"
         options.append(
             SelectOptionDict(
                 value=candidate["device_id"],
-                label=f"{candidate['name']}{area} — {', '.join(evidence)}",
+                label=f"{candidate['name']}{area} — {evidence}",
             )
         )
     return options
-
 
 def _monitored_entities(candidates: list[dict[str, Any]], selected: set[str]) -> list[str]:
     return [
@@ -198,66 +247,45 @@ def _device_data(candidates: list[dict[str, Any]], selected: set[str]) -> dict[s
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle initial setup and bulk commissioning of Energy Attribution."""
+    """Initial setup only: choose the aggregate meter and create the entry."""
 
-    VERSION = 3
+    VERSION = 4
 
     def __init__(self) -> None:
         self._power_entity: str | None = None
         self._candidates: list[dict[str, Any]] = []
 
     async def async_step_user(self, user_input=None):
-        """Select the whole-home power sensor, then build our own load list."""
+        """Select the whole-home power sensor; commissioning happens later."""
         if user_input is not None:
             self._power_entity = user_input[CONF_POWER_ENTITY]
             self._candidates = _build_candidates(self.hass, self._power_entity)
-            if not self._candidates:
-                return self.async_abort(reason="no_candidates")
-            return await self.async_step_commission()
 
-        schema = vol.Schema({
-            vol.Required(CONF_POWER_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="sensor", device_class="power", multiple=False)
-            )
-        })
-        return self.async_show_form(step_id="user", data_schema=schema)
-
-    async def async_step_commission(self, user_input=None):
-        """Bulk review: every filtered candidate is adopted and preselected."""
-        all_ids = [candidate["device_id"] for candidate in self._candidates]
-        if user_input is not None:
-            selected = set(user_input.get("monitored_devices", []))
-            monitored = _monitored_entities(self._candidates, selected)
             return self.async_create_entry(
                 title="Energy Attribution",
                 data={
                     CONF_POWER_ENTITY: self._power_entity,
-                    CONF_MONITORED_ENTITIES: monitored,
-                    "device_classifications": {
-                        candidate["device_id"]: "monitor" if candidate["device_id"] in selected else "ignore"
-                        for candidate in self._candidates
+                    # Adopt every filtered device into our private environment.
+                    # Selection/ignore is deliberately deferred to Configure.
+                    "candidate_devices": {
+                        c["device_id"]: c for c in self._candidates
                     },
-                    "commissioned_devices": _device_data(self._candidates, selected),
+                    CONF_MONITORED_ENTITIES: [],
+                    "device_classifications": {},
+                    "commissioned_devices": {},
                 },
             )
 
         schema = vol.Schema({
-            vol.Required("monitored_devices", default=all_ids): SelectSelector(
-                SelectSelectorConfig(
-                    options=_candidate_options(self._candidates),
-                    multiple=True,
-                    mode=SelectSelectorMode.LIST,
+            vol.Required(CONF_POWER_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="power",
+                    multiple=False,
                 )
             )
         })
-        return self.async_show_form(
-            step_id="commission",
-            data_schema=schema,
-            description_placeholders={
-                "count": str(len(self._candidates)),
-                "selected": str(len(all_ids)),
-            },
-        )
+        return self.async_show_form(step_id="user", data_schema=schema)
 
     @staticmethod
     @callback
@@ -266,19 +294,50 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
-    """Reopen the same bulk commissioning interface after setup."""
+    """The reusable commissioning interface.
+
+    This is intentionally an options/configuration interface, not part of
+    initial installation. It can be reopened whenever the user wants to
+    change what Energy Attribution monitors.
+    """
 
     async def async_step_init(self, user_input=None):
-        candidates = _build_candidates(self.hass, self.config_entry.data.get(CONF_POWER_ENTITY))
+        candidates = _build_candidates(
+            self.hass, self.config_entry.data.get(CONF_POWER_ENTITY)
+        )
         if not candidates:
             return self.async_abort(reason="no_candidates")
 
-        saved = set(self.config_entry.data.get(CONF_MONITORED_ENTITIES, []))
-        default_devices = [
-            candidate["device_id"]
-            for candidate in candidates
-            if any(m["entity_id"] in saved for m in candidate["measurements"])
-        ]
+        saved_classifications = self.config_entry.options.get(
+            "device_classifications",
+            self.config_entry.data.get("device_classifications", {}),
+        )
+        saved_monitored = set(
+            self.config_entry.options.get(
+                CONF_MONITORED_ENTITIES,
+                self.config_entry.data.get(CONF_MONITORED_ENTITIES, []),
+            )
+        )
+
+        # Previously selected devices remain selected. On first commissioning,
+        # every filtered candidate is selected by default.
+        if saved_classifications:
+            default_devices = [
+                c["device_id"]
+                for c in candidates
+                if saved_classifications.get(c["device_id"]) == "monitor"
+            ]
+        elif saved_monitored:
+            default_devices = [
+                c["device_id"]
+                for c in candidates
+                if any(
+                    m["entity_id"] in saved_monitored
+                    for m in c["measurements"]
+                )
+            ]
+        else:
+            default_devices = [c["device_id"] for c in candidates]
 
         if user_input is not None:
             selected = set(user_input.get("monitored_devices", []))
@@ -287,10 +346,15 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 data={
                     CONF_MONITORED_ENTITIES: _monitored_entities(candidates, selected),
                     "device_classifications": {
-                        candidate["device_id"]: "monitor" if candidate["device_id"] in selected else "ignore"
-                        for candidate in candidates
+                        c["device_id"]: (
+                            "monitor" if c["device_id"] in selected else "ignore"
+                        )
+                        for c in candidates
                     },
                     "commissioned_devices": _device_data(candidates, selected),
+                    "candidate_devices": {
+                        c["device_id"]: c for c in candidates
+                    },
                 },
             )
 
@@ -308,3 +372,4 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             data_schema=schema,
             description_placeholders={"count": str(len(candidates))},
         )
+

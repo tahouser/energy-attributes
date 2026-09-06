@@ -4,16 +4,9 @@
     "step": {
       "user": {
         "title": "Choose whole-home meter",
-        "description": "Select the HA power sensor that represents total whole-home consumption. We will then build a filtered electrical-load list.",
+        "description": "Select the HA power sensor that represents total whole-home consumption. Energy Attribution will automatically adopt the filtered electrical-load candidates into its private environment. You will choose what to monitor later from Configure.",
         "data": {
           "power_entity": "Whole-home power sensor"
-        }
-      },
-      "commission": {
-        "title": "Electrical-load commissioning",
-        "description": "{count} electrical-load candidates passed the filter. All are adopted into the Energy Attribution environment and selected by default. Uncheck anything you do not want monitored, then submit. This is a bulk selection step \u2014 there is no one-device-at-a-time commissioning.",
-        "data": {
-          "monitored_devices": "Devices to monitor"
         }
       }
     }
@@ -22,7 +15,7 @@
     "step": {
       "init": {
         "title": "Electrical-load commissioning",
-        "description": "{count} current electrical-load candidates are shown. Check the devices you want monitored. Changes here only affect Energy Attribution; Home Assistant devices are not modified.",
+        "description": "{count} potential electrical-load devices were found and adopted into the Energy Attribution environment. All are selected by default. Uncheck anything you do not want monitored, then submit. You can reopen this screen later from Configure.",
         "data": {
           "monitored_devices": "Devices to monitor"
         }
@@ -30,6 +23,6 @@
     }
   },
   "abort": {
-    "no_candidates": "No direct power or energy load measurements were found after filtering."
+    "no_candidates": "No electrical-load candidates were found after filtering."
   }
 }
