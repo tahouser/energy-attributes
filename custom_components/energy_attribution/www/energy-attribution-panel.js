@@ -2,6 +2,10 @@ class EnergyAttributionPanel extends HTMLElement {
   set hass(value) {
     this._hass = value;
     this._render();
+    if (!this._loaded) {
+      this._loaded = true;
+      this._load();
+    }
   }
   set narrow(value) { this._narrow = value; this._render(); }
   connectedCallback() {
@@ -9,8 +13,8 @@ class EnergyAttributionPanel extends HTMLElement {
     this._entry = null;
     this._workspace = null;
     this._timer = null;
+    this._loaded = false;
     this._render();
-    this._load();
   }
   disconnectedCallback() { if (this._timer) clearInterval(this._timer); }
   async _cmd(msg) { return this._hass.connection.sendMessagePromise(msg); }
