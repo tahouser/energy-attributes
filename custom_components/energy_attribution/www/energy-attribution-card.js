@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-card-v13";
+const TAG = "energy-attribution-card-v14";
 if (!customElements.get(TAG)) {
   class EnergyAttributionCard extends HTMLElement {
     constructor() { super(); this._timer = null; this._loading = false; this._data = null; }

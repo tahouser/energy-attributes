@@ -23,7 +23,7 @@ class TrainingEngine:
     method: Method
     baseline_window_s: float = 3.0
     min_event_w: float = 12.0
-    stable_window_s: float = 2.0
+    stable_window_s: float = 1.0
     return_tolerance_w: float = 25.0
     max_quick_duration_s: float = 120.0
     max_full_cycle_duration_s: float = 8 * 3600.0
@@ -42,6 +42,7 @@ class TrainingEngine:
     _on_hits: int = 0
     _off_hits: int = 0
     _cooldown_until: float | None = None
+    _on_samples: list[float] = field(default_factory=list)
     cycles_required: int = 3
 
     def add_sample(self, timestamp: float, watts: float) -> dict:
@@ -71,43 +72,42 @@ class TrainingEngine:
         return self._full_step(s)
 
     def _quick_step(self, s: PowerSample) -> dict:
+        # Quick training is a controlled test. Once we turn the target ON,
+        # timing—not whole-home event detection—controls when we turn it OFF.
+        # The meter is used to measure the resulting delta, not to authorize
+        # the safety-critical OFF command.
         if self.phase == "request_on":
             return self.result(action="turn_on")
         if self.phase == "waiting_for_on":
-            if s.watts >= self.baseline_w + self.on_threshold_w:
-                self._on_hits += 1
-                self.active_peak_w = max(self.active_peak_w or s.watts, s.watts)
-                if self._on_hits >= 1:
-                    self.phase = "request_off"
-                    self.active_started = self.active_started or s.timestamp
-            else:
-                self._on_hits = 0
-                self.active_peak_w = max(self.active_peak_w or self.baseline_w, s.watts)
+            self._on_samples.append(s.watts)
+            if self.active_started is not None and s.timestamp - self.active_started >= 1.5:
+                self.phase = "request_off"
         elif self.phase == "request_off":
             return self.result(action="turn_off")
         elif self.phase == "waiting_for_off":
-            if s.watts <= self.baseline_w + self.return_tolerance_w:
-                self._off_hits += 1
-                if self._off_hits >= 1:
-                    on_w = self.active_peak_w or s.watts
-                    off_w = median(x.watts for x in self.samples[-3:])
-                    delta = max(0.0, on_w - self.baseline_w)
-                    duration = max(0.0, s.timestamp - (self.active_started or s.timestamp))
-                    self.observations.append(QuickObservation(delta, on_w, off_w, duration))
-                    if len(self.observations) >= self.cycles_required:
-                        self.completed = self._quick_valid()
-                        self.phase = "complete" if self.completed else "error"
-                        if not self.completed:
-                            return self.result(failed=True, failure_reason="The three ON/OFF measurements were not consistent enough to save a signature.")
-                    else:
-                        self.phase = "cooldown"
-                        self._cooldown_until = s.timestamp + 0.75
-                    self._on_hits = 0
-                    self._off_hits = 0
-                    self.active_started = None
-                    self.active_peak_w = None
-            else:
+            if self.active_started is not None and s.timestamp - self.active_started >= 1.5:
+                if self._on_samples:
+                    on_w = median(self._on_samples)
+                else:
+                    on_w = s.watts
+                off_w = s.watts
+                delta = max(0.0, on_w - (self.baseline_w or off_w))
+                duration = max(0.0, s.timestamp - (self.cycle_started or s.timestamp))
+                self.observations.append(QuickObservation(delta, on_w, off_w, duration))
+                if len(self.observations) >= self.cycles_required:
+                    self.completed = self._quick_valid()
+                    self.phase = "complete" if self.completed else "error"
+                    if not self.completed:
+                        return self.result(failed=True, failure_reason="The three ON/OFF measurements were not consistent enough to save a signature.")
+                else:
+                    self.phase = "cooldown"
+                    self._cooldown_until = s.timestamp + 0.5
+                self._on_hits = 0
                 self._off_hits = 0
+                self.active_started = None
+                self.cycle_started = None
+                self.active_peak_w = None
+                self._on_samples.clear()
         elif self.phase == "cooldown":
             if s.timestamp >= (self._cooldown_until or s.timestamp):
                 self.phase = "request_on"
@@ -120,10 +120,13 @@ class TrainingEngine:
         if action == "turn_on" and self.phase == "request_on":
             self.phase = "waiting_for_on"
             self.active_started = timestamp
+            self.cycle_started = timestamp
             self.active_peak_w = None
+            self._on_samples.clear()
             self._on_hits = 0
         elif action == "turn_off" and self.phase == "request_off":
             self.phase = "waiting_for_off"
+            self.active_started = timestamp
             self._off_hits = 0
 
     def _quick_valid(self) -> bool:

@@ -22,12 +22,12 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await hass.http.async_register_static_paths([
             StaticPathConfig(URL_BASE, hass.config.path("custom_components", DOMAIN, "www"), cache_headers=False)
         ])
-        frontend.add_extra_js_url(hass, f"{URL_BASE}/energy-attribution-card.js?v=13")
+        frontend.add_extra_js_url(hass, f"{URL_BASE}/energy-attribution-card.js?v=14")
         await panel_custom.async_register_panel(
             hass=hass,
             frontend_url_path="energy-attribution",
-            webcomponent_name="energy-attribution-panel-v13",
-            module_url=f"{URL_BASE}/energy-attribution-panel.js?v=13",
+            webcomponent_name="energy-attribution-panel-v14",
+            module_url=f"{URL_BASE}/energy-attribution-panel.js?v=14",
             sidebar_title="Energy Attribution",
             sidebar_icon="mdi:flash-circle",
             require_admin=True,
