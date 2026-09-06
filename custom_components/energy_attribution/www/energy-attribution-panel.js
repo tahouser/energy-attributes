@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-panel-v11";
+const TAG = "energy-attribution-panel-v13";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
     set hass(hass) { this._hass = hass; if (!this._loaded && !this._loading) this._load(); }
@@ -56,11 +56,11 @@ if (!customElements.get(TAG)) {
       const d=this.data;
       const devices=d.devices || [];
       const monitored=devices.filter(x=>x.classification==='monitor');
-      const trained=devices.filter(x=>x.training?.status==='complete' && x.training?.learned);
+      const trained=devices.filter(x=>x.training?.status==='complete' && (x.training?.learned || x.training?.completed));
       const active=devices.find(x=>x.training?.status==='active');
       const resultDevice=devices.find(x=>x.training && ["complete","error","interrupted","stopped"].includes(x.training.status) && x.training.device_id);
       let html=`<style>
-      ha-card{display:block;margin:16px;padding:20px}button{margin:4px;padding:8px 12px;cursor:pointer}table{width:100%;border-collapse:collapse}td,th{padding:9px 8px;border-bottom:1px solid var(--divider-color);text-align:left}.muted{color:var(--secondary-text-color)}
+      ha-card{display:block;margin:0;padding:16px} @media (max-width:600px){ha-card{padding:12px}h1{font-size:1.5rem}h2{font-size:1.2rem}.summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.tile{min-width:0;padding:10px}.tile strong{font-size:20px}table{display:block;overflow-x:auto;white-space:nowrap;font-size:13px}td,th{padding:7px 6px}.training-box,.complete-box,.failure-box{padding:12px}button{min-height:40px;margin:3px 2px}}button{margin:4px;padding:8px 12px;cursor:pointer}table{width:100%;border-collapse:collapse}td,th{padding:9px 8px;border-bottom:1px solid var(--divider-color);text-align:left}.muted{color:var(--secondary-text-color)}
       .status{font-weight:600}.complete-status{color:var(--success-color,var(--primary-color))}.progress{color:var(--primary-color)}.error-status{color:var(--error-color)}.nottrained{color:var(--secondary-text-color)}
       .summary{display:flex;gap:12px;flex-wrap:wrap}.tile{padding:12px;border:1px solid var(--divider-color);border-radius:8px;min-width:155px}.tile strong{font-size:24px}.training-box{padding:18px;border:2px solid var(--primary-color);border-radius:10px;margin-top:18px}.complete-box{padding:18px;border:2px solid var(--success-color,var(--primary-color));border-radius:10px;margin-top:18px}.failure-box{padding:18px;border:2px solid var(--error-color);border-radius:10px;margin-top:18px}
       </style><ha-card><h1>Energy Attribution</h1>
@@ -88,7 +88,7 @@ if (!customElements.get(TAG)) {
         html+=`<div class="training-box"><h2>Training in progress</h2><h3>${this._esc(active.name)}</h3><p>${this._esc(this._phaseText(t))}</p>${t.method==='quick'&&t.cycles_required?`<p>Cycle: <b>${t.cycles_completed||0} of ${t.cycles_required}</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.peak_delta_w!=null?`<p>Detected load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}<button data-stop="${this._esc(active.device_id)}">Stop</button></div>`;
       }
       if(!active && resultDevice) {
-        const t=resultDevice.training; const complete=t.status==='complete' && t.learned;
+        const t=resultDevice.training; const complete=t.status==='complete' && (t.learned || t.completed);
         if(complete && !this._closedResult) {
           html+=`<div class="complete-box"><h2>Training Complete</h2><h3>${this._esc(resultDevice.name)}</h3><p>☑ <b>Training complete — signature saved</b></p>${t.method?`<p>Method: ${this._esc(t.method==='quick'?'Quick ON/OFF':'Full Cycle')}</p>`:''}${t.peak_delta_w!=null?`<p>Measured load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}${t.energy_wh!=null&&t.energy_wh>0?`<p>Additional energy: <b>${(t.energy_wh/1000).toFixed(2)} kWh</b></p>`:''}<button id="close-result">CLOSE</button></div>`;
         } else if(!complete && t.status!=='stopped') {

@@ -21,7 +21,7 @@ class QuickObservation:
 @dataclass
 class TrainingEngine:
     method: Method
-    baseline_window_s: float = 6.0
+    baseline_window_s: float = 3.0
     min_event_w: float = 12.0
     stable_window_s: float = 2.0
     return_tolerance_w: float = 25.0
@@ -77,7 +77,7 @@ class TrainingEngine:
             if s.watts >= self.baseline_w + self.on_threshold_w:
                 self._on_hits += 1
                 self.active_peak_w = max(self.active_peak_w or s.watts, s.watts)
-                if self._on_hits >= 2:
+                if self._on_hits >= 1:
                     self.phase = "request_off"
                     self.active_started = self.active_started or s.timestamp
             else:
@@ -88,7 +88,7 @@ class TrainingEngine:
         elif self.phase == "waiting_for_off":
             if s.watts <= self.baseline_w + self.return_tolerance_w:
                 self._off_hits += 1
-                if self._off_hits >= 2:
+                if self._off_hits >= 1:
                     on_w = self.active_peak_w or s.watts
                     off_w = median(x.watts for x in self.samples[-3:])
                     delta = max(0.0, on_w - self.baseline_w)
@@ -101,7 +101,7 @@ class TrainingEngine:
                             return self.result(failed=True, failure_reason="The three ON/OFF measurements were not consistent enough to save a signature.")
                     else:
                         self.phase = "cooldown"
-                        self._cooldown_until = s.timestamp + 2.0
+                        self._cooldown_until = s.timestamp + 0.75
                     self._on_hits = 0
                     self._off_hits = 0
                     self.active_started = None

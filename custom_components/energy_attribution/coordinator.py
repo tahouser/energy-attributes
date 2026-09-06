@@ -121,6 +121,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         state["instruction"] = "Training Complete. Three controlled measurements were captured and saved."
                         state["learned"] = True
                         state["completed_at"] = self.hass.loop.time()
+                        state["completed"] = True
                         state["learned_signature"] = {
                             "method": method, "baseline_w": result.get("baseline_w"), "load_w": result.get("peak_delta_w"),
                             "duration_s": result.get("duration_s"), "energy_wh": result.get("energy_wh"),
@@ -129,7 +130,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         await self._persist(force=True)
                         return
                     await self._persist()
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             raise
         except Exception as err:
