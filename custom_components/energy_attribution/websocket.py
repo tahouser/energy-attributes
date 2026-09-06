@@ -61,6 +61,7 @@ async def ws_workspace(hass, connection, msg):
         "power_entity": coordinator.power_entity,
         "whole_home_power": state.state if state else None,
         "devices": rows,
+        "last_training_device_id": getattr(coordinator, "last_training_device_id", None),
     })
 
 

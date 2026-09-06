@@ -29,6 +29,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self._store=Store(hass, 1, f"{DOMAIN}.training.{entry.entry_id}", private=True)
         self._training_engine: TrainingEngine|None=None
         self._training_device: str|None=None
+        self.last_training_device_id: str|None=None
         self._training_task: asyncio.Task|None=None
         self._training_lock=asyncio.Lock()
         self._last_persist=0.0
@@ -74,6 +75,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self.training_state[device_id]=state
             self._training_engine=engine
             self._training_device=device_id
+            self.last_training_device_id=device_id
             await self._persist(force=True)
             self._training_task=self.hass.async_create_task(self._training_loop(device_id,method))
             return state
@@ -121,6 +123,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         state["instruction"] = "Training Complete. Three controlled measurements were captured and saved."
                         state["learned"] = True
                         state["completed_at"] = self.hass.loop.time()
+                        self.last_training_device_id = device_id
                         state["completed"] = True
                         state["learned_signature"] = {
                             "method": method, "baseline_w": result.get("baseline_w"), "load_w": result.get("peak_delta_w"),

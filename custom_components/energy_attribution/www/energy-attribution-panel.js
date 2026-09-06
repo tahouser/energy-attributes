@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-panel-v14";
+const TAG = "energy-attribution-panel";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
     set hass(hass) { this._hass = hass; if (!this._loaded && !this._loading) this._load(); }
@@ -58,7 +58,8 @@ if (!customElements.get(TAG)) {
       const monitored=devices.filter(x=>x.classification==='monitor');
       const trained=devices.filter(x=>x.training?.status==='complete' && (x.training?.learned || x.training?.completed));
       const active=devices.find(x=>x.training?.status==='active');
-      const resultDevice=devices.find(x=>x.training && ["complete","error","interrupted","stopped"].includes(x.training.status) && x.training.device_id);
+      const lastId=d.last_training_device_id;
+      const resultDevice=lastId ? devices.find(x=>x.device_id===lastId) : devices.find(x=>x.training && x.training.device_id && ["complete","error","interrupted","stopped"].includes(x.training.status));
       let html=`<style>
       .topbar{display:flex;align-items:center;gap:10px;margin-bottom:12px}.back{min-height:40px;margin:0} @media(min-width:601px){.back{display:none}}
       ha-card{display:block;margin:0;padding:16px} @media (max-width:600px){ha-card{padding:12px}h1{font-size:1.5rem}h2{font-size:1.2rem}.summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.tile{min-width:0;padding:10px}.tile strong{font-size:20px}table{display:block;overflow-x:auto;white-space:nowrap;font-size:13px}td,th{padding:7px 6px}.training-box,.complete-box,.failure-box{padding:12px}button{min-height:40px;margin:3px 2px}}button{margin:4px;padding:8px 12px;cursor:pointer}table{width:100%;border-collapse:collapse}td,th{padding:9px 8px;border-bottom:1px solid var(--divider-color);text-align:left}.muted{color:var(--secondary-text-color)}

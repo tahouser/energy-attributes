@@ -99,3 +99,20 @@ explicitly explains the action at each stage:
 There is no hard-coded requirement to toggle a device three times. Quick tests
 look for consistent transitions; full-cycle loads are captured as a complete
 temporal sequence.
+
+
+## Dashboard card
+
+The integration registers a custom Lovelace card automatically. Add a **Manual** card to a dashboard with:
+
+```yaml
+type: custom:energy-attribution-card
+```
+
+The card shows the current whole-home power, monitored devices, learned devices, remaining training count, and the current/recent training state. It is intentionally a commissioning/status view until the attribution engine is implemented; it does not invent appliance-level power estimates.
+
+## Version 1.3.2
+
+- Fixed the training completion panel so it displays the device from the session that just finished.
+- Stabilized the custom card and panel element names so Lovelace configuration does not change between releases.
+- Dashboard card remains responsive on mobile.
