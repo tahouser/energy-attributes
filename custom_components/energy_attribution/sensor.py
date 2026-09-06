@@ -17,7 +17,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up Energy Attribution sensors."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([WholeHomePowerSensor(coordinator, entry.entry_id)])
+    async_add_entities([WholeHomePowerSensor(coordinator, entry.entry_id), TrainingStatusSensor(coordinator)])
 
 
 class WholeHomePowerSensor(CoordinatorEntity[EnergyAttributionCoordinator], SensorEntity):

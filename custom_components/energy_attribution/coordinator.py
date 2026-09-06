@@ -1,51 +1,160 @@
-"""Coordinator for Energy Attribution."""
-
+"""Coordinator and live training manager for Energy Attribution."""
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import timedelta
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY
+from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN
+from .training import TrainingEngine
 
+_LOGGER=logging.getLogger(__name__)
 
 class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
-    """Collect the current whole-home and selected-entity state."""
-
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        self.entry = entry
-        self.power_entity = entry.data[CONF_POWER_ENTITY]
-        self.monitored_entities = entry.options.get(CONF_MONITORED_ENTITIES, entry.data.get(CONF_MONITORED_ENTITIES, []))
-        self.device_classifications = entry.options.get("device_classifications", entry.data.get("device_classifications", {}))
-        self.commissioned_devices = entry.options.get("commissioned_devices", entry.data.get("commissioned_devices", {}))
-        self.candidate_devices = entry.options.get("candidate_devices", entry.data.get("candidate_devices", {}))
-        self.training_state = entry.options.get("training_state", entry.data.get("training_state", {}))
-        self.training_samples = entry.options.get("training_samples", entry.data.get("training_samples", {}))
-        super().__init__(
-            hass,
-            logger=__import__("logging").getLogger(__name__),
-            name="energy_attribution",
-            update_interval=timedelta(seconds=5),
-        )
+        self.entry=entry
+        self.power_entity=entry.data[CONF_POWER_ENTITY]
+        self.monitored_entities=entry.options.get(CONF_MONITORED_ENTITIES, entry.data.get(CONF_MONITORED_ENTITIES, []))
+        self.device_classifications=entry.options.get("device_classifications", entry.data.get("device_classifications", {}))
+        self.commissioned_devices=entry.options.get("commissioned_devices", entry.data.get("commissioned_devices", {}))
+        self.candidate_devices=entry.options.get("candidate_devices", entry.data.get("candidate_devices", {}))
+        self.training_state=entry.options.get("training_state", entry.data.get("training_state", {}))
+        self.training_samples=entry.options.get("training_samples", entry.data.get("training_samples", {}))
+        self._store=Store(hass, 1, f"{DOMAIN}.training.{entry.entry_id}", private=True)
+        self._training_engine: TrainingEngine|None=None
+        self._training_device: str|None=None
+        self._training_task: asyncio.Task|None=None
+        self._training_lock=asyncio.Lock()
+        super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
 
-    async def _async_update_data(self) -> dict:
-        """Read current HA states."""
-        states = self.hass.states
-        whole = states.get(self.power_entity)
-        whole_power = None
+    async def async_load_training(self):
+        saved=await self._store.async_load()
+        if isinstance(saved, dict):
+            self.training_state=saved.get("training_state", self.training_state)
+            self.training_samples=saved.get("training_samples", self.training_samples)
+            active=saved.get("active")
+            if active and active.get("status")=="active":
+                # Do not silently operate a device after HA restarts. Retain the
+                # captured state for review, but require an explicit restart.
+                active["status"]="interrupted"
+                self.training_state[active["device_id"]]=active
+                await self._persist()
+
+    async def _persist(self):
+        await self._store.async_save({
+            "training_state":self.training_state,
+            "training_samples":self.training_samples,
+            "active": self.training_state.get(self._training_device) if self._training_device else None,
+        })
+
+    async def async_start_training(self, device_id:str, method:str) -> dict:
+        async with self._training_lock:
+            if self._training_task and not self._training_task.done():
+                raise RuntimeError("Another training session is already active")
+            if method=="quick":
+                engine=TrainingEngine("quick")
+            else:
+                engine=TrainingEngine("full_cycle")
+            candidate=self.candidate_devices.get(device_id,{})
+            state={"status":"active","phase":"baseline","method":method,"device_id":device_id,
+                   "device_name":candidate.get("name",device_id),"area":candidate.get("area",""),
+                   "started_at":self.hass.loop.time(),"baseline_w":None,"peak_delta_w":None,
+                   "events_detected":0,"result":None}
+            self.training_state[device_id]=state
+            self._training_engine=engine
+            self._training_device=device_id
+            await self._persist()
+            self._training_task=self.hass.async_create_task(self._training_loop(device_id,method))
+            return state
+
+    async def _training_loop(self, device_id:str, method:str):
+        # Baseline is established first. For quick controllable loads, the
+        # integration performs the ON/OFF test itself after baseline capture.
+        try:
+            auto_controls=self._auto_control_entities(device_id)
+            turned_on=False
+            turned_off=False
+            while self._training_engine and self._training_device==device_id:
+                whole=self.hass.states.get(self.power_entity)
+                try: watts=float(whole.state) if whole else None
+                except (TypeError,ValueError): watts=None
+                if watts is not None:
+                    result=self._training_engine.add_sample(self.hass.loop.time(),watts)
+                    state=self.training_state[device_id]
+                    state.update({k:result.get(k) for k in ("phase","baseline_w","peak_delta_w","events_detected","duration_s","energy_wh") if k in result})
+                    state["result"]=result
+                    if method=="quick" and auto_controls and result["phase"]=="waiting_for_on" and not turned_on:
+                        await self._call_power(auto_controls,True)
+                        turned_on=True
+                        turned_off=False
+                        state["instruction"]="I turned the device ON automatically. Measuring the actual whole-home response…"
+                    elif method=="quick" and turned_on and result["phase"]=="waiting_for_off":
+                        await self._call_power(auto_controls,False)
+                        turned_on=False
+                        turned_off=True
+                        state["instruction"]="I turned the device OFF automatically. Confirming that power returned to baseline…"
+                    if result.get("completed"):
+                        state["status"]="complete"
+                        await self._call_power(auto_controls,False) if auto_controls and turned_on else None
+                        await self._persist()
+                        return
+                    await self._persist()
+                await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            _LOGGER.exception("Training failed")
+            state=self.training_state.get(device_id,{})
+            state["status"]="error"
+            state["error"]=str(err)
+            await self._persist()
+
+    def _auto_control_entities(self, device_id:str)->list[str]:
+        candidate=self.candidate_devices.get(device_id,{})
+        controls=[c for c in candidate.get("controls",[]) if c.get("domain") in {"light","switch","fan","humidifier","climate","water_heater"}]
+        priority={"light":0,"switch":1,"fan":2,"humidifier":3,"climate":4,"water_heater":5}
+        controls.sort(key=lambda c: priority.get(c.get("domain"),99))
+        return [controls[0]["entity_id"]] if controls else []
+
+    async def _call_power(self, entities:list[str], turn_on:bool):
+        for entity_id in entities:
+            domain=entity_id.split(".",1)[0]
+            service="turn_on" if turn_on else "turn_off"
+            await self.hass.services.async_call(domain,service,{"entity_id":entity_id},blocking=True)
+
+    async def async_reset_training(self, device_id: str):
+        """Clear a training session without touching device commissioning."""
+        if self._training_device == device_id:
+            await self.async_stop_training(device_id)
+        self.training_state.pop(device_id, None)
+        self.training_samples.pop(device_id, None)
+        await self._persist()
+
+    async def async_stop_training(self, device_id:str):
+        if self._training_task and not self._training_task.done():
+            self._training_task.cancel()
+            try: await self._training_task
+            except asyncio.CancelledError: pass
+        state=self.training_state.get(device_id)
+        if state and state.get("status")=="active":
+            state["status"]="stopped"
+        await self._persist()
+
+    @callback
+    def training_snapshot(self)->dict:
+        return self.training_state
+
+    async def _async_update_data(self)->dict:
+        states=self.hass.states
+        whole=states.get(self.power_entity)
+        whole_power=None
         if whole is not None:
-            try:
-                whole_power = float(whole.state)
-            except (TypeError, ValueError):
-                pass
-
-        return {
-            "whole_home_power": whole_power,
-            "entities": {
-                entity_id: states.get(entity_id)
-                for entity_id in self.monitored_entities
-                if states.get(entity_id) is not None
-            },
-        }
+            try: whole_power=float(whole.state)
+            except (TypeError,ValueError): pass
+        return {"whole_home_power":whole_power,"entities":{e:states.get(e) for e in self.monitored_entities if states.get(e) is not None}}
