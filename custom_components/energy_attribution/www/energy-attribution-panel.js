@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-panel-v24";
+const TAG = "energy-attribution-panel-v25";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
     constructor(){super();this._listMode="monitored";}
@@ -20,7 +20,7 @@ if (!customElements.get(TAG)) {
       this._scrollTraining();
     }
     async _train(id,method){this._closedResult=false;const d=this.data.devices.find(x=>x.device_id===id);if(!d)return;if(method==='quick'){if(!confirm(`EnergyIQ will automatically turn “${d.name}” ON and OFF during training. Make sure it is safe to operate. Continue?`))return;}else if(method==='manual'){if(!confirm(`Manual training for “${d.name}” listens to the Shelly whole-home power signal. No command will be sent to the device.\n\nWhen you press OK, wait for READY TO START, then operate the appliance normally.`))return;}await this._ws({type:"energy_attribution/start_training",entry_id:this.entryId,device_id:id,method});await this._refresh();this._scrollTraining();}
-    async _retry(id){this._closedResult=false;await this._ws({type:"energy_attribution/retry_training",entry_id:this.entryId,device_id:id});await this._refresh();this._scrollTraining();}
+    async _retry(id){const d=this.data.devices.find(x=>x.device_id===id);if(!d)return;const method=d.training?.method||"quick";this._closedResult=false;if(method==="quick"){if(!confirm(`EnergyIQ will automatically turn “${d.name}” ON and OFF during training. Make sure it is safe to operate. Continue?`))return;}try{await this._ws({type:"energy_attribution/start_training",entry_id:this.entryId,device_id:id,method});await this._refresh();this._scrollTraining();}catch(e){alert(`EnergyIQ could not start training: ${e.message||e}`);await this._refresh();}}
     async _stop(id){await this._ws({type:"energy_attribution/stop_training",entry_id:this.entryId,device_id:id});await this._refresh();}
     _scrollTraining(){requestAnimationFrame(()=>this.querySelector('#active-training')?.scrollIntoView({behavior:'smooth',block:'start'}));}
     _status(t){if(!t||!t.status)return{label:"Not trained",cls:"nottrained",icon:"○"};if(t.status==='complete')return{label:"Trained",cls:"complete-status",icon:"✓"};if(t.status==='active')return{label:"Training",cls:"progress",icon:"◐"};if(t.status==='interrupted')return{label:"Interrupted",cls:"error-status",icon:"!"};return{label:"Not trained",cls:"error-status",icon:"○"};}
