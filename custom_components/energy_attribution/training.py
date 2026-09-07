@@ -24,6 +24,8 @@ class TrainingEngine:
     baseline_window_s: float = 3.0
     min_event_w: float = 12.0
     stable_window_s: float = 1.0
+    quick_on_measurement_s: float = 2.5
+    quick_off_settle_s: float = 1.5
     return_tolerance_w: float = 25.0
     max_quick_duration_s: float = 120.0
     max_full_cycle_duration_s: float = 8 * 3600.0
@@ -44,6 +46,7 @@ class TrainingEngine:
     _off_hits: int = 0
     _cooldown_until: float | None = None
     _on_samples: list[float] = field(default_factory=list)
+    _off_samples: list[float] = field(default_factory=list)
     cycles_required: int = 3
 
     def add_sample(self, timestamp: float, watts: float) -> dict:
@@ -83,18 +86,29 @@ class TrainingEngine:
             return self.result(action="turn_on")
         if self.phase == "waiting_for_on":
             self._on_samples.append(s.watts)
-            if self.active_started is not None and s.timestamp - self.active_started >= 1.5:
+            # Kasa/LED dimmers and other electronic loads may ramp for a while
+            # after the entity turns on. Keep the established deterministic
+            # control behavior, but give the electrical signal more time to reach
+            # its normal operating plateau.
+            if self.active_started is not None and s.timestamp - self.active_started >= self.quick_on_measurement_s:
                 self.phase = "request_off"
         elif self.phase == "request_off":
             return self.result(action="turn_off")
         elif self.phase == "waiting_for_off":
-            if self.active_started is not None and s.timestamp - self.active_started >= 1.5:
-                if self._on_samples:
-                    on_w = median(self._on_samples)
-                else:
-                    on_w = s.watts
-                off_w = s.watts
-                delta = max(0.0, on_w - (self.baseline_w or off_w))
+            self._off_samples.append(s.watts)
+            if self.active_started is not None and s.timestamp - self.active_started >= self.quick_off_settle_s:
+                # Use the end of each measurement window rather than the full
+                # window. This avoids LED/dimmer startup transients pulling the
+                # learned signature down, and using the post-OFF plateau instead
+                # of the original baseline compensates for unrelated whole-home
+                # load drift during the test.
+                on_values = self._on_samples
+                off_values = self._off_samples
+                on_window = on_values[-max(1, int(len(on_values) * 0.4)):] if on_values else []
+                off_window = off_values[-max(1, int(len(off_values) * 0.6)):] if off_values else []
+                on_w = median(on_window) if on_window else (self.baseline_w or s.watts)
+                off_w = median(off_window) if off_window else s.watts
+                delta = max(0.0, on_w - off_w)
                 duration = max(0.0, s.timestamp - (self.cycle_started or s.timestamp))
                 self.observations.append(QuickObservation(delta, on_w, off_w, duration))
                 if len(self.observations) >= self.cycles_required:
@@ -111,6 +125,7 @@ class TrainingEngine:
                 self.cycle_started = None
                 self.active_peak_w = None
                 self._on_samples.clear()
+                self._off_samples.clear()
         elif self.phase == "cooldown":
             if s.timestamp >= (self._cooldown_until or s.timestamp):
                 self.phase = "request_on"
@@ -126,10 +141,12 @@ class TrainingEngine:
             self.cycle_started = timestamp
             self.active_peak_w = None
             self._on_samples.clear()
+            self._off_samples.clear()
             self._on_hits = 0
         elif action == "turn_off" and self.phase == "request_off":
             self.phase = "waiting_for_off"
             self.active_started = timestamp
+            self._off_samples.clear()
             self._off_hits = 0
 
     def _quick_valid(self) -> bool:
