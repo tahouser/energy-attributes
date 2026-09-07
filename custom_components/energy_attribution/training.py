@@ -24,8 +24,9 @@ class TrainingEngine:
     baseline_window_s: float = 3.0
     min_event_w: float = 12.0
     stable_window_s: float = 1.0
-    quick_on_measurement_s: float = 2.5
+    quick_on_measurement_s: float = 3.0
     quick_off_settle_s: float = 1.5
+    quick_capture_lead_s: float = 0.25
     return_tolerance_w: float = 25.0
     max_quick_duration_s: float = 120.0
     max_full_cycle_duration_s: float = 8 * 3600.0
@@ -47,6 +48,7 @@ class TrainingEngine:
     _cooldown_until: float | None = None
     _on_samples: list[float] = field(default_factory=list)
     _off_samples: list[float] = field(default_factory=list)
+    _on_capture_w: float | None = None
     cycles_required: int = 3
 
     def add_sample(self, timestamp: float, watts: float) -> dict:
@@ -90,6 +92,15 @@ class TrainingEngine:
             # after the entity turns on. Keep the established deterministic
             # control behavior, but give the electrical signal more time to reach
             # its normal operating plateau.
+            if (
+                self.active_started is not None
+                and self._on_capture_w is None
+                and s.timestamp - self.active_started >= max(0.0, self.quick_on_measurement_s - self.quick_capture_lead_s)
+            ):
+                # Capture the stabilized ON reading shortly before the controlled
+                # ON interval ends, but keep the target ON until the full 3-second
+                # interval has elapsed. No transient/ramp analysis is performed.
+                self._on_capture_w = s.watts
             if self.active_started is not None and s.timestamp - self.active_started >= self.quick_on_measurement_s:
                 self.phase = "request_off"
         elif self.phase == "request_off":
@@ -102,12 +113,12 @@ class TrainingEngine:
                 # learned signature down, and using the post-OFF plateau instead
                 # of the original baseline compensates for unrelated whole-home
                 # load drift during the test.
-                on_values = self._on_samples
-                off_values = self._off_samples
-                on_window = on_values[-max(1, int(len(on_values) * 0.4)):] if on_values else []
-                off_window = off_values[-max(1, int(len(off_values) * 0.6)):] if off_values else []
-                on_w = median(on_window) if on_window else (self.baseline_w or s.watts)
-                off_w = median(off_window) if off_window else s.watts
+                # Use the final stabilized readings rather than a percentage
+                # of the measurement window. The purpose of Quick Training is
+                # simply to learn the steady electrical delta after the load and
+                # meter have had time to settle.
+                on_w = self._on_capture_w if self._on_capture_w is not None else (self._on_samples[-1] if self._on_samples else (self.baseline_w or s.watts))
+                off_w = self._off_samples[-1] if self._off_samples else s.watts
                 delta = max(0.0, on_w - off_w)
                 duration = max(0.0, s.timestamp - (self.cycle_started or s.timestamp))
                 self.observations.append(QuickObservation(delta, on_w, off_w, duration))
@@ -126,6 +137,7 @@ class TrainingEngine:
                 self.active_peak_w = None
                 self._on_samples.clear()
                 self._off_samples.clear()
+                self._on_capture_w = None
         elif self.phase == "cooldown":
             if s.timestamp >= (self._cooldown_until or s.timestamp):
                 self.phase = "request_on"
@@ -142,6 +154,7 @@ class TrainingEngine:
             self.active_peak_w = None
             self._on_samples.clear()
             self._off_samples.clear()
+            self._on_capture_w = None
             self._on_hits = 0
         elif action == "turn_off" and self.phase == "request_off":
             self.phase = "waiting_for_off"
