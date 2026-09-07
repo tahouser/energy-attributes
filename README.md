@@ -132,3 +132,6 @@ Trained-device wattage now reflects current state: direct live HA power when ava
 - Dashboard now compares the live whole-home meter against currently active trained-device watts.
 - Trained active watts uses direct live HA power when available, otherwise the learned signature for trained devices that are currently ON.
 - Unaccounted home watts is the live whole-home total minus active trained-device watts.
+
+
+Diagnostic note: v1.6.23 directly polls the confirmed Pro 3EM at 192.168.1.251 via /rpc/EM.GetStatus?id=0 during Quick training. This is diagnostic only and does not alter training decisions.

@@ -201,19 +201,22 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             return state
 
     def _shelly_rpc_config(self) -> tuple[str, int, str | None, str | None] | None:
-        """Resolve the Shelly host/credentials from the selected power entity."""
+        """Resolve the Shelly host/credentials from the selected power entity.
+
+        For this diagnostic build, fall back to the confirmed local Pro 3EM IP
+        so the test cannot silently fail just because HA's Shelly entity is
+        represented by a different config-entry shape. The fallback is
+        diagnostic-only and does not affect normal EnergyIQ operation.
+        """
         registry = er.async_get(self.hass)
         entity = registry.async_get(self.power_entity)
-        if entity is None or not entity.config_entry_id:
-            return None
-        entry = self.hass.config_entries.async_get_entry(entity.config_entry_id)
-        if entry is None or entry.domain != "shelly":
-            return None
-        host = entry.data.get(CONF_HOST)
-        if not host:
-            return None
-        port = int(entry.data.get(CONF_PORT, 80))
-        return host, port, entry.data.get(CONF_USERNAME), entry.data.get(CONF_PASSWORD)
+        if entity is not None and entity.config_entry_id:
+            entry = self.hass.config_entries.async_get_entry(entity.config_entry_id)
+            if entry is not None and entry.domain == "shelly":
+                host = entry.data.get(CONF_HOST)
+                if host:
+                    return host, int(entry.data.get(CONF_PORT, 80)), entry.data.get(CONF_USERNAME), entry.data.get(CONF_PASSWORD)
+        return "192.168.1.251", 80, None, None
 
     async def _direct_shelly_poll(self, device_id: str):
         """Diagnostic-only direct Shelly RPC poll; does not affect training decisions."""
@@ -267,6 +270,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         rpc_elapsed_ms=round(elapsed_ms, 2),
                         ha_power_w=ha_w,
                         ha_last_updated=ha_updated,
+                        training_elapsed_ms=round((self.hass.loop.time() - self.training_state.get(device_id, {}).get("started_at", self.hass.loop.time())) * 1000.0, 1),
                     )
                 except Exception as err:
                     self._response_log("shelly_rpc_error", device_id, shelly_host=host, error=str(err))
