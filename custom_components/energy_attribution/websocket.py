@@ -10,6 +10,31 @@ from homeassistant.core import HomeAssistant, callback
 from .const import DOMAIN
 
 
+
+def _candidate_current_power(hass: HomeAssistant, candidate: dict):
+    total = 0.0
+    found = False
+    for measurement in candidate.get("measurements", []):
+        entity_id = measurement.get("entity_id")
+        state = hass.states.get(entity_id) if entity_id else None
+        if state is None:
+            continue
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError):
+            continue
+        unit = str(state.attributes.get("unit_of_measurement") or measurement.get("unit") or "").casefold()
+        device_class = str(state.attributes.get("device_class") or "").casefold()
+        if device_class not in {"power", "energy"} and unit not in {"w", "kw"}:
+            continue
+        if device_class == "energy" and unit not in {"w", "kw"}:
+            continue
+        if unit == "kw":
+            value *= 1000
+        total += max(0.0, value)
+        found = True
+    return total if found else None
+
 def _coordinator(hass: HomeAssistant, entry_id: str):
     """Return a loaded coordinator for a real config entry."""
     entry = hass.config_entries.async_get_entry(entry_id)
@@ -58,6 +83,7 @@ async def ws_workspace(hass, connection, msg):
             "controls": candidate.get("controls", []),
             "classification": coordinator.device_classifications.get(did, "ignore"),
             "training": coordinator.training_state.get(did, {}),
+            "current_power": _candidate_current_power(hass, candidate),
         })
     state = hass.states.get(coordinator.power_entity)
     connection.send_result(msg["id"], {
@@ -239,6 +265,30 @@ async def ws_start_training(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/bulk_auto_training",
+    vol.Required("entry_id"): str,
+    vol.Required("device_ids"): [str],
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_bulk_auto_training(hass, connection, msg):
+    coordinator = _coordinator(hass, msg["entry_id"])
+    result = await coordinator.async_bulk_auto_training(msg["device_ids"])
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/bulk_training_state",
+    vol.Required("entry_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_bulk_training_state(hass, connection, msg):
+    coordinator = _coordinator(hass, msg["entry_id"])
+    connection.send_result(msg["id"], coordinator.bulk_training_state)
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "energy_attribution/retry_training",
     vol.Required("entry_id"): str,
     vol.Required("device_id"): str,
@@ -268,5 +318,5 @@ async def ws_stop_training(hass, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_retry_training, ws_stop_training):
+    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_retry_training, ws_stop_training):
         websocket_api.async_register_command(hass, handler)

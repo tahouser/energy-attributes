@@ -33,6 +33,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.last_training_device_id: str|None=None
         self._training_task: asyncio.Task|None=None
         self._training_lock=asyncio.Lock()
+        self.bulk_training_state={"status":"idle","queue":[],"current_index":0,"total":0,"current_device_id":None,"completed":0,"skipped":[],"failed":[]}
         self._last_persist=0.0
         super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
 
@@ -90,6 +91,47 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             "last_training_device_id": self.last_training_device_id,
             "active": self.training_state.get(self._training_device) if self._training_device else None,
         })
+
+
+    async def async_bulk_auto_training(self, device_ids: list[str]) -> dict:
+        """Train selected HA/entity devices sequentially using Auto Quick."""
+        selected=[]
+        skipped=[]
+        for did in device_ids:
+            candidate=self.candidate_devices.get(did)
+            if not candidate or str(candidate.get("source", "ha")).casefold()=="manual":
+                continue
+            if not self._auto_control_entities(did):
+                skipped.append({"device_id":did,"reason":"No supported controllable HA entity"})
+                continue
+            selected.append(did)
+        self.bulk_training_state={"status":"active","queue":selected,"current_index":0,"total":len(selected),"current_device_id":None,"completed":0,"skipped":skipped,"failed":[]}
+        await self._persist(force=True)
+        if not selected:
+            self.bulk_training_state["status"]="complete"
+            await self._persist(force=True)
+            return self.bulk_training_state.copy()
+        self.hass.async_create_task(self._bulk_training_loop(selected))
+        return self.bulk_training_state.copy()
+
+    async def _bulk_training_loop(self, selected: list[str]):
+        for index, did in enumerate(selected, start=1):
+            self.bulk_training_state.update({"current_index":index,"current_device_id":did})
+            try:
+                await self.async_start_training(did, "quick")
+                if self._training_task:
+                    await self._training_task
+                state=self.training_state.get(did,{})
+                if state.get("status")=="complete":
+                    self.bulk_training_state["completed"] += 1
+                else:
+                    self.bulk_training_state["failed"].append({"device_id":did,"reason":state.get("error") or state.get("instruction") or state.get("status","failed")})
+            except Exception as err:
+                _LOGGER.exception("Bulk training failed for %s", did)
+                self.bulk_training_state["failed"].append({"device_id":did,"reason":str(err)})
+            await self._persist(force=True)
+        self.bulk_training_state.update({"status":"complete","current_device_id":None})
+        await self._persist(force=True)
 
     async def async_start_training(self, device_id:str, method:str) -> dict:
         async with self._training_lock:
