@@ -74,7 +74,7 @@ if (!customElements.get(TAG)) {
         <div class="tile"><div class="muted">Remaining</div><strong>${Math.max(0,monitored.length-trained.length)}</strong></div>
       </div>
       <h2>Commissioned Loads</h2><p>☑ Monitor means the load is included in attribution. <b>Training Complete</b> means a usable signature has actually been saved.</p>
-      <table><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Evidence</th><th>Training Status</th><th>Action</th></tr>`;
+      <table><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Source</th><th>Evidence</th><th>Training Status</th><th>Action</th></tr>`;
       for(const x of devices){
         const t=x.training||{}; const st=this._status(t); let action='';
         const isMonitored=this._pendingSelections ? this._pendingSelections.has(x.device_id) : x.classification==='monitor';
@@ -83,9 +83,9 @@ if (!customElements.get(TAG)) {
           else if(t.status==='complete') action=`<button data-retry="${this._esc(x.device_id)}">Train Again</button>`;
           else action=`<button data-quick="${this._esc(x.device_id)}">Quick ON/OFF</button> <button data-full="${this._esc(x.device_id)}">Full Cycle</button>`;
         }
-        html+=`<tr><td><input type="checkbox" data-device="${this._esc(x.device_id)}" ${isMonitored?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="muted">${this._esc(x.model||'')}</span></td><td>${this._esc(x.area||'')}</td><td>${this._esc(x.evidence||'')}</td><td class="status ${st.cls}">${st.icon} ${st.label}</td><td>${action}</td></tr>`;
+        html+=`<tr><td><input type="checkbox" data-device="${this._esc(x.device_id)}" ${isMonitored?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="muted">${this._esc(x.model||'')}</span></td><td>${this._esc(x.area||'')}</td><td>${this._esc(x.source==='manual'?'Manual':'HA')}</td><td>${this._esc(x.evidence||'')}</td><td class="status ${st.cls}">${st.icon} ${st.label}</td><td>${action}</td></tr>`;
       }
-      html+=`</table><button id="save">Save monitoring selections</button>`;
+      html+=`</table><button id="add-device">＋ Add Electrical Device</button> <button id="save">Save monitoring selections</button>`;
       if(active) {
         const t=active.training;
         html+=`<div class="training-box"><h2>Training in progress</h2><h3>${this._esc(active.name)}</h3><p>${this._esc(this._phaseText(t))}</p>${t.method==='quick'&&t.cycles_required?`<p>Cycle: <b>${t.cycles_completed||0} of ${t.cycles_required}</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.peak_delta_w!=null?`<p>Detected load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}<button data-stop="${this._esc(active.device_id)}">Stop</button></div>`;
@@ -104,6 +104,16 @@ if (!customElements.get(TAG)) {
         if(box.checked) this._pendingSelections.add(box.dataset.device); else this._pendingSelections.delete(box.dataset.device);
       }));
       this.querySelector('#save')?.addEventListener('click',()=>this._save());
+      this.querySelector('#add-device')?.addEventListener('click',async()=>{
+        const name=prompt('Name for the electrical device:');
+        if(!name || !name.trim()) return;
+        const category=prompt('Category (for example Appliance, HVAC, Lighting):','Appliance') || 'Appliance';
+        try {
+          await this._ws({type:"energy_attribution/add_manual_device",entry_id:this.entryId,name:name.trim(),category:category.trim() || 'Appliance'});
+          this._pendingSelections=null;
+          await this._refresh();
+        } catch(e) { console.error(e); alert(e?.message || 'Unable to add device'); }
+      });
       this.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>this._train(b.dataset.quick,'quick'));
       this.querySelectorAll('[data-full]').forEach(b=>b.onclick=()=>this._train(b.dataset.full,'full_cycle'));
       this.querySelectorAll('[data-retry]').forEach(b=>b.onclick=()=>this._retry(b.dataset.retry));

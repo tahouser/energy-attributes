@@ -98,7 +98,7 @@ class TrainingEngine:
                     self.completed = self._quick_valid()
                     self.phase = "complete" if self.completed else "error"
                     if not self.completed:
-                        return self.result(failed=True, failure_reason="The three ON/OFF cycles completed, but the meter did not show a measurable positive response from the target device.")
+                        return self.result(failed=True, failure_reason="The three ON/OFF measurements were not consistent enough to save a signature.")
                 else:
                     self.phase = "cooldown"
                     self._cooldown_until = s.timestamp + 0.5

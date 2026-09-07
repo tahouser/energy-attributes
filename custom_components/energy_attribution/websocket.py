@@ -99,6 +99,53 @@ async def ws_set_monitoring(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/add_manual_device",
+    vol.Required("entry_id"): str,
+    vol.Required("name"): str,
+    vol.Optional("category", default="Appliance"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_add_manual_device(hass, connection, msg):
+    coordinator = _coordinator(hass, msg["entry_id"])
+    name = msg["name"].strip()
+    category = msg.get("category", "Appliance").strip() or "Appliance"
+    if not name:
+        raise ValueError("Device name is required")
+    # Manual devices deliberately have no HA entity/device. They live in the
+    # same commissioning inventory as discovered HA candidates.
+    base = "manual_" + __import__("re").sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    did = base or "manual_device"
+    n = 2
+    while did in coordinator.candidate_devices:
+        did = f"{base}_{n}"
+        n += 1
+    candidate = {
+        "device_id": did,
+        "name": name,
+        "area": "",
+        "manufacturer": "",
+        "model": "",
+        "evidence": "Manual electrical device",
+        "controls": [],
+        "measurements": [],
+        "source": "manual",
+        "category": category,
+    }
+    coordinator.candidate_devices[did] = candidate
+    coordinator.device_classifications[did] = "ignore"
+    hass.config_entries.async_update_entry(
+        coordinator.entry,
+        options={
+            **coordinator.entry.options,
+            "candidate_devices": coordinator.candidate_devices,
+            "device_classifications": coordinator.device_classifications,
+            "monitored_entities": coordinator.monitored_entities,
+        },
+    )
+    connection.send_result(msg["id"], {"saved": True, "device": candidate})
+
+@websocket_api.websocket_command({
     vol.Required("type"): "energy_attribution/start_training",
     vol.Required("entry_id"): str,
     vol.Required("device_id"): str,
@@ -144,5 +191,5 @@ async def ws_stop_training(hass, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_start_training, ws_retry_training, ws_stop_training):
+    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_start_training, ws_retry_training, ws_stop_training):
         websocket_api.async_register_command(hass, handler)
