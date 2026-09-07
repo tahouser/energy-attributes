@@ -1,137 +1,15 @@
-# Energy Attribution
+# EnergyIQ v1.7.0
 
-A Home Assistant custom integration for attributing whole-home power consumption to selected Home Assistant electrical loads.
+EnergyIQ is a Home Assistant custom integration for electrical-load commissioning and attribution.
 
-## Installation
+## v1.7.0
+- Uses a local Shelly Pro 3EM RPC reading as the preferred whole-home measurement source during controlled training when EnergyIQ can automatically resolve the Shelly config entry.
+- Keeps the existing Home Assistant power entity as the normal dashboard/monitoring source.
+- Falls back to the HA power entity when a unique Shelly local connection cannot be resolved.
+- Preserves the established Quick training timing and safety behavior: 3-second baseline, automatic ON, 1.5-second measurement, automatic OFF, 1.5-second recovery, 0.5-second cooldown, three cycles.
+- Logs the measurement source and Shelly host at training completion.
 
-Install through HACS as a custom repository of type **Integration**. After installation, add **Energy Attribution** from **Settings → Devices & services → Add Integration**.
+## Automatic local meter resolution
+EnergyIQ first checks the selected whole-home power entity's Shelly config entry, then the entity's device and parent device config entries. If exactly one Shelly integration entry exists, it can be used as a safe fallback. Multiple unrelated Shelly entries are not guessed.
 
-## v0.3.0 commissioning model
-
-The commissioning workflow is deliberately separated into three stages:
-
-1. **Discovery/filtering** — the integration scans the HA device/entity registry and keeps only devices with direct, valid power or cumulative energy measurements. Disabled/config/diagnostic entities, environmental-only entities, controls without measurements, and the selected whole-home meter device are excluded.
-2. **Bulk selection** — every filtered device is adopted into Energy Attribution's own commissioning environment and is selected by default. The user can uncheck loads that should not be monitored. This is a single bulk screen, not a 1-device-at-a-time questionnaire.
-3. **Training** — controlled appliance training will use only the devices selected for monitoring. Long-cycle appliances such as dishwashers and dryers will be trained as full temporal signatures rather than as a single wattage value.
-
-The integration does not modify Home Assistant's device/entity registry. It stores its own monitor/ignore state and measurement mapping.
-
-## Reopening commissioning
-
-After setup, the same bulk commissioning screen is available from the Energy Attribution integration's configuration/options flow, allowing the monitored set to be changed without reinstalling the integration.
-
-## Current status
-
-v0.3.0 establishes the filtered, device-level commissioning environment. Attribution/NILM training and the dashboard are built on top of this base.
-
-
-## v0.4.0 commissioning workflow
-
-Initial installation only asks for the whole-home aggregate power sensor.
-The integration then adopts all devices that pass the electrical-load filter
-into its private Energy Attribution environment.
-
-Commissioning is intentionally separate from installation. Open the
-Energy Attribution integration's **Configure** action to review the complete
-candidate list on one bulk-selection screen. Candidates with direct
-power/energy measurements are shown first; controllable load-style devices
-such as lights, switches/outlets, fans, climate devices, media players/TVs,
-vacuums and water heaters are also included so the user can decide what is
-worth monitoring.
-
-The underlying Home Assistant entities and devices are never modified.
-
-
-## v0.5.0 workspace workflow
-
-Initial setup only chooses the whole-home meter. The integration's Configure action is the persistent workspace and offers two paths: **Adopt / review devices** and **Train a device**. Adoption is a bulk selection screen. Training is a separate controlled workflow for one monitored device at a time.
-
-
-## v0.6.0 evaluation workflow
-
-Configure is the permanent commissioning workspace. The selected device
-environment is retained independently of the initial installation flow.
-
-Training is modeled as persistent device state (`idle`, `armed`, `active`,
-`complete`). An armed/active long-cycle training session is stored in the
-config entry so the Configure page can be closed while the coordinator
-continues monitoring the whole-home power stream. Training metadata includes
-device identity, HA-derived category, baseline, peak delta and captured
-samples. The current prototype exposes training state for evaluation; a
-future custom frontend can provide per-row Train buttons and the full
-interactive waveform/confirmation experience without changing this data model.
-
-
-## v0.6.1
-
-Training actions are restricted to devices currently classified as **Monitor**.
-Ignored devices remain adopted in the private environment but do not appear in
-the training list.
-
-
-## v0.7.0
-
-The Configure workspace now routes the Train action into a persistent,
-multi-step training wizard:
-
-1. Prepare / identify the device.
-2. Arm and start training.
-3. Active training state.
-4. Review and confirm or retry.
-
-The training state is stored in the config entry so a long-cycle capture can
-remain active while the Configure page is closed. The current evaluation build
-uses the whole-home sensor as the capture source; live transition sampling and
-waveform rendering are the next implementation layer.
-
-
-## v0.8.0 training interaction
-
-Training no longer uses ambiguous Ready/Finish/Confirm switches. The wizard
-explicitly explains the action at each stage:
-
-- choose Quick ON/OFF or Full cycle;
-- explicitly START active monitoring;
-- follow device-specific instructions;
-- finish the capture;
-- review the captured behavior and explicitly save or retry.
-
-There is no hard-coded requirement to toggle a device three times. Quick tests
-look for consistent transitions; full-cycle loads are captured as a complete
-temporal sequence.
-
-
-## Dashboard card
-
-The integration registers a custom Lovelace card automatically. Add a **Manual** card to a dashboard with:
-
-```yaml
-type: custom:energy-attribution-card
-```
-
-The card shows the current whole-home power, monitored devices, learned devices, remaining training count, and the current/recent training state. It is intentionally a commissioning/status view until the attribution engine is implemented; it does not invent appliance-level power estimates.
-
-## Version 1.3.2
-
-- Fixed the training completion panel so it displays the device from the session that just finished.
-- Stabilized the custom card and panel element names so Lovelace configuration does not change between releases.
-- Dashboard card remains responsive on mobile.
-
-
-## 1.4.4
-- Manual-created devices show a dedicated Manual Training action.
-- Integration display name is AAA Energy Attribution to keep iterative installs easy to find.
-- Auto Quick behavior remains unchanged.
-
-
-## 1.6.14
-Trained-device wattage now reflects current state: direct live HA power when available, otherwise the learned signature is used only while the trained controllable device is ON.
-
-
-## 1.6.16
-- Dashboard now compares the live whole-home meter against currently active trained-device watts.
-- Trained active watts uses direct live HA power when available, otherwise the learned signature for trained devices that are currently ON.
-- Unaccounted home watts is the live whole-home total minus active trained-device watts.
-
-
-Diagnostic note: v1.6.23 directly polls the confirmed Pro 3EM at 192.168.1.251 via /rpc/EM.GetStatus?id=0 during Quick training. This is diagnostic only and does not alter training decisions.
+A future setup revision can expose an explicit local-meter selection/IP fallback when automatic resolution is unavailable. Non-Shelly local-meter adapters should be added by protocol rather than assuming every meter uses Shelly RPC.
