@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-panel-v14";
+const TAG = "energy-attribution-panel-v15";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
     set hass(hass) { this._hass = hass; if (!this._loaded && !this._loading) this._load(); }
@@ -78,11 +78,11 @@ if (!customElements.get(TAG)) {
       <table><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Source</th><th>Evidence</th><th>Training Status</th><th>Action</th></tr>`;
       for(const x of devices){
         const t=x.training||{}; const st=this._status(t); let action='';
-        const isMonitored=this._pendingSelections ? this._pendingSelections.has(x.device_id) : x.classification==='monitor';
+        const isMonitored=this._pendingSelections ? this._pendingSelections.has(x.device_id) : x.classification==='monitor'; const isManual=String(x.source||'').toLowerCase()==='manual';
         if(isMonitored) {
           if(t.status==='active') action=`<span>${this._esc(this._phaseText(t))}</span> <button data-stop="${this._esc(x.device_id)}">Stop</button>`;
-          else if(t.status==='complete') action=x.source==='manual' ? `<button data-manual="${this._esc(x.device_id)}">Manual Training</button>` : `<button data-retry="${this._esc(x.device_id)}">Train Again</button>`;
-          else if(x.source==='manual') action=`<button data-manual="${this._esc(x.device_id)}">Manual Training</button>`;
+          else if(t.status==='complete') action=isManual ? `<button data-manual="${this._esc(x.device_id)}">Manual Training</button>` : `<button data-retry="${this._esc(x.device_id)}">Train Again</button>`;
+          else if(isManual) action=`<button data-manual="${this._esc(x.device_id)}">Manual Training</button>`;
           else action=`<button data-quick="${this._esc(x.device_id)}">Quick ON/OFF</button> <button data-full="${this._esc(x.device_id)}">Full Cycle</button>`;
         }
         html+=`<tr><td><input type="checkbox" data-device="${this._esc(x.device_id)}" ${isMonitored?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="muted">${this._esc(x.model||'')}</span></td><td>${this._esc(x.area||'')}</td><td>${this._esc(x.source==='manual'?'Manual':'HA')}</td><td>${this._esc(x.evidence||'')}</td><td class="status ${st.cls}">${st.icon} ${st.label}</td><td>${action}</td></tr>`;
