@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import csv
+import aiohttp
 from datetime import datetime, timezone
 from pathlib import Path
 from datetime import timedelta
@@ -12,7 +13,10 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers import entity_registry as er
+from homeassistant.const import CONF_HOST, CONF_PORT, CONF_USERNAME, CONF_PASSWORD
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN
 from .training import TrainingEngine
@@ -40,6 +44,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self._response_log_path = Path(self.hass.config.path("energy_attribution_response.csv"))
         self._response_last_updated = None
         self._response_pending_action = None
+        self._direct_rpc_task: asyncio.Task | None = None
         self.bulk_training_state={"status":"idle","queue":[],"current_index":0,"total":0,"current_device_id":None,"completed":0,"skipped":[],"failed":[]}
         self._last_persist=0.0
         super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
@@ -184,9 +189,90 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self._response_last_updated = None
             self._response_pending_action = None
             self._response_log("training_start", device_id, power_entity=self.power_entity, method=method)
+            if self._direct_rpc_task and not self._direct_rpc_task.done():
+                self._direct_rpc_task.cancel()
+                try:
+                    await self._direct_rpc_task
+                except asyncio.CancelledError:
+                    pass
+            self._direct_rpc_task = self.hass.async_create_task(self._direct_shelly_poll(device_id))
             await self._persist(force=True)
             self._training_task=self.hass.async_create_task(self._training_loop(device_id,method))
             return state
+
+    def _shelly_rpc_config(self) -> tuple[str, int, str | None, str | None] | None:
+        """Resolve the Shelly host/credentials from the selected power entity."""
+        registry = er.async_get(self.hass)
+        entity = registry.async_get(self.power_entity)
+        if entity is None or not entity.config_entry_id:
+            return None
+        entry = self.hass.config_entries.async_get_entry(entity.config_entry_id)
+        if entry is None or entry.domain != "shelly":
+            return None
+        host = entry.data.get(CONF_HOST)
+        if not host:
+            return None
+        port = int(entry.data.get(CONF_PORT, 80))
+        return host, port, entry.data.get(CONF_USERNAME), entry.data.get(CONF_PASSWORD)
+
+    async def _direct_shelly_poll(self, device_id: str):
+        """Diagnostic-only direct Shelly RPC poll; does not affect training decisions."""
+        config = self._shelly_rpc_config()
+        if config is None:
+            self._response_log("rpc_unavailable", device_id, reason="Selected power entity is not backed by a Shelly config entry")
+            return
+        host, port, username, password = config
+        url = f"http://{host}:{port}/rpc/EM.GetStatus?id=0"
+        auth = aiohttp.BasicAuth(username, password) if username and password else None
+        timeout = aiohttp.ClientTimeout(total=1.0)
+        session = async_get_clientsession(self.hass)
+        try:
+            while self._training_device == device_id:
+                started = self.hass.loop.time()
+                try:
+                    async with session.get(url, auth=auth, timeout=timeout) as response:
+                        payload = await response.json(content_type=None)
+                    elapsed_ms = (self.hass.loop.time() - started) * 1000.0
+                    total = payload.get("total_act_power") if isinstance(payload, dict) else None
+                    source = "EM.GetStatus"
+                    if total is None:
+                        total = 0.0
+                        phase_values = []
+                        for phase_id in (0, 1, 2):
+                            phase_url = f"http://{host}:{port}/rpc/EM1.GetStatus?id={phase_id}"
+                            phase_started = self.hass.loop.time()
+                            async with session.get(phase_url, auth=auth, timeout=timeout) as phase_response:
+                                phase_payload = await phase_response.json(content_type=None)
+                            elapsed_ms += (self.hass.loop.time() - phase_started) * 1000.0
+                            value = phase_payload.get("act_power") if isinstance(phase_payload, dict) else None
+                            if value is not None:
+                                phase_values.append(float(value))
+                        total = sum(phase_values)
+                        source = "EM1.GetStatus(sum)"
+                    whole = self.hass.states.get(self.power_entity)
+                    ha_w = None
+                    ha_updated = ""
+                    if whole is not None:
+                        try:
+                            ha_w = float(whole.state)
+                        except (TypeError, ValueError):
+                            pass
+                        ha_updated = whole.last_updated.isoformat()
+                    self._response_log(
+                        "shelly_rpc_sample",
+                        device_id,
+                        shelly_host=host,
+                        rpc_source=source,
+                        rpc_power_w=round(float(total), 3),
+                        rpc_elapsed_ms=round(elapsed_ms, 2),
+                        ha_power_w=ha_w,
+                        ha_last_updated=ha_updated,
+                    )
+                except Exception as err:
+                    self._response_log("shelly_rpc_error", device_id, shelly_host=host, error=str(err))
+                await asyncio.sleep(0.25)
+        except asyncio.CancelledError:
+            raise
 
     async def _training_loop(self, device_id: str, method: str):
         try:
@@ -261,12 +347,16 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                             "events_detected": result.get("events_detected", 0), "observations": result.get("observations", []),
                         }
                         await self._persist(force=True)
+                        if self._direct_rpc_task and not self._direct_rpc_task.done():
+                            self._direct_rpc_task.cancel()
                         return
                     await self._persist()
                 await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             raise
         except Exception as err:
+            if self._direct_rpc_task and not self._direct_rpc_task.done():
+                self._direct_rpc_task.cancel()
             _LOGGER.exception("Training failed")
             state = self.training_state.get(device_id, {})
             state["status"] = "error"
@@ -305,6 +395,10 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         await self._persist()
 
     async def async_stop_training(self, device_id:str):
+        if self._direct_rpc_task and not self._direct_rpc_task.done():
+            self._direct_rpc_task.cancel()
+            try: await self._direct_rpc_task
+            except asyncio.CancelledError: pass
         if self._training_task and not self._training_task.done():
             self._training_task.cancel()
             try: await self._training_task
