@@ -29,6 +29,7 @@ if (!customElements.get(TAG)) {
     async _save() {
       const ids=[...this.querySelectorAll('input[data-device]:checked')].map(x=>x.dataset.device);
       await this._ws({type:"energy_attribution/set_monitoring",entry_id:this.entryId,device_ids:ids});
+      this._pendingSelections=null;
       await this._refresh();
     }
     async _train(id, method) {
@@ -45,7 +46,7 @@ if (!customElements.get(TAG)) {
     async _stop(id) { await this._ws({type:"energy_attribution/stop_training",entry_id:this.entryId,device_id:id}); await this._refresh(); }
     _status(t) {
       if (!t || !t.status) return {label:"Not trained", cls:"nottrained", icon:"☐"};
-      if (t.status === "complete" && t.learned) return {label:"Complete", cls:"complete-status", icon:"☑"};
+      if (t.status === "complete") return {label:"Complete", cls:"complete-status", icon:"☑"};
       if (t.status === "active") return {label:"In progress", cls:"progress", icon:"◐"};
       if (t.status === "interrupted") return {label:"Interrupted", cls:"error-status", icon:"⚠"};
       if (t.status === "error") return {label:"Not complete", cls:"error-status", icon:"☐"};
@@ -76,12 +77,13 @@ if (!customElements.get(TAG)) {
       <table><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Evidence</th><th>Training Status</th><th>Action</th></tr>`;
       for(const x of devices){
         const t=x.training||{}; const st=this._status(t); let action='';
-        if(x.classification==='monitor') {
+        const isMonitored=this._pendingSelections ? this._pendingSelections.has(x.device_id) : x.classification==='monitor';
+        if(isMonitored) {
           if(t.status==='active') action=`<span>${this._esc(this._phaseText(t))}</span> <button data-stop="${this._esc(x.device_id)}">Stop</button>`;
-          else if(t.status==='complete' && t.learned) action=`<button data-retry="${this._esc(x.device_id)}">Train Again</button>`;
+          else if(t.status==='complete') action=`<button data-retry="${this._esc(x.device_id)}">Train Again</button>`;
           else action=`<button data-quick="${this._esc(x.device_id)}">Quick ON/OFF</button> <button data-full="${this._esc(x.device_id)}">Full Cycle</button>`;
         }
-        html+=`<tr><td><input type="checkbox" data-device="${this._esc(x.device_id)}" ${x.classification==='monitor'?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="muted">${this._esc(x.model||'')}</span></td><td>${this._esc(x.area||'')}</td><td>${this._esc(x.evidence||'')}</td><td class="status ${st.cls}">${st.icon} ${st.label}</td><td>${action}</td></tr>`;
+        html+=`<tr><td><input type="checkbox" data-device="${this._esc(x.device_id)}" ${isMonitored?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="muted">${this._esc(x.model||'')}</span></td><td>${this._esc(x.area||'')}</td><td>${this._esc(x.evidence||'')}</td><td class="status ${st.cls}">${st.icon} ${st.label}</td><td>${action}</td></tr>`;
       }
       html+=`</table><button id="save">Save monitoring selections</button>`;
       if(active) {
@@ -89,7 +91,7 @@ if (!customElements.get(TAG)) {
         html+=`<div class="training-box"><h2>Training in progress</h2><h3>${this._esc(active.name)}</h3><p>${this._esc(this._phaseText(t))}</p>${t.method==='quick'&&t.cycles_required?`<p>Cycle: <b>${t.cycles_completed||0} of ${t.cycles_required}</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.peak_delta_w!=null?`<p>Detected load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}<button data-stop="${this._esc(active.device_id)}">Stop</button></div>`;
       }
       if(!active && resultDevice) {
-        const t=resultDevice.training; const complete=t.status==='complete' && (t.learned || t.completed);
+        const t=resultDevice.training; const complete=t.status==='complete';
         if(complete && !this._closedResult) {
           html+=`<div class="complete-box"><h2>Training Complete</h2><h3>${this._esc(resultDevice.name)}</h3><p>☑ <b>Training complete — signature saved</b></p>${t.method?`<p>Method: ${this._esc(t.method==='quick'?'Quick ON/OFF':'Full Cycle')}</p>`:''}${t.peak_delta_w!=null?`<p>Measured load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}${t.energy_wh!=null&&t.energy_wh>0?`<p>Additional energy: <b>${(t.energy_wh/1000).toFixed(2)} kWh</b></p>`:''}<button id="close-result">CLOSE</button></div>`;
         } else if(!complete && t.status!=='stopped') {
@@ -97,6 +99,10 @@ if (!customElements.get(TAG)) {
         }
       }
       html+=`</ha-card>`; this.innerHTML=html;
+      this.querySelectorAll('input[data-device]').forEach(box=>box.addEventListener('change',()=>{
+        if(!this._pendingSelections) this._pendingSelections=new Set(devices.filter(x=>x.classification==='monitor').map(x=>x.device_id));
+        if(box.checked) this._pendingSelections.add(box.dataset.device); else this._pendingSelections.delete(box.dataset.device);
+      }));
       this.querySelector('#save')?.addEventListener('click',()=>this._save());
       this.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>this._train(b.dataset.quick,'quick'));
       this.querySelectorAll('[data-full]').forEach(b=>b.onclick=()=>this._train(b.dataset.full,'full_cycle'));

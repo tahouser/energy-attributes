@@ -26,7 +26,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass=hass,
             frontend_url_path="energy-attribution",
             webcomponent_name="energy-attribution-panel-v13",
-            module_url=f"{URL_BASE}/energy-attribution-panel.js?v=16",
+            module_url=f"{URL_BASE}/energy-attribution-panel.js?v=18",
             sidebar_title="Energy Attribution",
             sidebar_icon="mdi:flash-circle",
             require_admin=True,

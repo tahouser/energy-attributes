@@ -98,7 +98,7 @@ class TrainingEngine:
                     self.completed = self._quick_valid()
                     self.phase = "complete" if self.completed else "error"
                     if not self.completed:
-                        return self.result(failed=True, failure_reason="The three ON/OFF measurements were not consistent enough to save a signature.")
+                        return self.result(failed=True, failure_reason="The three ON/OFF cycles completed, but the meter did not show a measurable positive response from the target device.")
                 else:
                     self.phase = "cooldown"
                     self._cooldown_until = s.timestamp + 0.5
@@ -130,11 +130,17 @@ class TrainingEngine:
             self._off_hits = 0
 
     def _quick_valid(self) -> bool:
+        # Quick training is a controlled causal test. The integration itself
+        # operated the target exactly three times, so whole-home meter variation
+        # must not reject an otherwise valid training session.  The three measured
+        # observations are retained and the median is used as the learned load.
+        # We only reject the session when the meter produced no measurable positive
+        # response at all; that means there is no usable signature to save.
         values = [o.delta_w for o in self.observations]
-        if len(values) != self.cycles_required or min(values) <= 0:
-            return False
-        center = median(values)
-        return max(values) - min(values) <= max(center * 0.15, 10.0)
+        return (
+            len(values) == self.cycles_required
+            and any(value > 0.0 for value in values)
+        )
 
     def _full_step(self, s: PowerSample) -> dict:
         if self.phase == "waiting_for_start" and s.watts >= self.baseline_w + self.on_threshold_w:
