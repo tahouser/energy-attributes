@@ -50,6 +50,8 @@ async def ws_workspace(hass, connection, msg):
             "area": candidate.get("area", ""),
             "manufacturer": candidate.get("manufacturer", ""),
             "model": candidate.get("model", ""),
+            "source": candidate.get("source", "ha"),
+            "category": candidate.get("category", ""),
             "evidence": candidate.get("evidence", ""),
             "controls": candidate.get("controls", []),
             "classification": coordinator.device_classifications.get(did, "ignore"),

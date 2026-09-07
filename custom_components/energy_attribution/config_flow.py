@@ -127,6 +127,17 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
     candidates: list[dict[str, Any]] = []
 
     for device in devices.devices.values():
+        # Shelly Energy Meter devices/channels are the whole-home measurement
+        # family and must never appear as appliance/load candidates.  This
+        # also catches phase/channel child devices that HA does not link via
+        # parent_device_id consistently.
+        device_name = " ".join(
+            str(value or "") for value in (
+                device.name_by_user, device.name, device.manufacturer, device.model
+            )
+        ).casefold()
+        if "shelly" in device_name and "energy meter" in device_name:
+            continue
         # Never treat the whole-home meter device (including phase/child
         # channels) as an appliance/load. HA can represent those channels as
         # child devices, so exclude the whole-home device family as well.

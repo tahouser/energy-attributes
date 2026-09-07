@@ -24,6 +24,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.device_classifications=entry.options.get("device_classifications", entry.data.get("device_classifications", {}))
         self.commissioned_devices=entry.options.get("commissioned_devices", entry.data.get("commissioned_devices", {}))
         self.candidate_devices=entry.options.get("candidate_devices", entry.data.get("candidate_devices", {}))
+        self._remove_shelly_energy_meter_candidates()
         self.training_state=entry.options.get("training_state", entry.data.get("training_state", {}))
         self.training_samples=entry.options.get("training_samples", entry.data.get("training_samples", {}))
         self._store=Store(hass, 1, f"{DOMAIN}.training.{entry.entry_id}", private=True)
@@ -34,6 +35,35 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self._training_lock=asyncio.Lock()
         self._last_persist=0.0
         super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
+
+    def _remove_shelly_energy_meter_candidates(self):
+        """Remove stale Shelly Energy Meter candidates from persisted inventory."""
+        removed = []
+        for did, candidate in list(self.candidate_devices.items()):
+            text = " ".join(str(candidate.get(key, "") or "") for key in ("name", "manufacturer", "model", "evidence")).casefold()
+            if "shelly" in text and "energy meter" in text:
+                removed.append(did)
+                self.candidate_devices.pop(did, None)
+                self.device_classifications.pop(did, None)
+                self.training_state.pop(did, None)
+                self.training_samples.pop(did, None)
+        if removed:
+            self.monitored_entities = [
+                entity_id
+                for did, candidate in self.candidate_devices.items()
+                for measurement in candidate.get("measurements", [])
+                for entity_id in [measurement.get("entity_id")]
+                if entity_id
+            ]
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                options={
+                    **self.entry.options,
+                    "candidate_devices": self.candidate_devices,
+                    "device_classifications": self.device_classifications,
+                    "monitored_entities": self.monitored_entities,
+                },
+            )
 
     async def async_load_training(self):
         saved=await self._store.async_load()
