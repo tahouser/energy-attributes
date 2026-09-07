@@ -49,6 +49,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self._direct_rpc_samples: list[tuple[float, float]] = []
         self._direct_rpc_available = False
         self._direct_rpc_host: str | None = None
+        self._direct_rpc_mode: str | None = None
         self.bulk_training_state={"status":"idle","queue":[],"current_index":0,"total":0,"current_device_id":None,"completed":0,"skipped":[],"failed":[]}
         self._last_persist=0.0
         super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
@@ -195,6 +196,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self._direct_rpc_samples.clear()
             self._direct_rpc_available = False
             self._direct_rpc_host = None
+            self._direct_rpc_mode = None
             self._response_log("training_start", device_id, power_entity=self.power_entity, method=method)
             if self._direct_rpc_task and not self._direct_rpc_task.done():
                 self._direct_rpc_task.cancel()
@@ -273,7 +275,6 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             return
 
         host, port, username, password = config
-        url = f"http://{host}:{port}/rpc/EM.GetStatus?id=0"
         auth = aiohttp.BasicAuth(username, password) if username and password else None
         timeout = aiohttp.ClientTimeout(total=1.0)
         session = async_get_clientsession(self.hass)
@@ -281,17 +282,29 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             while self._training_device == device_id:
                 started = self.hass.loop.time()
                 try:
-                    async with session.get(url, auth=auth, timeout=timeout) as response:
-                        response.raise_for_status()
-                        payload = await response.json(content_type=None)
-                    elapsed_ms = (self.hass.loop.time() - started) * 1000.0
-                    total = payload.get("total_act_power") if isinstance(payload, dict) else None
-                    source = "EM.GetStatus"
+                    total = None
+                    source = None
 
-                    # Some Pro 3EM firmware/API variants expose the phase
-                    # readings through EM1.GetStatus rather than a top-level
-                    # total. Sum the three phase active-power values in that
-                    # case.
+                    # Pro 3EM firmware/configurations can expose the aggregate
+                    # through EM.GetStatus, while others expose the three phase
+                    # readings as EM1 components. Try the aggregate endpoint once;
+                    # if it is unsupported (notably HTTP 404), switch to the
+                    # phase-sum endpoint for the remainder of this training run.
+                    if self._direct_rpc_mode != "em1":
+                        url = f"http://{host}:{port}/rpc/EM.GetStatus?id=0"
+                        try:
+                            async with session.get(url, auth=auth, timeout=timeout) as response:
+                                response.raise_for_status()
+                                payload = await response.json(content_type=None)
+                            total = payload.get("total_act_power") if isinstance(payload, dict) else None
+                            if total is not None:
+                                source = "EM.GetStatus"
+                                self._direct_rpc_mode = "em"
+                        except aiohttp.ClientResponseError as err:
+                            if err.status != 404:
+                                raise
+                            self._direct_rpc_mode = "em1"
+
                     if total is None:
                         phase_values = []
                         for phase_id in (0, 1, 2):
@@ -302,9 +315,13 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                             value = phase_payload.get("act_power") if isinstance(phase_payload, dict) else None
                             if value is not None:
                                 phase_values.append(float(value))
+                        if len(phase_values) != 3:
+                            raise RuntimeError("Shelly EM1 phase readings were incomplete")
                         total = sum(phase_values)
                         source = "EM1.GetStatus(sum)"
+                        self._direct_rpc_mode = "em1"
 
+                    elapsed_ms = (self.hass.loop.time() - started) * 1000.0
                     total = float(total)
                     sample_time = self.hass.loop.time()
                     self._direct_rpc_available = True
