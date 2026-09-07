@@ -28,7 +28,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             webcomponent_name="energy-attribution-panel-v19",
             module_url=f"{URL_BASE}/energy-attribution-panel.js?v=41",
             sidebar_title="EnergyIQ",
-            sidebar_icon="mdi:flash-circle",
+            sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
         data["_panel_registered"] = True
