@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import csv
+from datetime import datetime, timezone
+from pathlib import Path
 from datetime import timedelta
 from typing import Any
 
@@ -33,6 +36,9 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.last_training_device_id: str|None=None
         self._training_task: asyncio.Task|None=None
         self._training_lock=asyncio.Lock()
+        self._response_log_path = Path(self.hass.config.path("energy_attribution_response.csv"))
+        self._response_last_updated = None
+        self._response_pending_action = None
         self.bulk_training_state={"status":"idle","queue":[],"current_index":0,"total":0,"current_device_id":None,"completed":0,"skipped":[],"failed":[]}
         self._last_persist=0.0
         super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
@@ -135,6 +141,26 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.bulk_training_state.update({"status":"complete","current_device_id":None})
         await self._persist(force=True)
 
+    def _response_log(self, event: str, device_id: str, **values: Any) -> None:
+        """Write a compact training response-timing record for diagnostics."""
+        try:
+            path = self._response_log_path
+            new_file = not path.exists()
+            row = {
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "event": event,
+                "device_id": device_id,
+                **values,
+            }
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=list(row.keys()))
+                if new_file:
+                    writer.writeheader()
+                writer.writerow(row)
+        except Exception:  # diagnostics must never break training
+            _LOGGER.debug("Unable to write EnergyIQ response diagnostic", exc_info=True)
+
     async def async_start_training(self, device_id:str, method:str) -> dict:
         async with self._training_lock:
             if self._training_task and not self._training_task.done():
@@ -154,6 +180,9 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self._training_engine=engine
             self._training_device=device_id
             self.last_training_device_id=device_id
+            self._response_last_updated = None
+            self._response_pending_action = None
+            self._response_log("training_start", device_id, power_entity=self.power_entity, method=method)
             await self._persist(force=True)
             self._training_task=self.hass.async_create_task(self._training_loop(device_id,method))
             return state
@@ -173,6 +202,15 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 if watts is not None:
                     now = self.hass.loop.time()
                     state = self.training_state[device_id]
+                    state_updated = whole.last_updated.isoformat() if whole else ""
+                    if state_updated != self._response_last_updated:
+                        self._response_last_updated = state_updated
+                        values = {"power_w": watts, "ha_last_updated": state_updated}
+                        if self._response_pending_action:
+                            action = self._response_pending_action
+                            values["response_to_action"] = action
+                            self._response_pending_action = None
+                        self._response_log("power_update", device_id, **values)
                     state["live_power_w"] = watts
                     baseline = state.get("baseline_w")
                     state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
@@ -215,6 +253,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         state["completed_at"] = self.hass.loop.time()
                         self.last_training_device_id = device_id
                         state["completed"] = True
+                        self._response_log("training_complete", device_id, learned_load_w=result.get("peak_delta_w"))
                         state["learned_signature"] = {
                             "method": method, "baseline_w": result.get("baseline_w"), "load_w": result.get("peak_delta_w"),
                             "duration_s": result.get("duration_s"), "energy_wh": result.get("energy_wh"),
@@ -245,7 +284,16 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         for entity_id in entities:
             domain=entity_id.split(".",1)[0]
             service="turn_on" if turn_on else "turn_off"
+            command_loop = self.hass.loop.time()
             await self.hass.services.async_call(domain,service,{"entity_id":entity_id},blocking=True)
+            self._response_pending_action = service
+            self._response_log(
+                "control_command",
+                self._training_device or "",
+                entity_id=entity_id,
+                action=service,
+                command_loop=command_loop,
+            )
 
     async def async_reset_training(self, device_id: str):
         """Clear a training session without touching device commissioning."""
