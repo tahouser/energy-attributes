@@ -129,6 +129,7 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
     # HA 2026.9 no longer exposes the device registry as an iterable mapping.
     # Iterate the public main-device and child-device collections directly.
     all_devices = [*devices.devices, *devices.child_devices]
+    _LOGGER.debug("EnergyIQ device registry inventory: %d main + %d child devices", len(devices.devices), len(devices.child_devices))
     for device in all_devices:
         # Shelly Energy Meter devices/channels are the whole-home measurement
         # family and must never appear as appliance/load candidates.  This
