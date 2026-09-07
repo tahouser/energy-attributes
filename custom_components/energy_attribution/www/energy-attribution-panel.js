@@ -81,7 +81,8 @@ if (!customElements.get(TAG)) {
         const isMonitored=this._pendingSelections ? this._pendingSelections.has(x.device_id) : x.classification==='monitor';
         if(isMonitored) {
           if(t.status==='active') action=`<span>${this._esc(this._phaseText(t))}</span> <button data-stop="${this._esc(x.device_id)}">Stop</button>`;
-          else if(t.status==='complete') action=`<button data-retry="${this._esc(x.device_id)}">Train Again</button>`;
+          else if(t.status==='complete') action=x.source==='manual' ? `<button data-manual="${this._esc(x.device_id)}">Manual Training</button>` : `<button data-retry="${this._esc(x.device_id)}">Train Again</button>`;
+          else if(x.source==='manual') action=`<button data-manual="${this._esc(x.device_id)}">Manual Training</button>`;
           else action=`<button data-quick="${this._esc(x.device_id)}">Quick ON/OFF</button> <button data-full="${this._esc(x.device_id)}">Full Cycle</button>`;
         }
         html+=`<tr><td><input type="checkbox" data-device="${this._esc(x.device_id)}" ${isMonitored?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="muted">${this._esc(x.model||'')}</span></td><td>${this._esc(x.area||'')}</td><td>${this._esc(x.source==='manual'?'Manual':'HA')}</td><td>${this._esc(x.evidence||'')}</td><td class="status ${st.cls}">${st.icon} ${st.label}</td><td>${action}</td></tr>`;
@@ -117,10 +118,16 @@ if (!customElements.get(TAG)) {
       });
       this.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>this._train(b.dataset.quick,'quick'));
       this.querySelectorAll('[data-full]').forEach(b=>b.onclick=()=>this._train(b.dataset.full,'full_cycle'));
+      this.querySelectorAll('[data-manual]').forEach(b=>b.onclick=()=>this._manualInfo(b.dataset.manual));
       this.querySelectorAll('[data-retry]').forEach(b=>b.onclick=()=>this._retry(b.dataset.retry));
       this.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>this._stop(b.dataset.stop));
       this.querySelector('#close-result')?.addEventListener('click',()=>{this._closedResult=true;this._render();});
       this.querySelector('#dismiss-result')?.addEventListener('click',()=>{this._closedResult=true;this._render();});
+    }
+    _manualInfo(id){
+      const d=this.data.devices.find(x=>x.device_id===id);
+      if(!d) return;
+      alert(`Manual training for “${d.name}” will use the Shelly whole-home power signal. No HA command will be sent to this device. The manual listening/fingerprint workflow is the next training step.`);
     }
     _phaseText(t){const map={baseline:'Establishing the normal background load…',request_on:'Baseline established. Starting test cycle…',waiting_for_on:'Device is ON. Measuring the power increase…',request_off:'Power increase captured. Turning the device OFF…',waiting_for_off:'Device is OFF. Confirming the return to normal power…',cooldown:'Cycle complete. Preparing the next cycle…',waiting_for_start:'Baseline established. Start the appliance now. Monitoring will continue in the background.',capturing:'Cycle detected. Monitoring the complete cycle…',complete:'Training Complete. Review the measured signature, then close this result.',timeout:'Training timed out.'};return t.instruction||map[t.phase]||t.phase||'Waiting…';}
     _duration(s){const n=Math.round(s);if(n<60)return `${n}s`;if(n<3600)return `${Math.floor(n/60)}m ${n%60}s`;return `${Math.floor(n/3600)}h ${Math.floor((n%3600)/60)}m`;}

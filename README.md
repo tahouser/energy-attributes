@@ -116,3 +116,9 @@ The card shows the current whole-home power, monitored devices, learned devices,
 - Fixed the training completion panel so it displays the device from the session that just finished.
 - Stabilized the custom card and panel element names so Lovelace configuration does not change between releases.
 - Dashboard card remains responsive on mobile.
+
+
+## 1.4.4
+- Manual-created devices show a dedicated Manual Training action.
+- Integration display name is AAA Energy Attribution to keep iterative installs easy to find.
+- Auto Quick behavior remains unchanged.

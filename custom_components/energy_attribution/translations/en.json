@@ -1,6 +1,6 @@
 {
   "config": {
-    "flow_title": "Energy Attribution",
+    "flow_title": "AAA Energy Attribution",
     "step": {
       "user": {
         "title": "Choose whole-home meter",
@@ -14,8 +14,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "Energy Attribution \u2014 Commissioning",
-        "description": "{count} electrical-load candidates are in the private Energy Attribution environment. Select the devices to monitor. Training state is retained so longer-cycle training can continue in the background.",
+        "title": "AAA Energy Attribution \u2014 Commissioning",
+        "description": "{count} electrical-load candidates are in the private AAA Energy Attribution environment. Select the devices to monitor. Training state is retained so longer-cycle training can continue in the background.",
         "data": {
           "monitored_devices": "Devices to monitor",
           "action": "Training / save action"
