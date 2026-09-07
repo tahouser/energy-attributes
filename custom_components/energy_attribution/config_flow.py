@@ -127,10 +127,18 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
     candidates: list[dict[str, Any]] = []
 
     for device in devices.devices.values():
-        # Never treat the whole-home meter device (including its phase
-        # channels) as an appliance/load.
-        if whole_home_device_id and device.id == whole_home_device_id:
-            continue
+        # Never treat the whole-home meter device (including phase/child
+        # channels) as an appliance/load. HA can represent those channels as
+        # child devices, so exclude the whole-home device family as well.
+        if whole_home_device_id:
+            whole_home_parent_id = getattr(whole_home_entry, "parent_device_id", None) if whole_home_entry else None
+            device_parent_id = getattr(device, "parent_device_id", None)
+            if (
+                device.id == whole_home_device_id
+                or device_parent_id == whole_home_device_id
+                or (whole_home_parent_id and (device.id == whole_home_parent_id or device_parent_id == whole_home_parent_id))
+            ):
+                continue
 
         measurements: list[dict[str, str]] = []
         controls: list[dict[str, str]] = []
