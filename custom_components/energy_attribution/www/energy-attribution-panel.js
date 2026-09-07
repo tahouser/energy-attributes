@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-panel-v13";
+const TAG = "energy-attribution-panel-v14";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
     set hass(hass) { this._hass = hass; if (!this._loaded && !this._loading) this._load(); }
@@ -74,6 +74,7 @@ if (!customElements.get(TAG)) {
         <div class="tile"><div class="muted">Remaining</div><strong>${Math.max(0,monitored.length-trained.length)}</strong></div>
       </div>
       <h2>Commissioned Loads</h2><p>☑ Monitor means the load is included in attribution. <b>Training Complete</b> means a usable signature has actually been saved.</p>
+      <div style="margin:10px 0 14px"><button id="add-device">＋ Add Electrical Device</button> <button id="save">Save monitoring selections</button></div>
       <table><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Source</th><th>Evidence</th><th>Training Status</th><th>Action</th></tr>`;
       for(const x of devices){
         const t=x.training||{}; const st=this._status(t); let action='';
@@ -85,7 +86,7 @@ if (!customElements.get(TAG)) {
         }
         html+=`<tr><td><input type="checkbox" data-device="${this._esc(x.device_id)}" ${isMonitored?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="muted">${this._esc(x.model||'')}</span></td><td>${this._esc(x.area||'')}</td><td>${this._esc(x.source==='manual'?'Manual':'HA')}</td><td>${this._esc(x.evidence||'')}</td><td class="status ${st.cls}">${st.icon} ${st.label}</td><td>${action}</td></tr>`;
       }
-      html+=`</table><button id="add-device">＋ Add Electrical Device</button> <button id="save">Save monitoring selections</button>`;
+      html+=`</table>`;
       if(active) {
         const t=active.training;
         html+=`<div class="training-box"><h2>Training in progress</h2><h3>${this._esc(active.name)}</h3><p>${this._esc(this._phaseText(t))}</p>${t.method==='quick'&&t.cycles_required?`<p>Cycle: <b>${t.cycles_completed||0} of ${t.cycles_required}</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.peak_delta_w!=null?`<p>Detected load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}<button data-stop="${this._esc(active.device_id)}">Stop</button></div>`;
