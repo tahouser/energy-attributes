@@ -21,6 +21,7 @@ _LOGGER=logging.getLogger(__name__)
 
 class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass=hass
         self.entry=entry
         self.power_entity=entry.data[CONF_POWER_ENTITY]
         self.monitored_entities=entry.options.get(CONF_MONITORED_ENTITIES, entry.data.get(CONF_MONITORED_ENTITIES, []))
