@@ -130,6 +130,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 _LOGGER.exception("Bulk training failed for %s", did)
                 self.bulk_training_state["failed"].append({"device_id":did,"reason":str(err)})
             await self._persist(force=True)
+            if index < len(selected):
+                await asyncio.sleep(2.0)
         self.bulk_training_state.update({"status":"complete","current_device_id":None})
         await self._persist(force=True)
 
@@ -147,7 +149,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             state={"status":"active","phase":"baseline","method":method,"device_id":device_id,
                    "device_name":candidate.get("name",device_id),"area":candidate.get("area",""),
                    "started_at":self.hass.loop.time(),"baseline_w":None,"peak_delta_w":None,
-                   "events_detected":0,"result":None,"learned":False}
+                   "events_detected":0,"result":None,"learned":False,"live_power_w":None,"live_delta_w":None,"live_peak_w":None}
             self.training_state[device_id]=state
             self._training_engine=engine
             self._training_device=device_id
@@ -169,9 +171,17 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 except (TypeError, ValueError):
                     watts = None
                 if watts is not None:
-                    result = self._training_engine.add_sample(self.hass.loop.time(), watts)
+                    now = self.hass.loop.time()
                     state = self.training_state[device_id]
+                    state["live_power_w"] = watts
+                    baseline = state.get("baseline_w")
+                    state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
+                    if state.get("live_peak_w") is None or watts > state.get("live_peak_w", watts):
+                        state["live_peak_w"] = watts
+                    result = self._training_engine.add_sample(now, watts)
                     state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed")})
+                    baseline = state.get("baseline_w")
+                    state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
                     state["result"] = result
                     if method == "quick" and result.get("action"):
                         action = result["action"]
