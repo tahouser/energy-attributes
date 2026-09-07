@@ -11,10 +11,19 @@ from .const import DOMAIN
 
 
 
-def _candidate_current_power(hass: HomeAssistant, candidate: dict):
-    total = 0.0
-    found = False
+def _candidate_current_power(hass: HomeAssistant, candidate: dict, training: dict | None = None):
+    """Return the current watt estimate for a candidate.
+
+    For a trained controllable device, the learned signature is used while the
+    device is actually ON. A live HA power sensor is preferred when it reports
+    a positive value. Energy (kWh) sensors are never treated as instantaneous
+    watts.
+    """
+    direct_power = 0.0
+    found_power = False
     for measurement in candidate.get("measurements", []):
+        if measurement.get("kind") != "power":
+            continue
         entity_id = measurement.get("entity_id")
         state = hass.states.get(entity_id) if entity_id else None
         if state is None:
@@ -24,16 +33,61 @@ def _candidate_current_power(hass: HomeAssistant, candidate: dict):
         except (TypeError, ValueError):
             continue
         unit = str(state.attributes.get("unit_of_measurement") or measurement.get("unit") or "").casefold()
-        device_class = str(state.attributes.get("device_class") or "").casefold()
-        if device_class not in {"power", "energy"} and unit not in {"w", "kw"}:
-            continue
-        if device_class == "energy" and unit not in {"w", "kw"}:
+        if unit not in {"w", "kw"}:
             continue
         if unit == "kw":
             value *= 1000
-        total += max(0.0, value)
-        found = True
-    return total if found else None
+        direct_power += max(0.0, value)
+        found_power = True
+
+    training = training or {}
+    signature = training.get("learned_signature") or {}
+    try:
+        learned_w = float(signature.get("load_w"))
+    except (TypeError, ValueError):
+        learned_w = None
+
+    controls = candidate.get("controls", [])
+    control_on = any(
+        (hass.states.get(c.get("entity_id")) is not None
+         and hass.states.get(c.get("entity_id")).state == "on")
+        for c in controls if isinstance(c, dict) and c.get("entity_id")
+    )
+
+    if training.get("status") == "complete" and control_on and learned_w is not None and learned_w > 0:
+        # A positive direct measurement is the best live value. If HA exposes
+        # a power entity but it currently reports zero, use the trained load
+        # estimate so a trained ON light/switch does not incorrectly display 0 W.
+        return direct_power if found_power and direct_power > 0 else learned_w
+
+    if found_power:
+        return direct_power
+
+    if controls:
+        return 0.0
+    return None
+
+def _trained_live_power(hass: HomeAssistant, candidates: dict, training_state: dict) -> tuple[float, int]:
+    """Sum the current watts of completed trained loads that are active.
+
+    The whole-home meter remains the authoritative total. This value is only
+    the portion EnergyIQ can currently account for from trained devices: a
+    direct live power sensor when available, otherwise the learned signature
+    while the associated HA load entity is ON. Historical training wattage is
+    never counted while a device is OFF.
+    """
+    total = 0.0
+    live_count = 0
+    for did, candidate in candidates.items():
+        training = training_state.get(did, {})
+        if training.get("status") != "complete":
+            continue
+        watts = _candidate_current_power(hass, candidate, training)
+        if watts is None or watts <= 0:
+            continue
+        total += watts
+        live_count += 1
+    return total, live_count
 
 def _coordinator(hass: HomeAssistant, entry_id: str):
     """Return a loaded coordinator for a real config entry."""
@@ -83,13 +137,18 @@ async def ws_workspace(hass, connection, msg):
             "controls": candidate.get("controls", []),
             "classification": coordinator.device_classifications.get(did, "ignore"),
             "training": coordinator.training_state.get(did, {}),
-            "current_power": _candidate_current_power(hass, candidate),
+            "current_power": _candidate_current_power(hass, candidate, coordinator.training_state.get(did, {})),
         })
     state = hass.states.get(coordinator.power_entity)
+    trained_live_w, trained_live_count = _trained_live_power(
+        hass, coordinator.candidate_devices, coordinator.training_state
+    )
     connection.send_result(msg["id"], {
         "entry_id": msg["entry_id"],
         "power_entity": coordinator.power_entity,
         "whole_home_power": state.state if state else None,
+        "trained_live_power_w": trained_live_w,
+        "trained_live_count": trained_live_count,
         "devices": rows,
         "last_training_device_id": getattr(coordinator, "last_training_device_id", None),
     })

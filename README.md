@@ -122,3 +122,13 @@ The card shows the current whole-home power, monitored devices, learned devices,
 - Manual-created devices show a dedicated Manual Training action.
 - Integration display name is AAA Energy Attribution to keep iterative installs easy to find.
 - Auto Quick behavior remains unchanged.
+
+
+## 1.6.14
+Trained-device wattage now reflects current state: direct live HA power when available, otherwise the learned signature is used only while the trained controllable device is ON.
+
+
+## 1.6.16
+- Dashboard now compares the live whole-home meter against currently active trained-device watts.
+- Trained active watts uses direct live HA power when available, otherwise the learned signature for trained devices that are currently ON.
+- Unaccounted home watts is the live whole-home total minus active trained-device watts.
