@@ -97,6 +97,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 raise RuntimeError("Another training session is already active")
             if method=="quick":
                 engine=TrainingEngine("quick")
+            elif method=="manual":
+                engine=TrainingEngine("manual")
             else:
                 engine=TrainingEngine("full_cycle")
             candidate=self.candidate_devices.get(device_id,{})
@@ -152,7 +154,11 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                             await self._call_power(controls, False)
                             control_state = "off"
                         state["status"] = "complete"
-                        state["instruction"] = "Training Complete. Three controlled measurements were captured and saved."
+                        state["instruction"] = (
+                            "Training Complete. One manual electrical cycle was captured and saved."
+                            if method == "manual"
+                            else "Training Complete. Three controlled measurements were captured and saved."
+                        )
                         state["learned"] = True
                         state["completed_at"] = self.hass.loop.time()
                         self.last_training_device_id = device_id

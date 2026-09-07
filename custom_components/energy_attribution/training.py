@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from statistics import median, pstdev
 from typing import Literal
 
-Method = Literal["quick", "full_cycle"]
+Method = Literal["quick", "full_cycle", "manual"]
 
 @dataclass(slots=True)
 class PowerSample:
@@ -28,7 +28,8 @@ class TrainingEngine:
     max_quick_duration_s: float = 120.0
     max_full_cycle_duration_s: float = 8 * 3600.0
     full_cycle_min_active_s: float = 30.0
-    idle_window_s: float = 30.0
+    manual_min_active_s: float = 5.0
+    idle_window_s: float = 5.0
     samples: list[PowerSample] = field(default_factory=list)
     baseline_w: float | None = None
     baseline_noise_w: float = 0.0
@@ -69,6 +70,8 @@ class TrainingEngine:
 
         if self.method == "quick":
             return self._quick_step(s)
+        if self.method == "manual":
+            return self._manual_step(s)
         return self._full_step(s)
 
     def _quick_step(self, s: PowerSample) -> dict:
@@ -142,6 +145,45 @@ class TrainingEngine:
             and any(value > 0.0 for value in values)
         )
 
+    def _manual_step(self, s: PowerSample) -> dict:
+        """Train a device that the integration cannot control.
+
+        The user operates the appliance physically. The whole-home meter is
+        used to detect the electrical ON event, capture the load fingerprint,
+        and then detect the return to the background load. One clean cycle is
+        enough to save a manual signature.
+        """
+        if self.phase == "waiting_for_start":
+            if s.watts >= (self.baseline_w or s.watts) + self.on_threshold_w:
+                self.phase = "capturing"
+                self.cycle_started = s.timestamp
+                self.active_started = s.timestamp
+                self.active_peak_w = s.watts
+            return self.result()
+
+        if self.phase == "capturing":
+            self.active_peak_w = max(self.active_peak_w or s.watts, s.watts)
+            active_for = s.timestamp - (self.cycle_started or s.timestamp)
+            recent = [x.watts for x in self.samples if x.timestamp >= s.timestamp - self.idle_window_s]
+            if active_for >= self.manual_min_active_s and recent and max(abs(v - (self.baseline_w or v)) for v in recent) <= self.return_tolerance_w:
+                # A clean return to the baseline means the user has switched
+                # the appliance off (or its active cycle has ended). Move to a
+                # short validation phase so the UI can clearly show that the
+                # signature is being checked before it is saved.
+                self.phase = "validating"
+            return self.result()
+
+        if self.phase == "validating":
+            recent = [x.watts for x in self.samples if x.timestamp >= s.timestamp - self.idle_window_s]
+            if recent and max(abs(v - (self.baseline_w or v)) for v in recent) <= self.return_tolerance_w:
+                self.completed = True
+                self.phase = "complete"
+            elif self.active_peak_w is not None and s.watts > (self.baseline_w or s.watts) + self.on_threshold_w:
+                self.phase = "capturing"
+            return self.result()
+
+        return self.result()
+
     def _full_step(self, s: PowerSample) -> dict:
         if self.phase == "waiting_for_start" and s.watts >= self.baseline_w + self.on_threshold_w:
             self.phase = "capturing"
@@ -169,7 +211,7 @@ class TrainingEngine:
             peak_delta = median(o.delta_w for o in self.observations)
         elif self.baseline_w is not None:
             peak_delta = max(0.0, max((s.watts for s in self.samples), default=self.baseline_w)-self.baseline_w)
-        if self.method == "full_cycle" and self.cycle_started is not None and self.samples:
+        if self.method in {"full_cycle", "manual"} and self.cycle_started is not None and self.samples:
             duration = max(0.0, self.samples[-1].timestamp-self.cycle_started)
         return {
             "phase": self.phase, "baseline_w": self.baseline_w, "baseline_noise_w": self.baseline_noise_w,

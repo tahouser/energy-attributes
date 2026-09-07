@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-panel-v15";
+const TAG = "energy-attribution-panel-v16";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
     set hass(hass) { this._hass = hass; if (!this._loaded && !this._loading) this._load(); }
@@ -37,6 +37,11 @@ if (!customElements.get(TAG)) {
       const d=this.data.devices.find(x=>x.device_id===id); if(!d) return;
       if(method==='quick') {
         const ok=confirm(`Energy Attribution will automatically turn “${d.name}” ON and OFF during training. Make sure it is safe to operate. Continue?`);
+        if(!ok) return;
+      } else if(method==='manual') {
+        const ok=confirm(`Manual training for “${d.name}” will listen to the Shelly whole-home power signal. No command will be sent to the device.
+
+When you press OK, wait for READY TO START, then operate the appliance normally. Energy Attribution will detect the electrical fingerprint and finish when the load returns to normal.`);
         if(!ok) return;
       }
       await this._ws({type:"energy_attribution/start_training",entry_id:this.entryId,device_id:id,method});
@@ -95,7 +100,7 @@ if (!customElements.get(TAG)) {
       if(!active && resultDevice) {
         const t=resultDevice.training; const complete=t.status==='complete';
         if(complete && !this._closedResult) {
-          html+=`<div class="complete-box"><h2>Training Complete</h2><h3>${this._esc(resultDevice.name)}</h3><p>☑ <b>Training complete — signature saved</b></p>${t.method?`<p>Method: ${this._esc(t.method==='quick'?'Quick ON/OFF':'Full Cycle')}</p>`:''}${t.peak_delta_w!=null?`<p>Measured load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}${t.energy_wh!=null&&t.energy_wh>0?`<p>Additional energy: <b>${(t.energy_wh/1000).toFixed(2)} kWh</b></p>`:''}<button id="close-result">CLOSE</button></div>`;
+          html+=`<div class="complete-box"><h2>Training Complete</h2><h3>${this._esc(resultDevice.name)}</h3><p>☑ <b>Training complete — signature saved</b></p>${t.method?`<p>Method: ${this._esc(t.method==='quick'?'Quick ON/OFF':t.method==='manual'?'Manual':'Full Cycle')}</p>`:''}${t.peak_delta_w!=null?`<p>Measured load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}${t.energy_wh!=null&&t.energy_wh>0?`<p>Additional energy: <b>${(t.energy_wh/1000).toFixed(2)} kWh</b></p>`:''}<button id="close-result">CLOSE</button></div>`;
         } else if(!complete && t.status!=='stopped') {
           html+=`<div class="failure-box"><h2>Training Not Complete</h2><h3>${this._esc(resultDevice.name)}</h3><p>${this._esc(t.error || t.instruction || 'A reliable signature was not captured.')}</p><button data-retry="${this._esc(resultDevice.device_id)}">RETRY</button> <button id="dismiss-result">CLOSE</button></div>`;
         }
@@ -118,7 +123,7 @@ if (!customElements.get(TAG)) {
       });
       this.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>this._train(b.dataset.quick,'quick'));
       this.querySelectorAll('[data-full]').forEach(b=>b.onclick=()=>this._train(b.dataset.full,'full_cycle'));
-      this.querySelectorAll('[data-manual]').forEach(b=>b.onclick=()=>this._manualInfo(b.dataset.manual));
+      this.querySelectorAll('[data-manual]').forEach(b=>b.onclick=()=>this._train(b.dataset.manual,'manual'));
       this.querySelectorAll('[data-retry]').forEach(b=>b.onclick=()=>this._retry(b.dataset.retry));
       this.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>this._stop(b.dataset.stop));
       this.querySelector('#close-result')?.addEventListener('click',()=>{this._closedResult=true;this._render();});
@@ -127,9 +132,9 @@ if (!customElements.get(TAG)) {
     _manualInfo(id){
       const d=this.data.devices.find(x=>x.device_id===id);
       if(!d) return;
-      alert(`Manual training for “${d.name}” will use the Shelly whole-home power signal. No HA command will be sent to this device. The manual listening/fingerprint workflow is the next training step.`);
+      return this._train(id, 'manual');
     }
-    _phaseText(t){const map={baseline:'Establishing the normal background load…',request_on:'Baseline established. Starting test cycle…',waiting_for_on:'Device is ON. Measuring the power increase…',request_off:'Power increase captured. Turning the device OFF…',waiting_for_off:'Device is OFF. Confirming the return to normal power…',cooldown:'Cycle complete. Preparing the next cycle…',waiting_for_start:'Baseline established. Start the appliance now. Monitoring will continue in the background.',capturing:'Cycle detected. Monitoring the complete cycle…',complete:'Training Complete. Review the measured signature, then close this result.',timeout:'Training timed out.'};return t.instruction||map[t.phase]||t.phase||'Waiting…';}
+    _phaseText(t){const map={baseline:'Establishing the normal background load…',request_on:'Baseline established. Starting test cycle…',waiting_for_on:'Device is ON. Measuring the power increase…',request_off:'Power increase captured. Turning the device OFF…',waiting_for_off:'Device is OFF. Confirming the return to normal power…',cooldown:'Cycle complete. Preparing the next cycle…',waiting_for_start:'READY TO START — operate the appliance now. Monitoring the whole-home power signal…',capturing:'FINGERPRINT DETECTED — monitoring the complete electrical cycle…',validating:'DEVICE OFF / VALIDATING — confirming the load returned to normal…',complete:'CYCLE COMPLETE — training signature saved.',timeout:'Training timed out.'};return t.instruction||map[t.phase]||t.phase||'Waiting…';}
     _duration(s){const n=Math.round(s);if(n<60)return `${n}s`;if(n<3600)return `${Math.floor(n/60)}m ${n%60}s`;return `${Math.floor(n/3600)}h ${Math.floor((n%3600)/60)}m`;}
     _esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   }

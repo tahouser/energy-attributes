@@ -151,7 +151,7 @@ async def ws_add_manual_device(hass, connection, msg):
     vol.Required("type"): "energy_attribution/start_training",
     vol.Required("entry_id"): str,
     vol.Required("device_id"): str,
-    vol.Required("method"): vol.In(["quick", "full_cycle"]),
+    vol.Required("method"): vol.In(["quick", "full_cycle", "manual"]),
 })
 @websocket_api.require_admin
 @websocket_api.async_response
