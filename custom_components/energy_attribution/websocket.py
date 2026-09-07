@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
@@ -135,7 +137,7 @@ async def ws_add_manual_device(hass, connection, msg):
         "category": category,
     }
     coordinator.candidate_devices[did] = candidate
-    coordinator.device_classifications[did] = "ignore"
+    coordinator.device_classifications[did] = "monitor"
     hass.config_entries.async_update_entry(
         coordinator.entry,
         options={
@@ -146,6 +148,79 @@ async def ws_add_manual_device(hass, connection, msg):
         },
     )
     connection.send_result(msg["id"], {"saved": True, "device": candidate})
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/list_available_entities",
+    vol.Required("entry_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_list_available_entities(hass, connection, msg):
+    coordinator = _coordinator(hass, msg["entry_id"])
+    registry = er.async_get(hass)
+    used = set()
+    for candidate in coordinator.candidate_devices.values():
+        used.update(m.get("entity_id") for m in candidate.get("measurements", []) if m.get("entity_id"))
+        used.update(c.get("entity_id") for c in candidate.get("controls", []) if c.get("entity_id"))
+    entities = []
+    for entry in registry.entities.values():
+        if entry.entity_id in used or entry.disabled_by is not None:
+            continue
+        state = hass.states.get(entry.entity_id)
+        if state is None:
+            continue
+        if entry.domain not in {"light", "switch", "fan", "climate", "humidifier", "media_player", "vacuum", "water_heater", "sensor"}:
+            continue
+        entities.append({
+            "entity_id": entry.entity_id,
+            "name": state.attributes.get("friendly_name") or entry.name or entry.original_name or entry.entity_id,
+            "domain": entry.domain,
+            "device_id": entry.device_id,
+        })
+    entities.sort(key=lambda x: x["name"].casefold())
+    connection.send_result(msg["id"], {"entities": entities})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/add_entity",
+    vol.Required("entry_id"): str,
+    vol.Required("entity_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_add_entity(hass, connection, msg):
+    coordinator = _coordinator(hass, msg["entry_id"])
+    entity_id = msg["entity_id"]
+    registry = er.async_get(hass)
+    entry = registry.async_get(entity_id)
+    if entry is None or entry.disabled_by is not None:
+        raise ValueError("HA entity was not found or is disabled")
+    state = hass.states.get(entity_id)
+    name = state.attributes.get("friendly_name") if state else None
+    did = entry.device_id or "entity_" + entity_id.replace(".", "_")
+    candidate = coordinator.candidate_devices.get(did)
+    if candidate is None:
+        candidate = {"device_id": did, "name": name or entry.name or entry.original_name or entity_id, "area": "", "manufacturer": "", "model": "", "evidence": "", "controls": [], "measurements": [], "source": "ha", "category": "", "manual_added": True}
+        if entry.device_id:
+            dev = dr.async_get(hass).async_get(entry.device_id)
+            if dev:
+                candidate.update({"name": dev.name_by_user or dev.name or candidate["name"], "manufacturer": dev.manufacturer or "", "model": dev.model or ""})
+        coordinator.candidate_devices[did] = candidate
+    existing_measurements = {m.get("entity_id") for m in candidate.get("measurements", [])}
+    existing_controls = {c.get("entity_id") for c in candidate.get("controls", [])}
+    if entry.domain == "sensor" and entity_id not in existing_measurements:
+        attrs = state.attributes if state else {}
+        candidate.setdefault("measurements", []).append({"entity_id": entity_id, "name": name or entity_id, "kind": attrs.get("device_class", "sensor"), "unit": attrs.get("unit_of_measurement", "")})
+    elif entry.domain != "sensor" and entity_id not in existing_controls:
+        candidate.setdefault("controls", []).append({"entity_id": entity_id, "name": name or entity_id, "domain": entry.domain})
+    candidate["source"] = "ha"
+    candidate["manual_added"] = True
+    candidate["evidence"] = (candidate.get("evidence") + "; " if candidate.get("evidence") else "") + f"Manually selected HA entity: {entity_id}"
+    coordinator.device_classifications[did] = "monitor"
+    coordinator.monitored_entities = [m["entity_id"] for d,c in coordinator.candidate_devices.items() if coordinator.device_classifications.get(d)=="monitor" for m in c.get("measurements", []) if m.get("entity_id")]
+    hass.config_entries.async_update_entry(coordinator.entry, options={**coordinator.entry.options, "candidate_devices": coordinator.candidate_devices, "device_classifications": coordinator.device_classifications, "monitored_entities": coordinator.monitored_entities})
+    connection.send_result(msg["id"], {"saved": True, "device": candidate})
+
 
 @websocket_api.websocket_command({
     vol.Required("type"): "energy_attribution/start_training",
@@ -193,5 +268,5 @@ async def ws_stop_training(hass, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_start_training, ws_retry_training, ws_stop_training):
+    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_retry_training, ws_stop_training):
         websocket_api.async_register_command(hass, handler)

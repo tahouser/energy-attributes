@@ -1,142 +1,38 @@
-const TAG = "energy-attribution-panel-v16";
+const TAG = "energy-attribution-panel-v17";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
-    set hass(hass) { this._hass = hass; if (!this._loaded && !this._loading) this._load(); }
-    connectedCallback() { this._renderLoading(); if (this._hass && !this._loaded) this._load(); }
-    disconnectedCallback() { if (this._timer) clearInterval(this._timer); }
-    _renderLoading() { this.innerHTML = `<ha-card style="display:block;padding:24px"><h2>Energy Attribution</h2><p>Loading workspace…</p></ha-card>`; }
-    _ws(message) {
-      if (!this._hass?.connection?.sendMessagePromise) throw new Error("Home Assistant WebSocket connection is not ready.");
-      return this._hass.connection.sendMessagePromise(message);
-    }
-    async _load() {
-      if (this._loading) return; this._loading = true;
-      try {
-        const r = await this._ws({type:"energy_attribution/list_entries"});
-        if (!r.entries.length) throw new Error("Energy Attribution is not configured.");
-        this.entryId = r.entries[0].entry_id;
-        await this._refresh();
-        this._loaded = true;
-        this._timer = setInterval(() => this._refresh(), 1000);
-      } catch (e) {
-        this.innerHTML = `<ha-card style="display:block;padding:24px"><h2>Energy Attribution</h2><p style="color:var(--error-color)">${this._esc(e.message || e)}</p></ha-card>`;
-      } finally { this._loading = false; }
-    }
-    async _refresh() {
-      if (!this._hass || !this.entryId) return;
-      try { this.data = await this._ws({type:"energy_attribution/workspace",entry_id:this.entryId}); this._render(); } catch(e) { console.error(e); }
-    }
-    async _save() {
-      const ids=[...this.querySelectorAll('input[data-device]:checked')].map(x=>x.dataset.device);
-      await this._ws({type:"energy_attribution/set_monitoring",entry_id:this.entryId,device_ids:ids});
-      this._pendingSelections=null;
-      await this._refresh();
-    }
-    async _train(id, method) {
-      this._closedResult=false;
-      const d=this.data.devices.find(x=>x.device_id===id); if(!d) return;
-      if(method==='quick') {
-        const ok=confirm(`Energy Attribution will automatically turn “${d.name}” ON and OFF during training. Make sure it is safe to operate. Continue?`);
-        if(!ok) return;
-      } else if(method==='manual') {
-        const ok=confirm(`Manual training for “${d.name}” will listen to the Shelly whole-home power signal. No command will be sent to the device.
-
-When you press OK, wait for READY TO START, then operate the appliance normally. Energy Attribution will detect the electrical fingerprint and finish when the load returns to normal.`);
-        if(!ok) return;
-      }
-      await this._ws({type:"energy_attribution/start_training",entry_id:this.entryId,device_id:id,method});
-      await this._refresh();
-    }
-    async _retry(id) { this._closedResult=false; await this._ws({type:"energy_attribution/retry_training",entry_id:this.entryId,device_id:id}); await this._refresh(); }
-    async _stop(id) { await this._ws({type:"energy_attribution/stop_training",entry_id:this.entryId,device_id:id}); await this._refresh(); }
-    _status(t) {
-      if (!t || !t.status) return {label:"Not trained", cls:"nottrained", icon:"☐"};
-      if (t.status === "complete") return {label:"Complete", cls:"complete-status", icon:"☑"};
-      if (t.status === "active") return {label:"In progress", cls:"progress", icon:"◐"};
-      if (t.status === "interrupted") return {label:"Interrupted", cls:"error-status", icon:"⚠"};
-      if (t.status === "error") return {label:"Not complete", cls:"error-status", icon:"☐"};
-      if (t.status === "stopped") return {label:"Not complete", cls:"error-status", icon:"☐"};
-      return {label:"Not trained", cls:"nottrained", icon:"☐"};
-    }
-    _render() {
-      const d=this.data;
-      const devices=d.devices || [];
-      const monitored=devices.filter(x=>x.classification==='monitor');
-      const trained=devices.filter(x=>x.training?.status==='complete' && (x.training?.learned || x.training?.completed));
-      const active=devices.find(x=>x.training?.status==='active');
-      const lastId=d.last_training_device_id;
-      const resultDevice=lastId ? devices.find(x=>x.device_id===lastId) : devices.find(x=>x.training && ["complete","error","interrupted","stopped"].includes(x.training.status) && x.training.device_id);
-      let html=`<style>
-      ha-card{display:block;margin:0;padding:16px} @media (max-width:600px){ha-card{padding:12px}h1{font-size:1.5rem}h2{font-size:1.2rem}.summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.tile{min-width:0;padding:10px}.tile strong{font-size:20px}table{display:block;overflow-x:auto;white-space:nowrap;font-size:13px}td,th{padding:7px 6px}.training-box,.complete-box,.failure-box{padding:12px}button{min-height:40px;margin:3px 2px}}button{margin:4px;padding:8px 12px;cursor:pointer}table{width:100%;border-collapse:collapse}td,th{padding:9px 8px;border-bottom:1px solid var(--divider-color);text-align:left}.muted{color:var(--secondary-text-color)}
-      .status{font-weight:600}.complete-status{color:var(--success-color,var(--primary-color))}.progress{color:var(--primary-color)}.error-status{color:var(--error-color)}.nottrained{color:var(--secondary-text-color)}
-      .summary{display:flex;gap:12px;flex-wrap:wrap}.tile{padding:12px;border:1px solid var(--divider-color);border-radius:8px;min-width:155px}.tile strong{font-size:24px}.training-box{padding:18px;border:2px solid var(--primary-color);border-radius:10px;margin-top:18px}.complete-box{padding:18px;border:2px solid var(--success-color,var(--primary-color));border-radius:10px;margin-top:18px}.failure-box{padding:18px;border:2px solid var(--error-color);border-radius:10px;margin-top:18px}
-      </style><ha-card><h1>Energy Attribution</h1>
-      <p class="muted">Whole-home power: <b>${this._esc(d.whole_home_power ?? '—')} W</b></p>
-      <h2>Commissioning Progress</h2>
-      <div class="summary">
-        <div class="tile"><div class="muted">Monitored</div><strong>${monitored.length}</strong></div>
-        <div class="tile"><div class="muted">Training complete</div><strong>${trained.length} / ${monitored.length}</strong></div>
-        <div class="tile"><div class="muted">Remaining</div><strong>${Math.max(0,monitored.length-trained.length)}</strong></div>
-      </div>
-      <h2>Commissioned Loads</h2><p>☑ Monitor means the load is included in attribution. <b>Training Complete</b> means a usable signature has actually been saved.</p>
-      <div style="margin:10px 0 14px"><button id="add-device">＋ Add Electrical Device</button> <button id="save">Save monitoring selections</button></div>
-      <table><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Source</th><th>Evidence</th><th>Training Status</th><th>Action</th></tr>`;
-      for(const x of devices){
-        const t=x.training||{}; const st=this._status(t); let action='';
-        const isMonitored=this._pendingSelections ? this._pendingSelections.has(x.device_id) : x.classification==='monitor'; const isManual=String(x.source||'').toLowerCase()==='manual';
-        if(isMonitored) {
-          if(t.status==='active') action=`<span>${this._esc(this._phaseText(t))}</span> <button data-stop="${this._esc(x.device_id)}">Stop</button>`;
-          else if(t.status==='complete') action=isManual ? `<button data-manual="${this._esc(x.device_id)}">Manual Training</button>` : `<button data-retry="${this._esc(x.device_id)}">Train Again</button>`;
-          else if(isManual) action=`<button data-manual="${this._esc(x.device_id)}">Manual Training</button>`;
-          else action=`<button data-quick="${this._esc(x.device_id)}">Quick ON/OFF</button> <button data-full="${this._esc(x.device_id)}">Full Cycle</button>`;
-        }
-        html+=`<tr><td><input type="checkbox" data-device="${this._esc(x.device_id)}" ${isMonitored?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="muted">${this._esc(x.model||'')}</span></td><td>${this._esc(x.area||'')}</td><td>${this._esc(x.source==='manual'?'Manual':'HA')}</td><td>${this._esc(x.evidence||'')}</td><td class="status ${st.cls}">${st.icon} ${st.label}</td><td>${action}</td></tr>`;
-      }
-      html+=`</table>`;
-      if(active) {
-        const t=active.training;
-        html+=`<div class="training-box"><h2>Training in progress</h2><h3>${this._esc(active.name)}</h3><p>${this._esc(this._phaseText(t))}</p>${t.method==='quick'&&t.cycles_required?`<p>Cycle: <b>${t.cycles_completed||0} of ${t.cycles_required}</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.peak_delta_w!=null?`<p>Detected load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}<button data-stop="${this._esc(active.device_id)}">Stop</button></div>`;
-      }
-      if(!active && resultDevice) {
-        const t=resultDevice.training; const complete=t.status==='complete';
-        if(complete && !this._closedResult) {
-          html+=`<div class="complete-box"><h2>Training Complete</h2><h3>${this._esc(resultDevice.name)}</h3><p>☑ <b>Training complete — signature saved</b></p>${t.method?`<p>Method: ${this._esc(t.method==='quick'?'Quick ON/OFF':t.method==='manual'?'Manual':'Full Cycle')}</p>`:''}${t.peak_delta_w!=null?`<p>Measured load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.duration_s!=null?`<p>Duration: <b>${this._duration(t.duration_s)}</b></p>`:''}${t.energy_wh!=null&&t.energy_wh>0?`<p>Additional energy: <b>${(t.energy_wh/1000).toFixed(2)} kWh</b></p>`:''}<button id="close-result">CLOSE</button></div>`;
-        } else if(!complete && t.status!=='stopped') {
-          html+=`<div class="failure-box"><h2>Training Not Complete</h2><h3>${this._esc(resultDevice.name)}</h3><p>${this._esc(t.error || t.instruction || 'A reliable signature was not captured.')}</p><button data-retry="${this._esc(resultDevice.device_id)}">RETRY</button> <button id="dismiss-result">CLOSE</button></div>`;
-        }
-      }
-      html+=`</ha-card>`; this.innerHTML=html;
-      this.querySelectorAll('input[data-device]').forEach(box=>box.addEventListener('change',()=>{
-        if(!this._pendingSelections) this._pendingSelections=new Set(devices.filter(x=>x.classification==='monitor').map(x=>x.device_id));
-        if(box.checked) this._pendingSelections.add(box.dataset.device); else this._pendingSelections.delete(box.dataset.device);
-      }));
-      this.querySelector('#save')?.addEventListener('click',()=>this._save());
-      this.querySelector('#add-device')?.addEventListener('click',async()=>{
-        const name=prompt('Name for the electrical device:');
-        if(!name || !name.trim()) return;
-        const category=prompt('Category (for example Appliance, HVAC, Lighting):','Appliance') || 'Appliance';
-        try {
-          await this._ws({type:"energy_attribution/add_manual_device",entry_id:this.entryId,name:name.trim(),category:category.trim() || 'Appliance'});
-          this._pendingSelections=null;
-          await this._refresh();
-        } catch(e) { console.error(e); alert(e?.message || 'Unable to add device'); }
-      });
-      this.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>this._train(b.dataset.quick,'quick'));
-      this.querySelectorAll('[data-full]').forEach(b=>b.onclick=()=>this._train(b.dataset.full,'full_cycle'));
-      this.querySelectorAll('[data-manual]').forEach(b=>b.onclick=()=>this._train(b.dataset.manual,'manual'));
-      this.querySelectorAll('[data-retry]').forEach(b=>b.onclick=()=>this._retry(b.dataset.retry));
-      this.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>this._stop(b.dataset.stop));
-      this.querySelector('#close-result')?.addEventListener('click',()=>{this._closedResult=true;this._render();});
-      this.querySelector('#dismiss-result')?.addEventListener('click',()=>{this._closedResult=true;this._render();});
-    }
-    _manualInfo(id){
-      const d=this.data.devices.find(x=>x.device_id===id);
-      if(!d) return;
-      return this._train(id, 'manual');
-    }
+    set hass(hass) { this._hass=hass; if(!this._loaded&&!this._loading)this._load(); }
+    connectedCallback(){this._renderLoading();if(this._hass&&!this._loaded)this._load();}
+    disconnectedCallback(){if(this._timer)clearInterval(this._timer);}
+    _renderLoading(){this.innerHTML=`<ha-card style="display:block;padding:24px"><h2>EnergyIQ</h2><p>Loading workspace…</p></ha-card>`;}
+    _ws(m){if(!this._hass?.connection?.sendMessagePromise)throw new Error("Home Assistant WebSocket connection is not ready.");return this._hass.connection.sendMessagePromise(m);}
+    async _load(){if(this._loading)return;this._loading=true;try{const r=await this._ws({type:"energy_attribution/list_entries"});if(!r.entries.length)throw new Error("EnergyIQ is not configured.");this.entryId=r.entries[0].entry_id;await this._refresh();this._loaded=true;this._timer=setInterval(()=>this._refresh(),1000);}catch(e){this.innerHTML=`<ha-card style="display:block;padding:24px"><h2>EnergyIQ</h2><p style="color:var(--error-color)">${this._esc(e.message||e)}</p></ha-card>`;}finally{this._loading=false;}}
+    async _refresh(){if(!this._hass||!this.entryId)return;try{this.data=await this._ws({type:"energy_attribution/workspace",entry_id:this.entryId});this._render();}catch(e){console.error(e);}}
+    async _save(){const ids=[...this.querySelectorAll('input[data-device]:checked')].map(x=>x.dataset.device);await this._ws({type:"energy_attribution/set_monitoring",entry_id:this.entryId,device_ids:ids});this._pendingSelections=null;await this._refresh();}
+    async _train(id,method){this._closedResult=false;const d=this.data.devices.find(x=>x.device_id===id);if(!d)return;if(method==='quick'){if(!confirm(`EnergyIQ will automatically turn “${d.name}” ON and OFF during training. Make sure it is safe to operate. Continue?`))return;}else if(method==='manual'){if(!confirm(`Manual training for “${d.name}” listens to the Shelly whole-home power signal. No command will be sent to the device.\n\nWhen you press OK, wait for READY TO START, then operate the appliance normally.`))return;}await this._ws({type:"energy_attribution/start_training",entry_id:this.entryId,device_id:id,method});await this._refresh();this._scrollTraining();}
+    async _retry(id){this._closedResult=false;await this._ws({type:"energy_attribution/retry_training",entry_id:this.entryId,device_id:id});await this._refresh();this._scrollTraining();}
+    async _stop(id){await this._ws({type:"energy_attribution/stop_training",entry_id:this.entryId,device_id:id});await this._refresh();}
+    _scrollTraining(){requestAnimationFrame(()=>this.querySelector('#active-training')?.scrollIntoView({behavior:'smooth',block:'start'}));}
+    _status(t){if(!t||!t.status)return{label:"Not trained",cls:"nottrained",icon:"○"};if(t.status==='complete')return{label:"Trained",cls:"complete-status",icon:"✓"};if(t.status==='active')return{label:"Training",cls:"progress",icon:"◐"};if(t.status==='interrupted')return{label:"Interrupted",cls:"error-status",icon:"!"};return{label:"Not trained",cls:"error-status",icon:"○"};}
+    _currentPower(x){if(x.current_power!=null)return `${Number(x.current_power).toFixed(0)} W`;if(x.training?.status==='complete'&&x.training?.learned_signature?.load_w!=null)return `~${Number(x.training.learned_signature.load_w).toFixed(0)} W*`;return '—';}
+    async _addMenu(){const choice=prompt('Add to EnergyIQ:\n\n1 = Manual electrical device\n2 = Choose an HA entity\n\nEnter 1 or 2:','1');if(choice==='1'){const name=prompt('Name for the electrical device:');if(!name?.trim())return;const category=prompt('Category (for example Appliance, HVAC, Lighting):','Appliance')||'Appliance';await this._ws({type:'energy_attribution/add_manual_device',entry_id:this.entryId,name:name.trim(),category:category.trim()||'Appliance'});this._pendingSelections=null;await this._refresh();return;}if(choice==='2'){await this._chooseEntity();}}
+    async _chooseEntity(){const r=await this._ws({type:'energy_attribution/list_available_entities',entry_id:this.entryId});if(!r.entities?.length){alert('No additional HA entities are available.');return;}const lines=r.entities.map((e,i)=>`${i+1} = ${e.name} [${e.domain}]`).join('\n');const answer=prompt(`Choose an HA entity not already discovered:\n\n${lines}\n\nEnter the number:`);const n=Number(answer);if(!Number.isInteger(n)||n<1||n>r.entities.length)return;await this._ws({type:'energy_attribution/add_entity',entry_id:this.entryId,entity_id:r.entities[n-1].entity_id});this._pendingSelections=null;await this._refresh();}
+    _render(){const d=this.data,devices=d.devices||[],monitored=devices.filter(x=>x.classification==='monitor'),trained=monitored.filter(x=>x.training?.status==='complete'),active=devices.find(x=>x.training?.status==='active'),lastId=d.last_training_device_id,resultDevice=lastId?devices.find(x=>x.device_id===lastId):null;let html=`<style>
+      :host{display:block}.wrap{max-width:1400px;margin:0 auto}.hero{padding:18px 20px 8px}.hero h1{margin:0 0 4px;font-size:28px}.sub{color:var(--secondary-text-color)}.dash{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:12px;margin:12px 0 20px}.tile{padding:15px;border:1px solid var(--divider-color);border-radius:10px;background:var(--card-background-color)}.tile .label{color:var(--secondary-text-color);font-size:13px}.tile strong{display:block;font-size:26px;margin-top:4px}.training-box{padding:18px;border:2px solid var(--primary-color);border-radius:12px;margin:0 0 20px;background:var(--card-background-color)}.training-box h2{margin-top:0}.actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 14px}button{margin:0;padding:8px 12px;cursor:pointer}.primary{font-weight:600}.table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;table-layout:auto}td,th{padding:9px 10px;border-bottom:1px solid var(--divider-color);text-align:left;vertical-align:middle}th{font-size:12px;color:var(--secondary-text-color);font-weight:600;white-space:nowrap}.monitor-box{width:20px;height:20px;accent-color:var(--primary-color);vertical-align:middle}.status{font-weight:600;white-space:nowrap}.complete-status{color:var(--success-color,var(--primary-color))}.progress{color:var(--primary-color)}.error-status{color:var(--error-color)}.nottrained{color:var(--secondary-text-color)}.source{white-space:nowrap}.method{font-size:12px;color:var(--secondary-text-color)}.new-row{background:color-mix(in srgb,var(--primary-color) 7%,transparent)}.unknown{color:var(--secondary-text-color)}.note{font-size:12px;color:var(--secondary-text-color)}.complete-box{padding:18px;border:2px solid var(--success-color,var(--primary-color));border-radius:10px;margin-top:18px}.failure-box{padding:18px;border:2px solid var(--error-color);border-radius:10px;margin-top:18px}@media(max-width:800px){.dash{grid-template-columns:repeat(2,minmax(0,1fr))}.hero{padding:12px}.tile strong{font-size:21px}}
+      </style><div class="wrap"><div class="hero"><h1>EnergyIQ</h1><div class="sub">Whole-home electrical intelligence</div></div>
+      <div class="dash"><div class="tile"><div class="label">Home power now</div><strong>${d.whole_home_power!=null?Number(d.whole_home_power).toFixed(0)+' W':'—'}</strong></div><div class="tile"><div class="label">Monitored loads</div><strong>${monitored.length}</strong></div><div class="tile"><div class="label">Trained</div><strong>${trained.length} / ${monitored.length}</strong></div><div class="tile"><div class="label">Untrained</div><strong>${Math.max(0,monitored.length-trained.length)}</strong></div></div>`;
+      if(active){const t=active.training;html+=`<div id="active-training" class="training-box"><h2>🔴 Active Training</h2><h3>${this._esc(active.name)}</h3><p><b>${this._esc(this._phaseText(t))}</b></p>${t.method==='quick'&&t.cycles_required?`<p>Cycle <b>${t.cycles_completed||0} of ${t.cycles_required}</b></p>`:''}${t.baseline_w!=null?`<p>Baseline: <b>${Number(t.baseline_w).toFixed(0)} W</b></p>`:''}${t.peak_delta_w!=null?`<p>Detected load: <b>${Number(t.peak_delta_w).toFixed(0)} W</b></p>`:''}<button data-stop="${this._esc(active.device_id)}">Stop training</button></div>`;}
+      html+=`<h2>Current Energy Dashboard</h2><p class="note">Live home power is measured directly by the whole-home meter. Device values become available as EnergyIQ's attribution engine identifies learned signatures; asterisked values are learned signature magnitude, not a live attribution.</p><div class="table-wrap"><table><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Source</th><th>Current Power</th><th>Status</th><th>Training Method</th><th>Action</th></tr>`;
+      const ordered=[...devices].sort((a,b)=>{const am=String(a.source||'').toLowerCase()==='manual',bm=String(b.source||'').toLowerCase()==='manual';if(am!==bm)return am?-1:1;return String(a.name).localeCompare(String(b.name));});
+      for(const x of ordered){const t=x.training||{},st=this._status(t),isManual=String(x.source||'').toLowerCase()==='manual',isMonitored=this._pendingSelections?this._pendingSelections.has(x.device_id):x.classification==='monitor';let action='';if(isMonitored){if(t.status==='active')action=`<span>${this._esc(this._phaseText(t))}</span> <button data-stop="${this._esc(x.device_id)}">Stop</button>`;else if(isManual)action=`<button data-manual="${this._esc(x.device_id)}">${t.status==='complete'?'Retrain Manual':'Manual Training'}</button>`;else action=t.status==='complete'?`<button data-retry="${this._esc(x.device_id)}">Train Again</button>`:`<button data-quick="${this._esc(x.device_id)}">Quick ON/OFF</button> <button data-full="${this._esc(x.device_id)}">Full Cycle</button>`;}
+        html+=`<tr class="${x.manual_added?'new-row':''}"><td><input class="monitor-box" type="checkbox" data-device="${this._esc(x.device_id)}" ${isMonitored?'checked':''}></td><td><b>${this._esc(x.name)}</b><br><span class="method">${this._esc(x.model||x.category||'')}</span></td><td>${this._esc(x.area||'')}</td><td class="source">${isManual?'Manual':'HA'}</td><td>${this._currentPower(x)}</td><td class="status ${st.cls}">${st.icon} ${st.label}</td><td>${t.method?this._esc(t.method==='quick'?'Auto — Quick':t.method==='full_cycle'?'Auto — Long Run':'Manual'):'—'}</td><td>${action}</td></tr>`;}
+      html+=`</table></div><div class="actions"><button id="add-device" class="primary">＋ Add Device / Entity</button><button id="save" class="primary">Save monitoring selections</button></div><p class="note">New devices and manually selected entities are included immediately. Unchecking a device changes the pending selection; it is committed only when you press <b>Save monitoring selections</b>.</p>`;
+      if(!active&&resultDevice&&!this._closedResult){const t=resultDevice.training;if(t.status==='complete')html+=`<div class="complete-box"><h2>Training Complete</h2><h3>${this._esc(resultDevice.name)}</h3><p>✓ Signature saved.</p><button id="close-result">CLOSE</button></div>`;}
+      html+=`</div>`;this.innerHTML=html;
+      this.querySelectorAll('input[data-device]').forEach(box=>box.addEventListener('change',()=>{if(!this._pendingSelections)this._pendingSelections=new Set(devices.filter(x=>x.classification==='monitor').map(x=>x.device_id));if(box.checked)this._pendingSelections.add(box.dataset.device);else this._pendingSelections.delete(box.dataset.device);}));
+      this.querySelector('#save')?.addEventListener('click',()=>this._save());this.querySelector('#add-device')?.addEventListener('click',()=>this._addMenu());this.querySelectorAll('[data-quick]').forEach(b=>b.onclick=()=>this._train(b.dataset.quick,'quick'));this.querySelectorAll('[data-full]').forEach(b=>b.onclick=()=>this._train(b.dataset.full,'full_cycle'));this.querySelectorAll('[data-manual]').forEach(b=>b.onclick=()=>this._train(b.dataset.manual,'manual'));this.querySelectorAll('[data-retry]').forEach(b=>b.onclick=()=>this._retry(b.dataset.retry));this.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>this._stop(b.dataset.stop));this.querySelector('#close-result')?.addEventListener('click',()=>{this._closedResult=true;this._render();});}
     _phaseText(t){const map={baseline:'Establishing the normal background load…',request_on:'Baseline established. Starting test cycle…',waiting_for_on:'Device is ON. Measuring the power increase…',request_off:'Power increase captured. Turning the device OFF…',waiting_for_off:'Device is OFF. Confirming the return to normal power…',cooldown:'Cycle complete. Preparing the next cycle…',waiting_for_start:'READY TO START — operate the appliance now. Monitoring the whole-home power signal…',capturing:'FINGERPRINT DETECTED — monitoring the complete electrical cycle…',validating:'DEVICE OFF / VALIDATING — confirming the load returned to normal…',complete:'CYCLE COMPLETE — training signature saved.',timeout:'Training timed out.'};return t.instruction||map[t.phase]||t.phase||'Waiting…';}
-    _duration(s){const n=Math.round(s);if(n<60)return `${n}s`;if(n<3600)return `${Math.floor(n/60)}m ${n%60}s`;return `${Math.floor(n/3600)}h ${Math.floor((n%3600)/60)}m`;}
     _esc(v){return String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
   }
-  customElements.define(TAG, EnergyAttributionPanel);
+  customElements.define(TAG,EnergyAttributionPanel);
 }
