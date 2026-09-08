@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-panel-v32";
+const TAG = "energy-attribution-panel-v34";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
     constructor(){super();this._listMode="monitored";}
@@ -57,18 +57,20 @@ if (!customElements.get(TAG)) {
             if(!q)return true;
             return [e.name,e.entity_id,e.domain,e.state,e.hvac_action].some(v=>String(v||'').toLowerCase().includes(q));
           });
-          choice.innerHTML=filtered.map(e=>{const state=e.hvac_action||e.state||'';const suffix=state?` — ${this._esc(state)}`:'';const label=e.monitored?' [Already monitored]':e.already_added?' [Adopted — not monitored]':'';return `<option value="${this._esc(e.entity_id)}" data-added="${e.already_added?'1':'0'}" data-monitored="${e.monitored?'1':'0'}">${this._esc(e.name)} — ${this._esc(e.entity_id)}${suffix}${label}</option>`;}).join('');
+          choice.innerHTML=filtered.map(e=>{const state=e.hvac_action||e.state||'';const suffix=state?` — ${this._esc(state)}`:'';const label=e.monitored?' [Already monitored]':e.already_added?' [Adopted — not monitored]':'';return `<option value="${this._esc(e.entity_id)}">${this._esc(e.name)} — ${this._esc(e.entity_id)}${suffix}${label}</option>`;}).join('');
           count.textContent=`Showing ${filtered.length} of ${entities.length} enabled entities`;
           if(filtered.length)choice.selectedIndex=0;
-          const selected=filtered[choice.selectedIndex];
-          addButton.disabled=!!selected?.monitored;
-          addButton.textContent=selected?.monitored?'Already Monitored':selected?.already_added?'Add to Monitoring':'Add Entity';
+          updateSelection();
         };
         search.addEventListener('input',renderEntities);
         domain.addEventListener('change',renderEntities);
-        choice.addEventListener('change',()=>{const selected=entities.find(e=>e.entity_id===choice.value);addButton.disabled=!!selected?.monitored;addButton.textContent=selected?.monitored?'Already Monitored':selected?.already_added?'Add to Monitoring':'Add Entity';});
+        const ownership=modal.querySelector('#entity-ownership');
+        const updateSelection=()=>{const selected=entities.find(e=>e.entity_id===choice.value);const matches=selected?.candidate_matches||[];if(!selected){addButton.disabled=true;addButton.textContent='Add Entity';ownership.textContent='';return;}addButton.disabled=false;addButton.textContent=selected.monitored?'Verify / Repair Monitoring':selected.already_added?'Add to Monitoring':'Add Entity';if(matches.length){ownership.innerHTML=matches.map(m=>`EnergyIQ load: <b>${this._esc(m.name)}</b> · ${this._esc(m.device_id)} · ${this._esc(m.classification)}`).join('<br>');}else ownership.textContent='Not currently associated with an EnergyIQ load.';};
+        // Add the ownership readout after the entity selector.
+        choice.insertAdjacentHTML('afterend','<div id="entity-ownership" class="note" style="margin-top:8px;min-height:18px"></div>');
+        choice.addEventListener('change',updateSelection);
         modal.querySelector('#cancel-add').onclick=()=>modal.remove();
-        modal.querySelector('#add-entity').onclick=async()=>{const entity_id=choice.value;if(!entity_id)return;const selected=entities.find(e=>e.entity_id===entity_id);if(selected?.monitored)return;try{const result=await this._ws({type:'energy_attribution/add_entity',entry_id:this.entryId,entity_id});this._pendingSelections=null;this._listMode='monitored';modal.remove();await this._refresh();this._showNotice(`Added to Monitored: ${result?.device?.name||selected?.name||entity_id}`);}catch(e){alert(`EnergyIQ could not add the entity: ${e.message||e}`);}};
+        modal.querySelector('#add-entity').onclick=async()=>{const entity_id=choice.value;if(!entity_id)return;const selected=entities.find(e=>e.entity_id===entity_id);try{const result=await this._ws({type:'energy_attribution/add_entity',entry_id:this.entryId,entity_id});this._pendingSelections=null;this._listMode='monitored';modal.remove();await this._refresh();const load=result?.device?.name||selected?.name||entity_id;const matches=result?.candidate_matches||[];this._showNotice(matches.length?`Monitoring verified: ${load}`:`Added to Monitored: ${load}`);}catch(e){alert(`EnergyIQ could not add the entity: ${e.message||e}`);}};
         renderEntities();
         search.focus();
       };

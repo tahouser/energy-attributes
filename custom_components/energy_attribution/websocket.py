@@ -288,6 +288,16 @@ async def ws_list_available_entities(hass, connection, msg):
             continue
         state = hass.states.get(entry.entity_id)
         attrs = state.attributes if state is not None else {}
+        matches = []
+        for did, candidate in coordinator.candidate_devices.items():
+            attached = [*(candidate.get("measurements", []) or []), *(candidate.get("controls", []) or [])]
+            if any(isinstance(item, dict) and item.get("entity_id") == entry.entity_id for item in attached):
+                matches.append({
+                    "device_id": did,
+                    "name": candidate.get("name", did),
+                    "classification": coordinator.device_classifications.get(did, "ignore"),
+                    "source": candidate.get("source", "ha"),
+                })
         entities.append({
             "entity_id": entry.entity_id,
             "name": attrs.get("friendly_name") or entry.name or entry.original_name or entry.entity_id,
@@ -295,9 +305,10 @@ async def ws_list_available_entities(hass, connection, msg):
             "device_id": entry.device_id,
             "state": state.state if state is not None else "unavailable",
             "hvac_action": attrs.get("hvac_action") if entry.domain == "climate" else None,
-            "already_added": entry.entity_id in used,
-            "monitored": entry.entity_id in monitored_entities,
-            "candidate_device_id": entity_candidate.get(entry.entity_id),
+            "already_added": bool(matches),
+            "monitored": any(m["classification"] == "monitor" for m in matches),
+            "candidate_device_id": matches[0]["device_id"] if matches else None,
+            "candidate_matches": matches,
         })
     entities.sort(key=lambda x: x["name"].casefold())
     connection.send_result(msg["id"], {"entities": entities})
@@ -320,14 +331,30 @@ async def ws_add_entity(hass, connection, msg):
     state = hass.states.get(entity_id)
     name = state.attributes.get("friendly_name") if state else None
     # The initial EnergyIQ inventory is intentionally curated at the HA-device
-    # level.  Add Entity is the escape hatch for a load that was not included
-    # in that initial inventory.  If the selected entity already belongs to an
-    # EnergyIQ candidate, adopt it into that candidate.  Otherwise create a
-    # distinct EnergyIQ candidate keyed to the selected entity, even when HA
-    # has a device_id for it.  This prevents an out-of-band entity from being
-    # silently merged into an unrelated/previously discovered load.
-    device_did = entry.device_id
-    did = device_did if device_did in coordinator.candidate_devices else "entity_" + entity_id.replace(".", "_")
+    # level. Add Entity is the escape hatch for a specific HA entity that was
+    # not included in that initial inventory. A selected entity is therefore
+    # its own EnergyIQ load unless that exact entity is already attached to an
+    # existing candidate. Do NOT inherit the HA device candidate merely because
+    # the device already has another monitored entity; that made unrelated
+    # entities appear as "Already monitored" and prevented them from being
+    # added as their own load.
+    existing_did = None
+    for candidate_did, existing_candidate in coordinator.candidate_devices.items():
+        attached = [
+            *(existing_candidate.get("measurements", []) or []),
+            *(existing_candidate.get("controls", []) or []),
+        ]
+        if any(isinstance(item, dict) and item.get("entity_id") == entity_id for item in attached):
+            existing_did = candidate_did
+            break
+
+    did = existing_did or "entity_" + entity_id.replace(".", "_")
+    if did in coordinator.candidate_devices and existing_did is None:
+        base_did = did
+        n = 2
+        while did in coordinator.candidate_devices:
+            did = f"{base_did}_{n}"
+            n += 1
     candidate = coordinator.candidate_devices.get(did)
     if candidate is None:
         candidate = {"device_id": did, "name": name or entry.name or entry.original_name or entity_id, "area": "", "manufacturer": "", "model": "", "evidence": "", "controls": [], "measurements": [], "source": "ha", "category": "", "manual_added": True}
@@ -348,8 +375,41 @@ async def ws_add_entity(hass, connection, msg):
     candidate["evidence"] = (candidate.get("evidence") + "; " if candidate.get("evidence") else "") + f"Manually selected HA entity: {entity_id}"
     coordinator.device_classifications[did] = "monitor"
     coordinator.monitored_entities = _monitored_entity_ids(coordinator)
-    hass.config_entries.async_update_entry(coordinator.entry, options={**coordinator.entry.options, "candidate_devices": coordinator.candidate_devices, "device_classifications": coordinator.device_classifications, "monitored_entities": coordinator.monitored_entities})
-    connection.send_result(msg["id"], {"saved": True, "action": "added_to_monitoring", "device": candidate, "device_id": did})
+    # Persist the complete candidate/classification state. This is deliberately
+    # separate from the legacy monitored_entities list: the workspace is load
+    # based, while monitored_entities is only a compatibility/index field.
+    hass.config_entries.async_update_entry(
+        coordinator.entry,
+        options={
+            **coordinator.entry.options,
+            "candidate_devices": coordinator.candidate_devices,
+            "device_classifications": coordinator.device_classifications,
+            "monitored_entities": coordinator.monitored_entities,
+        },
+    )
+    # Return enough ownership information to diagnose stale/duplicate entity
+    # associations instead of allowing the UI to report only "Already Monitored".
+    matches = []
+    for candidate_did, existing_candidate in coordinator.candidate_devices.items():
+        attached = [*(existing_candidate.get("measurements", []) or []), *(existing_candidate.get("controls", []) or [])]
+        if any(isinstance(item, dict) and item.get("entity_id") == entity_id for item in attached):
+            matches.append({
+                "device_id": candidate_did,
+                "name": existing_candidate.get("name", candidate_did),
+                "classification": coordinator.device_classifications.get(candidate_did, "ignore"),
+                "source": existing_candidate.get("source", "ha"),
+            })
+    connection.send_result(
+        msg["id"],
+        {
+            "saved": True,
+            "action": "already_monitored" if existing_did else "added_to_monitoring",
+            "device": candidate,
+            "device_id": did,
+            "entity_id": entity_id,
+            "candidate_matches": matches,
+        },
+    )
 
 
 @websocket_api.websocket_command({
