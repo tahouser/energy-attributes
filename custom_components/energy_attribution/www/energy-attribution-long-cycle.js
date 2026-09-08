@@ -34,17 +34,17 @@
 
   const esc = s => String(s ?? "").replace(/[&<>\"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
 
-  function removeOverlay(panel) {
-    panel.querySelector("#energyiq-long-cycle-overlay")?.remove();
+  function removeOverlay() {
+    document.getElementById("energyiq-long-cycle-overlay")?.remove();
   }
 
   function renderOverlay(panel, device) {
     if (!device?.training || device.training.status !== "active" || device.training.method !== "full_cycle") {
-      removeOverlay(panel);
+      removeOverlay();
       return;
     }
     const t = device.training;
-    let box = panel.querySelector("#energyiq-long-cycle-overlay");
+    let box = document.getElementById("energyiq-long-cycle-overlay");
     if (!box) {
       box = document.createElement("div");
       box.id = "energyiq-long-cycle-overlay";
