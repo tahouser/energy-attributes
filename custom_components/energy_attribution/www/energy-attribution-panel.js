@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-panel-v29";
+const TAG = "energy-attribution-panel-v30";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
     constructor(){super();this._listMode="monitored";}
@@ -43,10 +43,11 @@ if (!customElements.get(TAG)) {
         if(!r.entities?.length){modal.querySelector('.modal').innerHTML=`<h2>Choose HA Entity</h2><p>No additional HA entities are available.</p><div class="modal-actions"><button id="cancel-add">Close</button></div>`;modal.querySelector('#cancel-add').onclick=()=>modal.remove();return;}
         const entities=r.entities;
         const domains=[...new Set(entities.map(e=>e.domain).filter(Boolean))].sort();
-        modal.querySelector('.modal').innerHTML=`<h2>Choose HA Entity</h2><p class="note">Search by friendly name, entity ID, or domain. Use the domain filter to quickly find things such as <b>Climate</b> entities.</p><div class="entity-filters"><input id="entity-search" type="search" placeholder="Search entities…" autocomplete="off" aria-label="Search HA entities"><select id="entity-domain" aria-label="Filter by entity domain"><option value="">All domains</option>${domains.map(d=>`<option value="${this._esc(d)}">${this._esc(d.charAt(0).toUpperCase()+d.slice(1))}</option>`).join('')}</select></div><div id="entity-count" class="note"></div><select id="entity-choice" size="10" aria-label="Available HA entities"></select><div class="modal-actions"><button id="add-entity" class="primary">Add Entity</button><button id="cancel-add">Cancel</button></div>`;
+        modal.querySelector('.modal').innerHTML=`<h2>Choose HA Entity</h2><p class="note">Search all enabled Home Assistant entities by friendly name, entity ID, domain, state, or HVAC action.</p><div class="entity-filters"><input id="entity-search" type="search" placeholder="Search entities…" autocomplete="off" aria-label="Search HA entities"><select id="entity-domain" aria-label="Filter by entity domain"><option value="">All domains</option>${domains.map(d=>`<option value="${this._esc(d)}">${this._esc(d.charAt(0).toUpperCase()+d.slice(1))}</option>`).join('')}</select></div><div id="entity-count" class="note"></div><select id="entity-choice" size="10" aria-label="Available HA entities"></select><div class="modal-actions"><button id="add-entity" class="primary">Add Entity</button><button id="cancel-add">Cancel</button></div>`;
         const search=modal.querySelector('#entity-search');
         const domain=modal.querySelector('#entity-domain');
         const choice=modal.querySelector('#entity-choice');
+        const addButton=modal.querySelector('#add-entity');
         const count=modal.querySelector('#entity-count');
         const renderEntities=()=>{
           const q=(search.value||'').trim().toLowerCase();
@@ -56,14 +57,18 @@ if (!customElements.get(TAG)) {
             if(!q)return true;
             return [e.name,e.entity_id,e.domain,e.state,e.hvac_action].some(v=>String(v||'').toLowerCase().includes(q));
           });
-          choice.innerHTML=filtered.map(e=>{const state=e.hvac_action||e.state||'';const suffix=state?` — ${this._esc(state)}`:'';return `<option value="${this._esc(e.entity_id)}">${this._esc(e.name)} — ${this._esc(e.entity_id)}${suffix}</option>`;}).join('');
-          count.textContent=`Showing ${filtered.length} of ${entities.length} available entities`;
+          choice.innerHTML=filtered.map(e=>{const state=e.hvac_action||e.state||'';const suffix=state?` — ${this._esc(state)}`:'';const added=e.already_added?' [Already added]':'';return `<option value="${this._esc(e.entity_id)}" data-added="${e.already_added?'1':'0'}">${this._esc(e.name)} — ${this._esc(e.entity_id)}${suffix}${added}</option>`;}).join('');
+          count.textContent=`Showing ${filtered.length} of ${entities.length} enabled entities`;
           if(filtered.length)choice.selectedIndex=0;
+          const selected=filtered[choice.selectedIndex];
+          addButton.disabled=!!selected?.already_added;
+          addButton.textContent=selected?.already_added?'Already Added':'Add Entity';
         };
         search.addEventListener('input',renderEntities);
         domain.addEventListener('change',renderEntities);
+        choice.addEventListener('change',()=>{const selected=entities.find(e=>e.entity_id===choice.value);addButton.disabled=!!selected?.already_added;addButton.textContent=selected?.already_added?'Already Added':'Add Entity';});
         modal.querySelector('#cancel-add').onclick=()=>modal.remove();
-        modal.querySelector('#add-entity').onclick=async()=>{const entity_id=choice.value;if(!entity_id)return;await this._ws({type:'energy_attribution/add_entity',entry_id:this.entryId,entity_id});this._pendingSelections=null;modal.remove();await this._refresh();};
+        modal.querySelector('#add-entity').onclick=async()=>{const entity_id=choice.value;if(!entity_id)return;const selected=entities.find(e=>e.entity_id===entity_id);if(selected?.already_added)return;await this._ws({type:'energy_attribution/add_entity',entry_id:this.entryId,entity_id});this._pendingSelections=null;modal.remove();await this._refresh();};
         renderEntities();
         search.focus();
       };

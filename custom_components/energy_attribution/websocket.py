@@ -249,20 +249,22 @@ async def ws_list_available_entities(hass, connection, msg):
         used.update(c.get("entity_id") for c in candidate.get("controls", []) if c.get("entity_id"))
     entities = []
     for entry in registry.entities.values():
-        if entry.entity_id in used or entry.disabled_by is not None:
+        # The Add Entity dialog is a complete browser of enabled HA entities,
+        # not an electrical-load candidate filter. Keep disabled registry
+        # entries out because they are not selectable in HA, but include every
+        # enabled domain and entities without a current State object.
+        if entry.disabled_by is not None:
             continue
         state = hass.states.get(entry.entity_id)
-        if state is None:
-            continue
-        if entry.domain not in {"light", "switch", "fan", "climate", "humidifier", "media_player", "vacuum", "water_heater", "sensor"}:
-            continue
+        attrs = state.attributes if state is not None else {}
         entities.append({
             "entity_id": entry.entity_id,
-            "name": state.attributes.get("friendly_name") or entry.name or entry.original_name or entry.entity_id,
+            "name": attrs.get("friendly_name") or entry.name or entry.original_name or entry.entity_id,
             "domain": entry.domain,
             "device_id": entry.device_id,
-            "state": state.state,
-            "hvac_action": state.attributes.get("hvac_action") if entry.domain == "climate" else None,
+            "state": state.state if state is not None else "unavailable",
+            "hvac_action": attrs.get("hvac_action") if entry.domain == "climate" else None,
+            "already_added": entry.entity_id in used,
         })
     entities.sort(key=lambda x: x["name"].casefold())
     connection.send_result(msg["id"], {"entities": entities})
