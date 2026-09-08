@@ -261,6 +261,8 @@ async def ws_list_available_entities(hass, connection, msg):
             "name": state.attributes.get("friendly_name") or entry.name or entry.original_name or entry.entity_id,
             "domain": entry.domain,
             "device_id": entry.device_id,
+            "state": state.state,
+            "hvac_action": state.attributes.get("hvac_action") if entry.domain == "climate" else None,
         })
     entities.sort(key=lambda x: x["name"].casefold())
     connection.send_result(msg["id"], {"entities": entities})
