@@ -9,6 +9,7 @@ from homeassistant.components.http import StaticPathConfig
 from .const import DOMAIN
 from .coordinator import EnergyAttributionCoordinator
 from .websocket import async_register as async_register_websocket
+from .long_cycle import async_register as async_register_long_cycle
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energy-attribution-static"
@@ -17,6 +18,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     data = hass.data.setdefault(DOMAIN, {})
     if not data.get("_websocket_registered"):
         async_register_websocket(hass)
+        await async_register_long_cycle(hass)
         data["_websocket_registered"] = True
     if not data.get("_panel_registered"):
         await hass.http.async_register_static_paths([
@@ -26,7 +28,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass=hass,
             frontend_url_path="energy-attribution",
             webcomponent_name="energy-attribution-panel-v35",
-            module_url=f"{URL_BASE}/energy-attribution-loader.js?v=1",
+            module_url=f"{URL_BASE}/energy-attribution-loader.js?v=2",
             sidebar_title="EnergyIQ",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
