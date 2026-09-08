@@ -50,6 +50,7 @@ class TrainingEngine:
     _off_samples: list[float] = field(default_factory=list)
     _on_capture_w: float | None = None
     cycles_required: int = 3
+    _end_requested: bool = False
 
     def add_sample(self, timestamp: float, watts: float) -> dict:
         if watts != watts or watts < 0:
@@ -82,24 +83,15 @@ class TrainingEngine:
     def _quick_step(self, s: PowerSample) -> dict:
         # Quick training is a controlled test. Once we turn the target ON,
         # timing—not whole-home event detection—controls when we turn it OFF.
-        # The meter is used to measure the resulting delta, not to authorize
-        # the safety-critical OFF command.
         if self.phase == "request_on":
             return self.result(action="turn_on")
         if self.phase == "waiting_for_on":
             self._on_samples.append(s.watts)
-            # Kasa/LED dimmers and other electronic loads may ramp for a while
-            # after the entity turns on. Keep the established deterministic
-            # control behavior, but give the electrical signal more time to reach
-            # its normal operating plateau.
             if (
                 self.active_started is not None
                 and self._on_capture_w is None
                 and s.timestamp - self.active_started >= max(0.0, self.quick_on_measurement_s - self.quick_capture_lead_s)
             ):
-                # Capture the stabilized ON reading shortly before the controlled
-                # ON interval ends, but keep the target ON until the full 3-second
-                # interval has elapsed. No transient/ramp analysis is performed.
                 self._on_capture_w = s.watts
             if self.active_started is not None and s.timestamp - self.active_started >= self.quick_on_measurement_s:
                 self.phase = "request_off"
@@ -108,15 +100,6 @@ class TrainingEngine:
         elif self.phase == "waiting_for_off":
             self._off_samples.append(s.watts)
             if self.active_started is not None and s.timestamp - self.active_started >= self.quick_off_settle_s:
-                # Use the end of each measurement window rather than the full
-                # window. This avoids LED/dimmer startup transients pulling the
-                # learned signature down, and using the post-OFF plateau instead
-                # of the original baseline compensates for unrelated whole-home
-                # load drift during the test.
-                # Use the final stabilized readings rather than a percentage
-                # of the measurement window. The purpose of Quick Training is
-                # simply to learn the steady electrical delta after the load and
-                # meter have had time to settle.
                 on_w = self._on_capture_w if self._on_capture_w is not None else (self._on_samples[-1] if self._on_samples else (self.baseline_w or s.watts))
                 off_w = self._off_samples[-1] if self._off_samples else s.watts
                 delta = max(0.0, on_w - off_w)
@@ -163,26 +146,11 @@ class TrainingEngine:
             self._off_hits = 0
 
     def _quick_valid(self) -> bool:
-        # Quick training is a controlled causal test. The integration itself
-        # operated the target exactly three times, so whole-home meter variation
-        # must not reject an otherwise valid training session.  The three measured
-        # observations are retained and the median is used as the learned load.
-        # We only reject the session when the meter produced no measurable positive
-        # response at all; that means there is no usable signature to save.
         values = [o.delta_w for o in self.observations]
-        return (
-            len(values) == self.cycles_required
-            and any(value > 0.0 for value in values)
-        )
+        return len(values) == self.cycles_required and any(value > 0.0 for value in values)
 
     def _manual_step(self, s: PowerSample) -> dict:
-        """Train a device that the integration cannot control.
-
-        The user operates the appliance physically. The whole-home meter is
-        used to detect the electrical ON event, capture the load fingerprint,
-        and then detect the return to the background load. One clean cycle is
-        enough to save a manual signature.
-        """
+        """Train a device that the integration cannot control."""
         if self.phase == "waiting_for_start":
             if s.watts >= (self.baseline_w or s.watts) + self.on_threshold_w:
                 self.phase = "capturing"
@@ -190,19 +158,13 @@ class TrainingEngine:
                 self.active_started = s.timestamp
                 self.active_peak_w = s.watts
             return self.result()
-
         if self.phase == "capturing":
             self.active_peak_w = max(self.active_peak_w or s.watts, s.watts)
             active_for = s.timestamp - (self.cycle_started or s.timestamp)
             recent = [x.watts for x in self.samples if x.timestamp >= s.timestamp - self.idle_window_s]
             if active_for >= self.manual_min_active_s and recent and max(abs(v - (self.baseline_w or v)) for v in recent) <= self.return_tolerance_w:
-                # A clean return to the baseline means the user has switched
-                # the appliance off (or its active cycle has ended). Move to a
-                # short validation phase so the UI can clearly show that the
-                # signature is being checked before it is saved.
                 self.phase = "validating"
             return self.result()
-
         if self.phase == "validating":
             recent = [x.watts for x in self.samples if x.timestamp >= s.timestamp - self.idle_window_s]
             if recent and max(abs(v - (self.baseline_w or v)) for v in recent) <= self.return_tolerance_w:
@@ -211,22 +173,53 @@ class TrainingEngine:
             elif self.active_peak_w is not None and s.watts > (self.baseline_w or s.watts) + self.on_threshold_w:
                 self.phase = "capturing"
             return self.result()
-
         return self.result()
 
     def _full_step(self, s: PowerSample) -> dict:
+        # Long-cycle training is intentionally user-assisted. EnergyIQ detects
+        # the first meaningful event, but it does not assume that event belongs
+        # to the selected load. The user must identify it before capture begins.
         if self.phase == "waiting_for_start" and s.watts >= self.baseline_w + self.on_threshold_w:
-            self.phase = "capturing"
+            self.phase = "awaiting_confirmation"
             self.cycle_started = s.timestamp
             self.active_started = s.timestamp
             self.active_peak_w = s.watts
-        elif self.phase == "capturing":
+            return self.result(action="confirm_start")
+        if self.phase == "capturing":
             self.active_peak_w = max(self.active_peak_w or s.watts, s.watts)
-            active_for = s.timestamp - (self.cycle_started or s.timestamp)
-            recent = [x.watts for x in self.samples if x.timestamp >= s.timestamp - self.idle_window_s]
-            if active_for >= self.full_cycle_min_active_s and recent and max(abs(v - self.baseline_w) for v in recent) <= self.return_tolerance_w:
-                self.completed = True
-                self.phase = "complete"
+        return self.result()
+
+    def confirm_full_cycle(self, accepted: bool, timestamp: float) -> dict:
+        """Accept or reject the first detected event for a long-cycle session."""
+        if self.method != "full_cycle" or self.phase != "awaiting_confirmation":
+            return self.result(failed=True, failure_reason="Long-cycle training is not waiting for event confirmation.")
+        if accepted:
+            self.phase = "capturing"
+            self._end_requested = False
+            if self.cycle_started is None:
+                self.cycle_started = timestamp
+            self.active_started = self.cycle_started
+            return self.result()
+        self.phase = "waiting_for_start"
+        self.cycle_started = None
+        self.active_started = None
+        self.active_peak_w = None
+        return self.result()
+
+    def end_full_cycle(self, force: bool = False) -> dict:
+        """Finish a user-confirmed long-cycle capture without auto-completing."""
+        if self.method != "full_cycle" or self.phase != "capturing":
+            return self.result(failed=True, failure_reason="Long-cycle training is not currently capturing a confirmed load.")
+        self._end_requested = True
+        baseline = self.baseline_w if self.baseline_w is not None else 0.0
+        recent = self.samples[-1].watts if self.samples else baseline
+        returned = abs(recent - baseline) <= self.return_tolerance_w
+        duration = max(0.0, self.samples[-1].timestamp - (self.cycle_started or self.samples[-1].timestamp)) if self.samples else 0.0
+        if not force and (not returned or duration < self.full_cycle_min_active_s):
+            self._end_requested = False
+            return self.result(action="end_warning", end_ready=returned and duration >= self.full_cycle_min_active_s, end_returned=returned, end_duration_s=duration)
+        self.completed = True
+        self.phase = "complete"
         return self.result()
 
     def _energy_wh(self) -> float:
@@ -234,7 +227,7 @@ class TrainingEngine:
             return 0.0
         return sum(max(0.0, ((a.watts-self.baseline_w)+(b.watts-self.baseline_w))/2) * max(0.0,b.timestamp-a.timestamp)/3600 for a,b in zip(self.samples,self.samples[1:]))
 
-    def result(self, *, action: str | None = None, failed: bool = False, failure_reason: str | None = None) -> dict:
+    def result(self, *, action: str | None = None, failed: bool = False, failure_reason: str | None = None, **extra) -> dict:
         peak_delta = None
         duration = None
         if self.method == "quick" and self.observations:
@@ -251,5 +244,5 @@ class TrainingEngine:
             "cycles_completed": len(self.observations) if self.method == "quick" else None,
             "observations": [{"delta_w":o.delta_w,"on_w":o.on_w,"off_w":o.off_w,"on_duration_s":o.on_duration_s} for o in self.observations],
             "duration_s": duration, "energy_wh": self._energy_wh(), "completed": self.completed,
-            "action": action, "failed": failed, "failure_reason": failure_reason,
+            "action": action, "failed": failed, "failure_reason": failure_reason, **extra,
         }
