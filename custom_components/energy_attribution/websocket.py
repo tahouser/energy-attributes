@@ -244,9 +244,24 @@ async def ws_list_available_entities(hass, connection, msg):
     coordinator = _coordinator(hass, msg["entry_id"])
     registry = er.async_get(hass)
     used = set()
-    for candidate in coordinator.candidate_devices.values():
-        used.update(m.get("entity_id") for m in candidate.get("measurements", []) if m.get("entity_id"))
-        used.update(c.get("entity_id") for c in candidate.get("controls", []) if c.get("entity_id"))
+    monitored_entities = set()
+    entity_candidate = {}
+    for did, candidate in coordinator.candidate_devices.items():
+        is_monitored = coordinator.device_classifications.get(did, "ignore") == "monitor"
+        for m in candidate.get("measurements", []):
+            entity_id = m.get("entity_id")
+            if entity_id:
+                used.add(entity_id)
+                entity_candidate[entity_id] = did
+                if is_monitored:
+                    monitored_entities.add(entity_id)
+        for c in candidate.get("controls", []):
+            entity_id = c.get("entity_id")
+            if entity_id:
+                used.add(entity_id)
+                entity_candidate[entity_id] = did
+                if is_monitored:
+                    monitored_entities.add(entity_id)
     entities = []
     for entry in registry.entities.values():
         # The Add Entity dialog is a complete browser of enabled HA entities,
@@ -265,6 +280,8 @@ async def ws_list_available_entities(hass, connection, msg):
             "state": state.state if state is not None else "unavailable",
             "hvac_action": attrs.get("hvac_action") if entry.domain == "climate" else None,
             "already_added": entry.entity_id in used,
+            "monitored": entry.entity_id in monitored_entities,
+            "candidate_device_id": entity_candidate.get(entry.entity_id),
         })
     entities.sort(key=lambda x: x["name"].casefold())
     connection.send_result(msg["id"], {"entities": entities})
