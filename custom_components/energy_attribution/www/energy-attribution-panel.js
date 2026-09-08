@@ -1,4 +1,4 @@
-const TAG = "energy-attribution-panel-v31";
+const TAG = "energy-attribution-panel-v32";
 if (!customElements.get(TAG)) {
   class EnergyAttributionPanel extends HTMLElement {
     constructor(){super();this._listMode="monitored";}

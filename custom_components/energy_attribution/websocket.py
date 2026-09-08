@@ -322,10 +322,43 @@ async def ws_add_entity(hass, connection, msg):
     candidate["source"] = "ha"
     candidate["manual_added"] = True
     candidate["evidence"] = (candidate.get("evidence") + "; " if candidate.get("evidence") else "") + f"Manually selected HA entity: {entity_id}"
+    # A manually selected entity is immediately a monitored EnergyIQ device.
+    # Keep the classification, candidate inventory, and legacy monitored_entities
+    # list in sync. The previous implementation only copied measurement entities
+    # into monitored_entities, which meant control-only entities could be saved
+    # successfully but disappear from parts of the monitoring inventory after a
+    # refresh/reload.
     coordinator.device_classifications[did] = "monitor"
-    coordinator.monitored_entities = [m["entity_id"] for d,c in coordinator.candidate_devices.items() if coordinator.device_classifications.get(d)=="monitor" for m in c.get("measurements", []) if m.get("entity_id")]
-    hass.config_entries.async_update_entry(coordinator.entry, options={**coordinator.entry.options, "candidate_devices": coordinator.candidate_devices, "device_classifications": coordinator.device_classifications, "monitored_entities": coordinator.monitored_entities})
-    connection.send_result(msg["id"], {"saved": True, "device": candidate})
+    coordinator.monitored_entities = [
+        entity_id
+        for candidate_did, c in coordinator.candidate_devices.items()
+        if coordinator.device_classifications.get(candidate_did) == "monitor"
+        for item in (c.get("measurements", []) + c.get("controls", []))
+        for entity_id in [item.get("entity_id")]
+        if entity_id
+    ]
+    hass.config_entries.async_update_entry(
+        coordinator.entry,
+        options={
+            **coordinator.entry.options,
+            "candidate_devices": coordinator.candidate_devices,
+            "device_classifications": coordinator.device_classifications,
+            "monitored_entities": coordinator.monitored_entities,
+        },
+    )
+    # Return the complete candidate and its classification so the frontend can
+    # immediately reconcile its local state even if HA has not yet completed the
+    # config-entry update callback.
+    connection.send_result(
+        msg["id"],
+        {
+            "saved": True,
+            "device": {
+                **candidate,
+                "classification": "monitor",
+            },
+        },
+    )
 
 
 @websocket_api.websocket_command({
