@@ -89,6 +89,27 @@ def _trained_live_power(hass: HomeAssistant, candidates: dict, training_state: d
         live_count += 1
     return total, live_count
 
+def _monitored_entity_ids(coordinator) -> list[str]:
+    """Return HA entities belonging to currently monitored EnergyIQ loads.
+
+    The EnergyIQ workspace is candidate/load based, not entity-list based.
+    Keep this legacy field synchronized with both measurement entities and
+    controllable load entities so adding a control-only load does not vanish
+    from persisted monitoring state.
+    """
+    result: list[str] = []
+    seen: set[str] = set()
+    for did, candidate in coordinator.candidate_devices.items():
+        if coordinator.device_classifications.get(did, "ignore") != "monitor":
+            continue
+        for item in (*candidate.get("measurements", []), *candidate.get("controls", [])):
+            entity_id = item.get("entity_id") if isinstance(item, dict) else None
+            if entity_id and entity_id not in seen:
+                seen.add(entity_id)
+                result.append(entity_id)
+    return result
+
+
 def _coordinator(hass: HomeAssistant, entry_id: str):
     """Return a loaded coordinator for a real config entry."""
     entry = hass.config_entries.async_get_entry(entry_id)
@@ -169,12 +190,7 @@ async def ws_set_monitoring(hass, connection, msg):
     coordinator.device_classifications = {
         did: "monitor" if did in selected else "ignore" for did in valid
     }
-    coordinator.monitored_entities = [
-        m["entity_id"]
-        for did, candidate in coordinator.candidate_devices.items()
-        if did in selected
-        for m in candidate.get("measurements", [])
-    ]
+    coordinator.monitored_entities = _monitored_entity_ids(coordinator)
     hass.config_entries.async_update_entry(
         coordinator.entry,
         options={
@@ -303,7 +319,15 @@ async def ws_add_entity(hass, connection, msg):
         raise ValueError("HA entity was not found or is disabled")
     state = hass.states.get(entity_id)
     name = state.attributes.get("friendly_name") if state else None
-    did = entry.device_id or "entity_" + entity_id.replace(".", "_")
+    # The initial EnergyIQ inventory is intentionally curated at the HA-device
+    # level.  Add Entity is the escape hatch for a load that was not included
+    # in that initial inventory.  If the selected entity already belongs to an
+    # EnergyIQ candidate, adopt it into that candidate.  Otherwise create a
+    # distinct EnergyIQ candidate keyed to the selected entity, even when HA
+    # has a device_id for it.  This prevents an out-of-band entity from being
+    # silently merged into an unrelated/previously discovered load.
+    device_did = entry.device_id
+    did = device_did if device_did in coordinator.candidate_devices else "entity_" + entity_id.replace(".", "_")
     candidate = coordinator.candidate_devices.get(did)
     if candidate is None:
         candidate = {"device_id": did, "name": name or entry.name or entry.original_name or entity_id, "area": "", "manufacturer": "", "model": "", "evidence": "", "controls": [], "measurements": [], "source": "ha", "category": "", "manual_added": True}
@@ -322,43 +346,10 @@ async def ws_add_entity(hass, connection, msg):
     candidate["source"] = "ha"
     candidate["manual_added"] = True
     candidate["evidence"] = (candidate.get("evidence") + "; " if candidate.get("evidence") else "") + f"Manually selected HA entity: {entity_id}"
-    # A manually selected entity is immediately a monitored EnergyIQ device.
-    # Keep the classification, candidate inventory, and legacy monitored_entities
-    # list in sync. The previous implementation only copied measurement entities
-    # into monitored_entities, which meant control-only entities could be saved
-    # successfully but disappear from parts of the monitoring inventory after a
-    # refresh/reload.
     coordinator.device_classifications[did] = "monitor"
-    coordinator.monitored_entities = [
-        entity_id
-        for candidate_did, c in coordinator.candidate_devices.items()
-        if coordinator.device_classifications.get(candidate_did) == "monitor"
-        for item in (c.get("measurements", []) + c.get("controls", []))
-        for entity_id in [item.get("entity_id")]
-        if entity_id
-    ]
-    hass.config_entries.async_update_entry(
-        coordinator.entry,
-        options={
-            **coordinator.entry.options,
-            "candidate_devices": coordinator.candidate_devices,
-            "device_classifications": coordinator.device_classifications,
-            "monitored_entities": coordinator.monitored_entities,
-        },
-    )
-    # Return the complete candidate and its classification so the frontend can
-    # immediately reconcile its local state even if HA has not yet completed the
-    # config-entry update callback.
-    connection.send_result(
-        msg["id"],
-        {
-            "saved": True,
-            "device": {
-                **candidate,
-                "classification": "monitor",
-            },
-        },
-    )
+    coordinator.monitored_entities = _monitored_entity_ids(coordinator)
+    hass.config_entries.async_update_entry(coordinator.entry, options={**coordinator.entry.options, "candidate_devices": coordinator.candidate_devices, "device_classifications": coordinator.device_classifications, "monitored_entities": coordinator.monitored_entities})
+    connection.send_result(msg["id"], {"saved": True, "action": "added_to_monitoring", "device": candidate, "device_id": did})
 
 
 @websocket_api.websocket_command({
