@@ -1,6 +1,11 @@
-# EnergyIQ v1.7.20
+# EnergyIQ v1.7.21
 
-EnergyIQ is a Home Assistant custom integration for electrical-load commissioning and attribution.
+EnergyIQ is a Home Assistant custom integration for whole-home electrical intelligence and load identification.
+
+## v1.7.21
+- Removes the old `AAA` prefix from user-facing commissioning and integration branding.
+- Uses **EnergyIQ** consistently as the visible product name.
+- Keeps the internal `energy_attribution` domain unchanged for compatibility.
 
 ## v1.7.20
 - Keeps Trained active watts as the primary value in the existing Trained active watts tile.
