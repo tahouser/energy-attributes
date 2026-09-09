@@ -74,13 +74,6 @@ async def ws_accounting_state(hass, connection, msg):
             options={**coordinator.entry.options, "observed_peak_w": round(observed, 1)},
         )
 
-    if reference is None and observed is not None:
-        reference = observed
-        hass.config_entries.async_update_entry(
-            coordinator.entry,
-            options={**coordinator.entry.options, "reference_max_w": round(reference, 1)},
-        )
-
     learned = _learned_capacity(coordinator)
     mystery = max(0.0, reference - learned) if reference is not None else None
     coverage = (learned / reference * 100.0) if reference and reference > 0 else None
