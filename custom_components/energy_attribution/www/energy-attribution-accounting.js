@@ -73,6 +73,22 @@
       if (!a) return;
       const tiles = panel.querySelectorAll(".dash .tile");
       if (tiles.length >= 3) { const strong = tiles[2].querySelector("strong"); if (strong) strong.textContent = a.mystery_w != null ? `${Number(a.mystery_w).toFixed(0)} W` : "—"; }
+      if (tiles.length >= 2) {
+        const trainedTile = tiles[1];
+        const strong = trainedTile.querySelector("strong");
+        if (strong) strong.textContent = panel.data?.trained_live_power_w != null ? `${Number(panel.data.trained_live_power_w).toFixed(0)} W` : "—";
+        let inactive = trainedTile.querySelector("[data-energyiq-trained-inactive]");
+        if (!inactive) {
+          inactive = document.createElement("div");
+          inactive.dataset.energyiqTrainedInactive = "true";
+          inactive.className = "tile-note";
+          trainedTile.append(inactive);
+        }
+        const learned = Number(a.learned_capacity_w || 0);
+        const active = Number(panel.data?.trained_live_power_w || 0);
+        const inactiveW = Math.max(0, learned - active);
+        inactive.textContent = `Trained inactive: ${inactiveW.toFixed(0)} W`;
+      }
       const dash = panel.querySelector(".dash"); if (!dash) return;
       let unaccounted = dash.querySelector('[data-energyiq-tile="unaccounted"]');
       let coverage = dash.querySelector('[data-energyiq-tile="coverage"]');
