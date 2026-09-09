@@ -1,6 +1,12 @@
-# EnergyIQ v1.7.19
+# EnergyIQ v1.7.20
 
 EnergyIQ is a Home Assistant custom integration for electrical-load commissioning and attribution.
+
+## v1.7.20
+- Keeps Trained active watts as the primary value in the existing Trained active watts tile.
+- Adds Trained inactive watts as a secondary value in that same tile, avoiding another dashboard tile.
+- Calculates trained inactive watts as learned trained-load capacity minus currently active trained watts.
+- Cache-busts the accounting frontend extension.
 
 ## v1.7.19
 - Makes the EnergyIQ panel itself vertically scrollable on iOS/mobile layouts.
@@ -14,7 +20,6 @@ EnergyIQ is a Home Assistant custom integration for electrical-load commissionin
 
 ## v1.7.16
 - Added accounting for Home Power, Trained Active, Unaccounted Now, Mystery Watts, Training Coverage, and an explicit observed reference maximum.
-- Added mobile/table scrolling improvements and frontend rendering protections.
 
 ## v1.7.15
 - Added supervised Long Cycle training for HVAC and other loads with multi-stage behavior.
