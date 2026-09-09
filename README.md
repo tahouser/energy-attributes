@@ -1,6 +1,10 @@
-# EnergyIQ v1.7.21
+# EnergyIQ v1.7.22
 
 EnergyIQ is a Home Assistant custom integration for whole-home electrical intelligence and load identification.
+
+## v1.7.22
+- Adds the new EnergyIQ Power & Control integration icon using the light-background design.
+- Keeps the internal `energy_attribution` domain unchanged for compatibility.
 
 ## v1.7.21
 - Removes the old `AAA` prefix from user-facing commissioning and integration branding.
