@@ -288,11 +288,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._candidates = _build_candidates(self.hass, self._power_entity)
 
             return self.async_create_entry(
-                title="Energy Attribution",
+                title="EnergyIQ",
                 data={
                     CONF_POWER_ENTITY: self._power_entity,
-                    # Adopt every filtered device into our private environment.
-                    # Selection/ignore is deliberately deferred to Configure.
                     "candidate_devices": {
                         c["device_id"]: c for c in self._candidates
                     },
@@ -388,7 +386,6 @@ def _training_method(candidate: dict[str, Any]) -> str:
         return "full_cycle"
     return "quick"
 
-
 def _training_plan_text(method: str) -> str:
     if method == "full_cycle":
         return (
@@ -413,11 +410,4 @@ def _candidate_category(candidate: dict[str, Any]) -> str:
         return "Appliance"
     if "water_heater" in domains:
         return "Appliance"
-    if "humidifier" in domains:
-        return "Appliance"
-    if "fan" in domains:
-        return "Fan"
-    if "switch" in domains:
-        return "Appliance"
-    return "Electrical Load"
-
+    if...
