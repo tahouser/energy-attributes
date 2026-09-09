@@ -8,31 +8,16 @@
 
     const originalRender = panel._render.bind(panel);
     const originalSave = panel._save.bind(panel);
-
-    const committedIds = () => new Set((panel.data?.devices || [])
-      .filter(x => x.classification === "monitor")
-      .map(x => x.device_id));
-
-    const fetchAccounting = () => panel._ws({
-      type: "energy_attribution/accounting_state",
-      entry_id: panel.entryId,
-    });
-
+    const committedIds = () => new Set((panel.data?.devices || []).filter(x => x.classification === "monitor").map(x => x.device_id));
+    const fetchAccounting = () => panel._ws({type:"energy_attribution/accounting_state",entry_id:panel.entryId});
     const updateAccounting = async () => {
       try {
         panel._accounting = await fetchAccounting();
         const home = panel.data?.whole_home_power;
         const trained = panel.data?.trained_live_power_w;
-        panel._accounting.unaccounted_now_w = home != null
-          ? Math.max(0, Number(home) - Number(trained || 0))
-          : null;
-      } catch (err) {
-        console.warn("EnergyIQ accounting extension failed", err);
-      }
+        panel._accounting.unaccounted_now_w = home != null ? Math.max(0, Number(home) - Number(trained || 0)) : null;
+      } catch (err) { console.warn("EnergyIQ accounting extension failed", err); }
     };
-
-    // Refresh workspace data without rebuilding the table while there are
-    // unsaved monitoring changes. This keeps an unchecked row visible until Save.
     panel._refresh = async () => {
       if (!panel._hass || !panel.entryId) return;
       try {
@@ -40,89 +25,52 @@
         panel.bulk = await panel._ws({type:"energy_attribution/bulk_training_state",entry_id:panel.entryId});
         await updateAccounting();
         if (!panel.querySelector("#add-modal") && !panel._pendingSelections) originalRender();
-        restoreCheckboxes();
-        patchDashboard();
+        restoreCheckboxes(); patchDashboard();
       } catch (e) { console.error(e); }
     };
-
-    panel._save = async () => {
-      await originalSave();
-      await updateAccounting();
-      patchDashboard();
-    };
-
-    panel._render = () => {
-      originalRender();
-      restoreCheckboxes();
-      patchDashboard();
-    };
-
+    panel._save = async () => { await originalSave(); await updateAccounting(); patchDashboard(); };
+    panel._render = () => { originalRender(); restoreCheckboxes(); patchDashboard(); };
     const restoreCheckboxes = () => {
       const pending = panel._pendingSelections;
       if (!pending) return;
-      panel.querySelectorAll('input[data-device]').forEach(box => {
-        box.checked = pending.has(box.dataset.device);
-      });
+      panel.querySelectorAll('input[data-device]').forEach(box => { box.checked = pending.has(box.dataset.device); });
     };
-
-    // Capture phase prevents the base checkbox listener from immediately
-    // re-rendering/filtering the row. Save remains the commit point.
     panel.addEventListener("change", event => {
       const box = event.target?.closest?.('input[data-device]');
       if (!box) return;
       event.stopImmediatePropagation();
       if (!panel._pendingSelections) panel._pendingSelections = committedIds();
-      if (box.checked) panel._pendingSelections.add(box.dataset.device);
-      else panel._pendingSelections.delete(box.dataset.device);
+      if (box.checked) panel._pendingSelections.add(box.dataset.device); else panel._pendingSelections.delete(box.dataset.device);
       box.checked = panel._pendingSelections.has(box.dataset.device);
     }, true);
 
-    // Allow vertical page scrolling on touch devices while retaining native
-    // horizontal table scrolling.
+    // Keep horizontal scrolling, but make the long monitored table itself a
+    // bounded vertical scroll area on touch devices. touch-action:auto permits
+    // either axis instead of requiring the gesture to be horizontal.
     const style = document.createElement("style");
-    style.textContent = `${TAG} .table-wrap { touch-action: auto !important; overflow-x: auto !important; overflow-y: visible !important; -webkit-overflow-scrolling: touch !important; } ${TAG} .monitor-box { touch-action: manipulation; }`;
+    style.textContent = `${TAG} .table-wrap { touch-action:auto !important; overflow-x:auto !important; overflow-y:auto !important; max-height:60vh !important; -webkit-overflow-scrolling:touch !important; } ${TAG} .monitor-box { touch-action:manipulation; }`;
     document.head.appendChild(style);
 
     function patchDashboard() {
       const a = panel._accounting;
       if (!a) return;
       const tiles = panel.querySelectorAll(".dash .tile");
-      if (tiles.length >= 3) {
-        const strong = tiles[2].querySelector("strong");
-        if (strong) strong.textContent = a.mystery_w != null ? `${Number(a.mystery_w).toFixed(0)} W` : "—";
-      }
-      const dash = panel.querySelector(".dash");
-      if (!dash) return;
+      if (tiles.length >= 3) { const strong = tiles[2].querySelector("strong"); if (strong) strong.textContent = a.mystery_w != null ? `${Number(a.mystery_w).toFixed(0)} W` : "—"; }
+      const dash = panel.querySelector(".dash"); if (!dash) return;
       let unaccounted = dash.querySelector('[data-energyiq-tile="unaccounted"]');
       let coverage = dash.querySelector('[data-energyiq-tile="coverage"]');
-      if (!unaccounted) {
-        unaccounted = makeTile("Unaccounted now", "—", "Current whole-home power not attributed to trained active loads");
-        unaccounted.dataset.energyiqTile = "unaccounted"; dash.append(unaccounted);
-      }
-      if (!coverage) {
-        coverage = makeTile("Training coverage", "—", "Learned load capacity ÷ reference maximum");
-        coverage.dataset.energyiqTile = "coverage"; dash.append(coverage);
-      }
+      if (!unaccounted) { unaccounted=makeTile("Unaccounted now","—","Current whole-home power not attributed to trained active loads"); unaccounted.dataset.energyiqTile="unaccounted"; dash.append(unaccounted); }
+      if (!coverage) { coverage=makeTile("Training coverage","—","Learned load capacity ÷ reference maximum"); coverage.dataset.energyiqTile="coverage"; dash.append(coverage); }
       unaccounted.querySelector("strong").textContent = a.unaccounted_now_w != null ? `${Number(a.unaccounted_now_w).toFixed(0)} W` : "—";
       coverage.querySelector("strong").textContent = a.training_coverage_pct != null ? `${Number(a.training_coverage_pct).toFixed(1)}%` : "—";
       patchReferenceControl();
     }
-
-    function makeTile(label, value, note) {
-      const tile = document.createElement("div"); tile.className = "tile";
-      const l = document.createElement("div"); l.className = "label"; l.textContent = label;
-      const s = document.createElement("strong"); s.textContent = value; tile.append(l, s);
-      if (note) { const n = document.createElement("div"); n.className = "tile-note"; n.textContent = note; tile.append(n); }
-      return tile;
-    }
-
+    function makeTile(label,value,note) { const tile=document.createElement("div"); tile.className="tile"; const l=document.createElement("div"); l.className="label"; l.textContent=label; const s=document.createElement("strong"); s.textContent=value; tile.append(l,s); if(note){const n=document.createElement("div");n.className="tile-note";n.textContent=note;tile.append(n);} return tile; }
     function patchReferenceControl() {
-      const actions = panel.querySelector(".actions");
-      if (!actions) return;
-      let wrap = actions.querySelector("[data-energyiq-reference]");
-      if (!wrap) {
-        wrap = document.createElement("span"); wrap.dataset.energyiqReference="true";
-        wrap.style.cssText="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap";
+      const actions=panel.querySelector(".actions"); if(!actions)return;
+      let wrap=actions.querySelector("[data-energyiq-reference]");
+      if(!wrap){
+        wrap=document.createElement("span"); wrap.dataset.energyiqReference="true"; wrap.style.cssText="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap";
         const label=document.createElement("span"); label.className="note"; label.textContent="Reference max (W):";
         const input=document.createElement("input"); input.type="number"; input.min="1"; input.step="10"; input.inputMode="numeric"; input.style.cssText="width:105px;box-sizing:border-box;padding:7px";
         const save=document.createElement("button"); save.type="button"; save.textContent="Set reference"; save.className="primary";
@@ -131,10 +79,8 @@
         observed.onclick=()=>{if(panel._accounting?.observed_peak_w!=null)input.value=Math.round(panel._accounting.observed_peak_w);};
         wrap.append(label,input,save,observed); actions.append(wrap);
       }
-      const input=wrap.querySelector("input");
-      if(input&&document.activeElement!==input&&panel._accounting?.reference_max_w!=null)input.value=Math.round(panel._accounting.reference_max_w);
+      const input=wrap.querySelector("input"); if(input&&document.activeElement!==input&&panel._accounting?.reference_max_w!=null)input.value=Math.round(panel._accounting.reference_max_w);
     }
-
     updateAccounting().then(patchDashboard);
   };
   const timer=setInterval(()=>{const panel=document.querySelector(TAG);if(panel){clearInterval(timer);install();}},250);
