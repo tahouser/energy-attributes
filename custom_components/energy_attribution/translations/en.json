@@ -1,6 +1,6 @@
 {
   "config": {
-    "flow_title": "AAA Energy Attribution",
+    "flow_title": "EnergyIQ",
     "step": {
       "user": {
         "title": "Choose whole-home meter",
@@ -14,8 +14,8 @@
   "options": {
     "step": {
       "init": {
-        "title": "AAA Energy Attribution \u2014 Commissioning",
-        "description": "{count} electrical-load candidates are in the private AAA Energy Attribution environment. Select the devices to monitor. Training state is retained so longer-cycle training can continue in the background.",
+        "title": "EnergyIQ — Commissioning",
+        "description": "{count} electrical-load candidates are in the private EnergyIQ environment. Select the devices to monitor. Training state is retained so longer-cycle training can continue in the background.",
         "data": {
           "monitored_devices": "Devices to monitor",
           "action": "Training / save action"
@@ -36,21 +36,21 @@
         }
       },
       "training_review": {
-        "title": "Review \u2014 {device}",
+        "title": "Review — {device}",
         "description": "Category: {category}\nMethod: {method}\nDetected events: {events}\n{observation}\n\nDoes this captured behavior resemble the selected device? Save it only if the observed load belongs to this device.",
         "data": {
-          "confirm": "YES \u2014 save training"
+          "confirm": "YES — save training"
         }
       },
       "training_start": {
-        "title": "Ready to start \u2014 {device}",
+        "title": "Ready to start — {device}",
         "description": "{instructions}\n\nThis is the point where active monitoring begins. Nothing is captured until you press START.",
         "data": {
           "start": "START TRAINING"
         }
       },
       "training_monitoring": {
-        "title": "Training active \u2014 {device}",
+        "title": "Training active — {device}",
         "description": "{instruction}\n\nTraining remains stored while Configure is closed. When the training activity is complete, return here and finish the capture.",
         "data": {
           "finish": "Finish training capture"
