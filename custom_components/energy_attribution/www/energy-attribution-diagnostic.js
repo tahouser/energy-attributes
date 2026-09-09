@@ -2,6 +2,10 @@
  * This deliberately does not alter the EnergyIQ inventory. It compares the
  * live entity-browser ownership result with a fresh workspace response so we
  * can distinguish backend inventory state from stale/filtered frontend state.
+ *
+ * Mobile touch fix: the panel's horizontal table scroller uses touch-action:
+ * pan-x, which can prevent native checkbox activation on mobile browsers.
+ * Override that presentation-only rule so taps reach the native checkbox.
  */
 (() => {
   const TAG = "energy-attribution-panel-v35";
@@ -9,6 +13,18 @@
     const panel = document.querySelector(TAG);
     if (!panel || panel.__energyIqDiagInstalled) return;
     panel.__energyIqDiagInstalled = true;
+
+    // Allow normal taps on controls inside the horizontally scrolling table.
+    // overflow-x:auto still provides horizontal scrolling; this only removes
+    // the restrictive touch-action rule that was interfering with checkbox taps.
+    const mobileTouchFix = document.createElement("style");
+    mobileTouchFix.id = "energyiq-mobile-touch-fix";
+    mobileTouchFix.textContent = `
+      ${TAG} .table-wrap { touch-action: auto !important; }
+      ${TAG} .table-wrap input.monitor-box,
+      ${TAG} .table-wrap input.train-box { touch-action: manipulation !important; }
+    `;
+    document.head.appendChild(mobileTouchFix);
 
     const esc = (v) => String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
     const show = async () => {

@@ -10,6 +10,7 @@ from .const import DOMAIN
 from .coordinator import EnergyAttributionCoordinator
 from .websocket import async_register as async_register_websocket
 from .long_cycle import async_register as async_register_long_cycle
+from .accounting import async_register as async_register_accounting
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energy-attribution-static"
@@ -19,6 +20,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     if not data.get("_websocket_registered"):
         async_register_websocket(hass)
         await async_register_long_cycle(hass)
+        async_register_accounting(hass)
         data["_websocket_registered"] = True
     if not data.get("_panel_registered"):
         await hass.http.async_register_static_paths([
