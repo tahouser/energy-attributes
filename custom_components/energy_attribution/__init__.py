@@ -30,7 +30,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass=hass,
             frontend_url_path="energy-attribution",
             webcomponent_name="energy-attribution-panel-v35",
-            module_url=f"{URL_BASE}/energy-attribution-loader.js?v=4",
+            module_url=f"{URL_BASE}/energy-attribution-loader.js?v=5",
             sidebar_title="EnergyIQ",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
