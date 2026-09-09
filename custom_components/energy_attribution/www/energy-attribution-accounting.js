@@ -38,8 +38,6 @@
     };
 
     panel._save = async () => {
-      // Saving monitoring selections is an intentional structural change, so
-      // allow the following refresh to rebuild the committed list.
       panel._energyIqForceRender = true;
       await originalSave();
       await updateAccounting();
@@ -62,8 +60,12 @@
       box.checked = panel._pendingSelections.has(box.dataset.device);
     }, true);
 
+    // Mobile scrolling: keep the table as a horizontal scroll surface only.
+    // Vertical scrolling must remain with the Home Assistant page. A nested
+    // vertical overflow container caused iOS to lose subsequent swipe gestures
+    // after momentum scrolling stopped.
     const style = document.createElement("style");
-    style.textContent = `${TAG} .table-wrap { touch-action:auto !important; overflow-x:auto !important; overflow-y:auto !important; max-height:60vh !important; -webkit-overflow-scrolling:touch !important; } ${TAG} .monitor-box { touch-action:manipulation; }`;
+    style.textContent = `${TAG} .table-wrap { touch-action: pan-x pan-y !important; overflow-x:auto !important; overflow-y:visible !important; max-height:none !important; -webkit-overflow-scrolling:auto !important; } ${TAG} .monitor-box { touch-action:manipulation; }`;
     document.head.appendChild(style);
 
     function patchDashboard() {
