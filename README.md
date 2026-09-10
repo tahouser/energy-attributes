@@ -1,6 +1,12 @@
-# EnergyIQ v2.0.0
+# EnergyIQ v2.0.6
 
 EnergyIQ is a Home Assistant custom integration for whole-home electrical intelligence and load identification.
+
+## v2.0.6
+- Normalizes the frontend stack to EnergyIQ 2.0.6.
+- Removes the legacy v1.7.19 frontend version override from the active loader.
+- Uses the All / Monitored / Excluded load views with All as the default view.
+- Keeps monitoring selections pending until Save monitoring selections is used.
 
 ## v2.0.0
 - Resets the Home Assistant integration domain to `energyiq` for a clean long-term product identity.
