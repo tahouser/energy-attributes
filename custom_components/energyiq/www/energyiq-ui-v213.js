@@ -13,7 +13,7 @@
 
   const devicesFor = (self) => self?.data?.devices || [];
   const persistedIds = (self) => {
-    if (!self.__energyiqPersistedMonitorIds || !self._pendingSelections) {
+    if (!self.__energyiqPersistedMonitorIds) {
       self.__energyiqPersistedMonitorIds = new Set(
         devicesFor(self).filter(d => d.classification === "monitor").map(d => d.device_id)
       );
@@ -21,7 +21,15 @@
     return self.__energyiqPersistedMonitorIds;
   };
 
-  const saveButton = (self) => [...self.querySelectorAll("button")].find(b => /^save$/i.test((b.textContent || "").trim()) || /^saving…?$/i.test((b.textContent || "").trim()) || /^saved$/i.test((b.textContent || "").trim()));
+  const saveButton = (self) => [...self.querySelectorAll("button")].find(b => /^(save|save changes|save monitoring|saving…?|saved)$/i.test((b.textContent || "").trim()));
+
+  const injectStyles = (self) => {
+    if (self.querySelector("#energyiq-ui-213-style")) return;
+    const style = document.createElement("style");
+    style.id = "energyiq-ui-213-style";
+    style.textContent = `.entity-state-radio{display:inline-flex;width:17px;height:17px;box-sizing:border-box;border:2px solid var(--secondary-text-color);border-radius:50%;align-items:center;justify-content:center;margin:0 9px 0 2px;vertical-align:middle;flex:0 0 auto}.entity-state-radio>span{display:block;width:9px;height:9px;border-radius:50%}.entity-state-radio.on{border-color:var(--success-color,#43a047)}.entity-state-radio.on>span{background:var(--success-color,#43a047)}.entity-state-radio.off{border-color:var(--error-color,#e53935)}.entity-state-radio.off>span{background:var(--error-color,#e53935)}.entity-state-radio.unknown{border-color:var(--disabled-text-color,var(--secondary-text-color))}.entity-state-radio.unknown>span{background:var(--disabled-text-color,var(--secondary-text-color))}.list-toggle .toggle-btn{min-width:76px}`;
+    self.appendChild(style);
+  };
 
   const stateFor = (self, d) => {
     const entityId = d?.entity_id || d?.ha_entity_id || d?.entity || d?.entity_id_text;
@@ -92,7 +100,6 @@
       if (next) pending.add(d.device_id); else pending.delete(d.device_id);
       self._pendingSelections = pending;
       self.__energyiqSaveState = "dirty";
-      self.__energyiqPersistedMonitorIds = new Set(persistedIds(self));
       self._render();
     }, true);
   };
@@ -115,10 +122,8 @@
   proto._render = function (...args) {
     const self = this;
     const pending = self._pendingSelections;
-    const persisted = persistedIds(self);
     const requestedMode = self._listMode || "monitored";
-
-    // Render against persisted classification so pending edits never make rows disappear.
+    persistedIds(self);
     self._pendingSelections = null;
 
     if (requestedMode === "all") {
@@ -132,9 +137,7 @@
       const excludedRows = table2 ? [...table2.querySelectorAll("tbody tr")] : [];
       if (table2) {
         const tbody = table2.querySelector("tbody");
-        if (tbody) {
-          tbody.replaceChildren(...monitoredRows, ...excludedRows);
-        }
+        if (tbody) tbody.replaceChildren(...monitoredRows, ...excludedRows);
       }
       self._listMode = "all";
     } else {
@@ -144,8 +147,8 @@
 
     self._pendingSelections = pending;
     self._listMode = requestedMode;
+    injectStyles(self);
 
-    // Add the third list mode without changing the existing panel structure.
     const toggle = self.querySelector(".list-toggle");
     if (toggle) {
       if (!toggle.querySelector('[data-energyiq-mode="all"]')) {
@@ -195,7 +198,6 @@
     }
   };
 
-  // Capture the persisted state before the first edit and after a successful save.
   if (!proto.__energyiqRefresh213) {
     const originalRefresh = proto._refresh;
     proto._refresh = async function (...args) {
