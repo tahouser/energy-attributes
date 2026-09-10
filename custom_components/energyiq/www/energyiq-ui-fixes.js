@@ -50,6 +50,19 @@
           <td class="status ${status.cls}">${status.icon} ${status.label}</td>
           <td>${training.method ? panel._esc(training.method === "quick" ? "Auto — Quick" : training.method === "full_cycle" ? "Auto — Long Run" : "Manual") : "—"}</td>
           <td></td>`;
+        const box = row.querySelector("input[data-device]");
+        box.addEventListener("change", () => {
+          if (!panel._pendingSelections) {
+            panel._pendingSelections = new Set(
+              (panel.data?.devices || [])
+                .filter(x => x.classification === "monitor")
+                .map(x => x.device_id)
+            );
+          }
+          if (box.checked) panel._pendingSelections.add(box.dataset.device);
+          else panel._pendingSelections.delete(box.dataset.device);
+          panel._render();
+        });
         table.appendChild(row);
       }
     };
@@ -59,9 +72,7 @@
     panel.addEventListener("change", (event) => {
       const box = event.target;
       if (!(box instanceof HTMLInputElement) || !box.matches("input[data-device]")) return;
-      if (!box.checked) {
-        queueMicrotask(() => panel._render());
-      }
+      if (!box.checked) queueMicrotask(() => panel._render());
     });
   };
 
