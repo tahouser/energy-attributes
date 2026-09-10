@@ -1,4 +1,4 @@
-"""Coordinator and live training manager for Energy Attribution."""
+"""Coordinator and live training manager for EnergyIQ."""
 from __future__ import annotations
 
 import asyncio
@@ -91,8 +91,6 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self.last_training_device_id=saved.get("last_training_device_id", self.last_training_device_id)
             active=saved.get("active")
             if active and active.get("status")=="active":
-                # Do not silently operate a device after HA restarts. Retain the
-                # captured state for review, but require an explicit restart.
                 active["status"]="interrupted"
                 self.training_state[active["device_id"]]=active
                 await self._persist()
@@ -109,7 +107,6 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             "active": self.training_state.get(self._training_device) if self._training_device else None,
         })
 
-
     async def async_bulk_auto_training(self, device_ids: list[str]) -> dict:
         """Train selected HA/entity devices sequentially using Auto Quick."""
         selected=[]
@@ -118,29 +115,20 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             candidate=self.candidate_devices.get(did)
             if not candidate or str(candidate.get("source", "ha")).casefold()=="manual":
                 continue
-            if not self._auto_control_entities(did):
-                skipped.append({"device_id":did,"reason":"No supported controllable HA entity"})
-                continue
             selected.append(did)
-        self.bulk_training_state={"status":"active","queue":selected,"current_index":0,"total":len(selected),"current_device_id":None,"completed":0,"skipped":skipped,"failed":[]}
+        self.bulk_training_state.update({"status":"running","queue":selected,"current_index":0,"total":len(selected),"current_device_id":None,"completed":0,"skipped":skipped,"failed":[]})
         await self._persist(force=True)
-        if not selected:
-            self.bulk_training_state["status"]="complete"
-            await self._persist(force=True)
-            return self.bulk_training_state.copy()
-        self.hass.async_create_task(self._bulk_training_loop(selected))
-        return self.bulk_training_state.copy()
-
-    async def _bulk_training_loop(self, selected: list[str]):
         for index, did in enumerate(selected, start=1):
-            self.bulk_training_state.update({"current_index":index,"current_device_id":did})
+            self.bulk_training_state["current_index"]=index
+            self.bulk_training_state["current_device_id"]=did
             try:
                 await self.async_start_training(did, "quick")
-                if self._training_task:
-                    await self._training_task
+                task=self._training_task
+                if task:
+                    await task
                 state=self.training_state.get(did,{})
                 if state.get("status")=="complete":
-                    self.bulk_training_state["completed"] += 1
+                    self.bulk_training_state["completed"]+=1
                 else:
                     self.bulk_training_state["failed"].append({"device_id":did,"reason":state.get("error") or state.get("instruction") or state.get("status","failed")})
             except Exception as err:
@@ -152,11 +140,10 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.bulk_training_state.update({"status":"complete","current_device_id":None})
         await self._persist(force=True)
 
-    def _response_log(self, event: str, device_id: str, **values: Any) -> None:
-        """Write a compact training response-timing record for diagnostics."""
+    async def _response_log(self, event: str, device_id: str, **values: Any) -> None:
+        """Write a compact training response-timing record off the HA event loop."""
         try:
             path = self._response_log_path
-            new_file = not path.exists()
             row = {
                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
                 "event": event,
@@ -164,13 +151,25 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 **values,
             }
             path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", newline="", encoding="utf-8") as fh:
-                writer = csv.DictWriter(fh, fieldnames=list(row.keys()))
-                if new_file:
-                    writer.writeheader()
-                writer.writerow(row)
-        except Exception:  # diagnostics must never break training
+            await asyncio.to_thread(self._append_response_row, path, row)
+        except Exception:
             _LOGGER.debug("Unable to write EnergyIQ response diagnostic", exc_info=True)
+
+    @staticmethod
+    def _append_response_row(path: Path, row: dict[str, Any]) -> None:
+        """Append one diagnostics row using a stable superset of all known fields."""
+        fieldnames = [
+            "timestamp_utc", "event", "device_id", "power_entity", "method",
+            "entity_id", "action", "command_loop", "shelly_host", "rpc_source",
+            "rpc_power_w", "rpc_elapsed_ms", "ha_power_w", "ha_last_updated",
+            "learned_load_w", "measurement_source", "error",
+        ]
+        new_file = not path.exists()
+        with path.open("a", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames, extrasaction="ignore")
+            if new_file:
+                writer.writeheader()
+            writer.writerow(row)
 
     async def async_start_training(self, device_id:str, method:str) -> dict:
         async with self._training_lock:
@@ -197,7 +196,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self._direct_rpc_available = False
             self._direct_rpc_host = None
             self._direct_rpc_mode = None
-            self._response_log("training_start", device_id, power_entity=self.power_entity, method=method)
+            await self._response_log("training_start", device_id, power_entity=self.power_entity, method=method)
             if self._direct_rpc_task and not self._direct_rpc_task.done():
                 self._direct_rpc_task.cancel()
                 try:
@@ -213,90 +212,55 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         """Resolve a local Shelly connection from the selected whole-home entity.
 
         Prefer the selected entity's Shelly config entry, then its device and
-        parent-device config entries. If HA has exactly one Shelly entry, use
-        that as a safe fallback. Multiple unrelated Shelly entries require an
-        explicit future selection rather than guessing.
+        entity metadata. Return None when the entity is not associated with a
+        Shelly integration device.
         """
-        registry = er.async_get(self.hass)
-        device_registry = dr.async_get(self.hass)
-        entity = registry.async_get(self.power_entity)
-        candidate_entries = []
-
-        def add_entry(entry_id: str | None) -> None:
-            if not entry_id:
-                return
-            entry = self.hass.config_entries.async_get_entry(entry_id)
-            if entry and entry.domain == "shelly" and entry.data.get(CONF_HOST):
-                candidate_entries.append(entry)
-
-        if entity:
-            add_entry(entity.config_entry_id)
-            if entity.device_id:
-                device = device_registry.async_get(entity.device_id)
-                if device:
-                    for entry_id in getattr(device, "config_entries", set()):
-                        add_entry(entry_id)
-                    parent_id = getattr(device, "parent_device_id", None)
-                    if parent_id:
-                        parent = device_registry.async_get(parent_id)
-                        if parent:
-                            for entry_id in getattr(parent, "config_entries", set()):
-                                add_entry(entry_id)
-
-        if not candidate_entries:
-            shelly_entries = [
-                e for e in self.hass.config_entries.async_entries("shelly")
-                if e.data.get(CONF_HOST)
-            ]
-            if len(shelly_entries) == 1:
-                candidate_entries = shelly_entries
-
-        unique = {entry.entry_id: entry for entry in candidate_entries}
-        if len(unique) != 1:
-            return None
-        entry = next(iter(unique.values()))
-        return (
-            entry.data[CONF_HOST],
-            int(entry.data.get(CONF_PORT, 80)),
-            entry.data.get(CONF_USERNAME),
-            entry.data.get(CONF_PASSWORD),
-        )
+        reg = er.async_get(self.hass)
+        entity_entry = reg.async_get(self.power_entity)
+        if entity_entry and entity_entry.config_entry_id:
+            config_entry = self.hass.config_entries.async_get_entry(entity_entry.config_entry_id)
+            if config_entry and config_entry.domain == "shelly":
+                host = config_entry.data.get(CONF_HOST)
+                if host:
+                    return host, int(config_entry.data.get(CONF_PORT, 80)), config_entry.data.get(CONF_USERNAME), config_entry.data.get(CONF_PASSWORD)
+        device_reg = dr.async_get(self.hass)
+        if entity_entry and entity_entry.device_id:
+            device = device_reg.async_get(entity_entry.device_id)
+            if device:
+                for config_entry_id in device.config_entries:
+                    config_entry = self.hass.config_entries.async_get_entry(config_entry_id)
+                    if config_entry and config_entry.domain == "shelly":
+                        host = config_entry.data.get(CONF_HOST)
+                        if host:
+                            return host, int(config_entry.data.get(CONF_PORT, 80)), config_entry.data.get(CONF_USERNAME), config_entry.data.get(CONF_PASSWORD)
+        return None
 
     async def _direct_shelly_poll(self, device_id: str):
-        """Poll the selected Shelly locally and provide fast training samples."""
-        config = self._shelly_rpc_config()
-        if config is None:
+        cfg = self._shelly_rpc_config()
+        if not cfg:
             self._direct_rpc_available = False
-            self._response_log(
-                "rpc_unavailable",
-                device_id,
-                reason="No unique Shelly connection could be resolved from the selected whole-home meter",
-            )
             return
-
-        host, port, username, password = config
-        auth = aiohttp.BasicAuth(username, password) if username and password else None
-        timeout = aiohttp.ClientTimeout(total=1.0)
+        host, port, username, password = cfg
+        auth = aiohttp.BasicAuth(username, password) if username else None
+        timeout = aiohttp.ClientTimeout(total=2)
         session = async_get_clientsession(self.hass)
         try:
-            while self._training_device == device_id:
+            while self._training_engine and self._training_device == device_id:
                 started = self.hass.loop.time()
                 try:
                     total = None
                     source = None
-
-                    # Pro 3EM firmware/configurations can expose the aggregate
-                    # through EM.GetStatus, while others expose the three phase
-                    # readings as EM1 components. Try the aggregate endpoint once;
-                    # if it is unsupported (notably HTTP 404), switch to the
-                    # phase-sum endpoint for the remainder of this training run.
-                    if self._direct_rpc_mode != "em1":
-                        url = f"http://{host}:{port}/rpc/EM.GetStatus?id=0"
+                    if self._direct_rpc_mode in (None, "em"):
                         try:
+                            url = f"http://{host}:{port}/rpc/EM.GetStatus?id=0"
                             async with session.get(url, auth=auth, timeout=timeout) as response:
                                 response.raise_for_status()
                                 payload = await response.json(content_type=None)
-                            total = payload.get("total_act_power") if isinstance(payload, dict) else None
+                            if isinstance(payload, dict):
+                                for key in ("total_act_power", "total_power", "act_power"):
+                                    if payload.get(key) is not None:
+                                        total = float(payload[key])
+                                        break
                             if total is not None:
                                 source = "EM.GetStatus"
                                 self._direct_rpc_mode = "em"
@@ -327,7 +291,6 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                     self._direct_rpc_available = True
                     self._direct_rpc_host = host
                     self._direct_rpc_samples.append((sample_time, total))
-
                     whole = self.hass.states.get(self.power_entity)
                     ha_w = None
                     ha_updated = ""
@@ -337,21 +300,9 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         except (TypeError, ValueError):
                             pass
                         ha_updated = whole.last_updated.isoformat()
-
-                    self._response_log(
-                        "shelly_rpc_sample",
-                        device_id,
-                        shelly_host=host,
-                        rpc_source=source,
-                        rpc_power_w=round(total, 3),
-                        rpc_elapsed_ms=round(elapsed_ms, 2),
-                        ha_power_w=ha_w,
-                        ha_last_updated=ha_updated,
-                    )
+                    await self._response_log("shelly_rpc_sample", device_id, shelly_host=host, rpc_source=source, rpc_power_w=round(total, 3), rpc_elapsed_ms=round(elapsed_ms, 2), ha_power_w=ha_w, ha_last_updated=ha_updated)
                 except Exception as err:
-                    self._response_log(
-                        "shelly_rpc_error", device_id, shelly_host=host, error=str(err)
-                    )
+                    await self._response_log("shelly_rpc_error", device_id, shelly_host=host, error=str(err))
                 await asyncio.sleep(0.25)
         except asyncio.CancelledError:
             raise
@@ -365,11 +316,6 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             direct_cursor = 0
             while self._training_engine and self._training_device == device_id:
                 samples: list[tuple[float, float]] = []
-
-                # Once a direct Shelly sample is available, it is the preferred
-                # whole-home signal for the entire training session. This keeps
-                # the established Quick timing while removing HA's slower state
-                # propagation from the measurement path.
                 if self._direct_rpc_available:
                     if direct_cursor < len(self._direct_rpc_samples):
                         samples = self._direct_rpc_samples[direct_cursor:]
@@ -388,83 +334,56 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                             self._response_last_updated = state_updated
                             values = {"power_w": watts, "ha_last_updated": state_updated}
                             if self._response_pending_action:
-                                action = self._response_pending_action
-                                values["response_to_action"] = action
+                                values["response_to"] = self._response_pending_action
                                 self._response_pending_action = None
-                            self._response_log("power_update", device_id, **values)
-
-                if samples:
-                    for now, watts in samples:
-                        state = self.training_state[device_id]
-                        state["live_power_w"] = watts
-                        baseline = state.get("baseline_w")
-                        state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
-                        if state.get("live_peak_w") is None or watts > state.get("live_peak_w", watts):
-                            state["live_peak_w"] = watts
-
-                        result = self._training_engine.add_sample(now, watts)
-                        state.update({
-                            k: result.get(k) for k in (
-                                "phase", "baseline_w", "peak_delta_w", "events_detected",
-                                "duration_s", "energy_wh", "cycles_required", "cycles_completed"
-                            )
-                        })
-                        baseline = state.get("baseline_w")
-                        state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
-                        state["result"] = result
-
-                        if method == "quick" and result.get("action"):
-                            action = result["action"]
-                            if action == "turn_on" and control_state == "off":
-                                state["instruction"] = "Turning the test device ON automatically…"
-                                await self._call_power(controls, True)
-                                control_state = "on"
-                                self._training_engine.control_action_consumed("turn_on", self.hass.loop.time())
-                            elif action == "turn_off" and control_state == "on":
-                                state["instruction"] = "Turning the test device OFF automatically…"
-                                await self._call_power(controls, False)
-                                control_state = "off"
-                                self._training_engine.control_action_consumed("turn_off", self.hass.loop.time())
-
-                        if result.get("failed"):
-                            state["status"] = "error"
-                            state["instruction"] = result.get("failure_reason", "Training could not be completed.")
-                            state["error"] = state["instruction"]
-                            await self._persist(force=True)
-                            return
-
-                        if result.get("completed"):
-                            if control_state == "on":
-                                await self._call_power(controls, False)
-                                control_state = "off"
-                            state["status"] = "complete"
-                            state["instruction"] = (
-                                "Training Complete. One manual electrical cycle was captured and saved."
-                                if method == "manual"
-                                else "Training Complete. Three controlled measurements were captured and saved."
-                            )
-                            state["learned"] = True
-                            state["completed_at"] = self.hass.loop.time()
-                            self.last_training_device_id = device_id
-                            state["completed"] = True
-                            self._response_log(
-                                "training_complete", device_id,
-                                learned_load_w=result.get("peak_delta_w"),
-                                measurement_source="shelly_rpc" if self._direct_rpc_available else "ha_entity",
-                                shelly_host=self._direct_rpc_host or "",
-                            )
-                            state["learned_signature"] = {
-                                "method": method, "baseline_w": result.get("baseline_w"), "load_w": result.get("peak_delta_w"),
-                                "duration_s": result.get("duration_s"), "energy_wh": result.get("energy_wh"),
-                                "events_detected": result.get("events_detected", 0), "observations": result.get("observations", []),
-                            }
-                            await self._persist(force=True)
-                            if self._direct_rpc_task and not self._direct_rpc_task.done():
-                                self._direct_rpc_task.cancel()
-                            return
-
-                        await self._persist()
-
+                            await self._response_log("power_update", device_id, **values)
+                for now, watts in samples:
+                    state=self.training_state[device_id]
+                    state["live_power_w"]=watts
+                    baseline=state.get("baseline_w")
+                    state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
+                    if state.get("live_peak_w") is None or watts > state.get("live_peak_w", watts):
+                        state["live_peak_w"] = watts
+                    result = self._training_engine.add_sample(now, watts)
+                    state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed")})
+                    baseline = state.get("baseline_w")
+                    state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
+                    state["result"] = result
+                    if method == "quick" and result.get("action"):
+                        action = result["action"]
+                        if action == "turn_on" and control_state == "off":
+                            state["instruction"] = "Turning the test device ON automatically…"
+                            await self._call_power(controls, True)
+                            control_state = "on"
+                            self._training_engine.control_action_consumed("turn_on", self.hass.loop.time())
+                        elif action == "turn_off" and control_state == "on":
+                            state["instruction"] = "Turning the test device OFF automatically…"
+                            await self._call_power(controls, False)
+                            control_state = "off"
+                            self._training_engine.control_action_consumed("turn_off", self.hass.loop.time())
+                    if result.get("failed"):
+                        state["status"] = "error"
+                        state["instruction"] = result.get("failure_reason", "Training could not be completed.")
+                        state["error"] = state["instruction"]
+                        await self._persist(force=True)
+                        return
+                    if result.get("completed"):
+                        if control_state == "on":
+                            await self._call_power(controls, False)
+                            control_state = "off"
+                        state["status"] = "complete"
+                        state["instruction"] = ("Training Complete. One manual electrical cycle was captured and saved." if method == "manual" else "Training Complete. Three controlled measurements were captured and saved.")
+                        state["learned"] = True
+                        state["completed_at"] = self.hass.loop.time()
+                        self.last_training_device_id = device_id
+                        state["completed"] = True
+                        await self._response_log("training_complete", device_id, learned_load_w=result.get("peak_delta_w"), measurement_source="shelly_rpc" if self._direct_rpc_available else "ha_entity", shelly_host=self._direct_rpc_host or "")
+                        state["learned_signature"] = {"method": method, "baseline_w": result.get("baseline_w"), "load_w": result.get("peak_delta_w"), "duration_s": result.get("duration_s"), "energy_wh": result.get("energy_wh"), "events_detected": result.get("events_detected", 0), "observations": result.get("observations", [])}
+                        await self._persist(force=True)
+                        if self._direct_rpc_task and not self._direct_rpc_task.done():
+                            self._direct_rpc_task.cancel()
+                        return
+                    await self._persist()
                 await asyncio.sleep(0.10 if self._direct_rpc_available else 0.5)
         except asyncio.CancelledError:
             raise
@@ -492,13 +411,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             command_loop = self.hass.loop.time()
             await self.hass.services.async_call(domain,service,{"entity_id":entity_id},blocking=True)
             self._response_pending_action = service
-            self._response_log(
-                "control_command",
-                self._training_device or "",
-                entity_id=entity_id,
-                action=service,
-                command_loop=command_loop,
-            )
+            await self._response_log("control_command", self._training_device or "", entity_id=entity_id, action=service, command_loop=command_loop)
 
     async def async_reset_training(self, device_id: str):
         """Clear a training session without touching device commissioning."""
