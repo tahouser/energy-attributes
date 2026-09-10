@@ -1,4 +1,4 @@
-/* EnergyIQ v2.1.2 frontend loader. Unique URL forces Home Assistant/browser to fetch the current frontend. */
+/* EnergyIQ v2.1.1 frontend loader, uniquely named to force a fresh browser fetch. */
 (async () => {
   const load = async (path) => {
     try { await import(`${path}?v=212`); return true; }
@@ -7,8 +7,8 @@
 
   const setVersion = (panel) => {
     const sub = panel?.querySelector?.(".sub");
-    if (sub && sub.textContent !== "Whole-home electrical intelligence · v2.1.2") {
-      sub.textContent = "Whole-home electrical intelligence · v2.1.2";
+    if (sub && sub.textContent !== "Whole-home electrical intelligence · v2.1.1") {
+      sub.textContent = "Whole-home electrical intelligence · v2.1.1";
     }
   };
 
@@ -25,9 +25,7 @@
           new Promise((_, reject) => setTimeout(() => reject(new Error(`EnergyIQ WebSocket timeout: ${message?.type || "unknown command"}`)), 10000)),
         ]);
       }
-      if (hass?.connection?.sendMessagePromise) {
-        return hass.connection.sendMessagePromise(message);
-      }
+      if (hass?.connection?.sendMessagePromise) return hass.connection.sendMessagePromise(message);
       throw new Error("EnergyIQ: Home Assistant WebSocket API is not available.");
     };
 
