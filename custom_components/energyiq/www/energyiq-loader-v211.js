@@ -5,6 +5,11 @@
     catch (error) { console.error(`EnergyIQ frontend layer failed: ${path}`, error); return false; }
   };
 
+  const setVersion = (panel) => {
+    const sub = panel?.querySelector?.(".sub");
+    if (sub) sub.textContent = "Whole-home electrical intelligence · v2.1.1";
+  };
+
   // Keep the Home Assistant panel element name stable. The loader itself is
   // uniquely versioned, so stale v2.0.9 loader assets are not reused.
   const panelLoaded = await load("./energyiq-panel.js");
@@ -27,6 +32,19 @@
       }
       throw new Error("EnergyIQ: Home Assistant WebSocket API is not available.");
     };
+
+    // _render() creates the header asynchronously, so changing the subtitle
+    // only once at loader startup is too early. Wrap the render method so the
+    // v2.1.1 label is applied every time the panel rebuilds its DOM.
+    if (typeof proto._render === "function" && !proto.__energyiqVersionPatched) {
+      const originalRender = proto._render;
+      proto._render = function (...args) {
+        const result = originalRender.apply(this, args);
+        setVersion(this);
+        return result;
+      };
+      proto.__energyiqVersionPatched = true;
+    }
   }
 
   // Supporting layers are loaded after the panel transport is patched.
@@ -36,12 +54,8 @@
   await load("./energyiq-long-cycle.js");
   await load("./energyiq-accounting.js");
 
-  const setVersion = () => {
-    const panel = document.querySelector("energyiq-panel-v209");
-    const sub = panel?.querySelector(".sub");
-    if (sub) sub.textContent = "Whole-home electrical intelligence · v2.1.1";
-  };
-  setVersion();
-  setTimeout(setVersion, 100);
-  setTimeout(setVersion, 500);
+  const panel = document.querySelector("energyiq-panel-v209");
+  setVersion(panel);
+  setTimeout(() => setVersion(document.querySelector("energyiq-panel-v209")), 100);
+  setTimeout(() => setVersion(document.querySelector("energyiq-panel-v209")), 500);
 })();
