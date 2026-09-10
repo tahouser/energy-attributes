@@ -166,7 +166,7 @@ async def ws_set_monitoring(hass, connection, msg):
     selected &= valid
     coordinator.device_classifications = {did: "monitor" if did in selected else "ignore" for did in valid}
     coordinator.monitored_entities = _monitored_entity_ids(coordinator)
-    hass.config_entries.async_update_entry(hass, coordinator.entry, options={
+    hass.config_entries.async_update_entry(coordinator.entry, options={
         **coordinator.entry.options,
         "monitored_entities": coordinator.monitored_entities,
         "device_classifications": coordinator.device_classifications,
@@ -209,7 +209,7 @@ async def ws_add_manual_device(hass, connection, msg):
     }
     coordinator.candidate_devices[did] = candidate
     coordinator.device_classifications[did] = "monitor"
-    hass.config_entries.async_update_entry(hass, coordinator.entry, options={
+    hass.config_entries.async_update_entry(coordinator.entry, options={
         **coordinator.entry.options,
         "candidate_devices": coordinator.candidate_devices,
         "device_classifications": coordinator.device_classifications,
@@ -313,7 +313,7 @@ async def ws_add_entity(hass, connection, msg):
     candidate["evidence"] = (candidate.get("evidence") + "; " if candidate.get("evidence") else "") + f"Manually selected HA entity: {entity_id}"
     coordinator.device_classifications[did] = "monitor"
     coordinator.monitored_entities = _monitored_entity_ids(coordinator)
-    hass.config_entries.async_update_entry(hass, coordinator.entry, options={
+    hass.config_entries.async_update_entry(coordinator.entry, options={
         **coordinator.entry.options,
         "candidate_devices": coordinator.candidate_devices,
         "device_classifications": coordinator.device_classifications,
