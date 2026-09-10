@@ -1,4 +1,4 @@
-"""Sensors for Energy Attribution."""
+"""Sensors for EnergyIQ."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .const import DOMAIN
 async def async_setup_entry(
     hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up Energy Attribution sensors."""
+    """Set up EnergyIQ sensors."""
     coordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([WholeHomePowerSensor(coordinator, entry.entry_id), TrainingStatusSensor(coordinator)])
 
@@ -39,9 +39,9 @@ class WholeHomePowerSensor(CoordinatorEntity[EnergyAttributionCoordinator], Sens
 
 
 class TrainingStatusSensor(SensorEntity):
-    """Expose the persistent training state for the hub."""
+    """Expose the persistent EnergyIQ training state."""
 
-    _attr_name = "Energy Attribution Training"
+    _attr_name = "EnergyIQ Training"
     _attr_icon = "mdi:school"
 
     def __init__(self, coordinator):
