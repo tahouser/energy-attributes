@@ -7,7 +7,9 @@
 
   const setVersion = (panel) => {
     const sub = panel?.querySelector?.(".sub");
-    if (sub) sub.textContent = "Whole-home electrical intelligence · v2.1.1";
+    if (sub && sub.textContent !== "Whole-home electrical intelligence · v2.1.1") {
+      sub.textContent = "Whole-home electrical intelligence · v2.1.1";
+    }
   };
 
   // Keep the Home Assistant panel element name stable. The loader itself is
@@ -15,10 +17,10 @@
   const panelLoaded = await load("./energyiq-panel.js");
   if (!panelLoaded) return;
 
-  // The panel historically used HA's older connection API. Patch it after the
-  // module registers the element, before normal panel startup requests run.
   const proto = customElements.get("energyiq-panel-v209")?.prototype;
   if (proto) {
+    // The panel historically used HA's older connection API. Patch it after the
+    // module registers the element, before normal panel startup requests run.
     proto._ws = function (message) {
       const hass = this._hass;
       if (hass?.callWS) {
@@ -33,9 +35,8 @@
       throw new Error("EnergyIQ: Home Assistant WebSocket API is not available.");
     };
 
-    // _render() creates the header asynchronously, so changing the subtitle
-    // only once at loader startup is too early. Wrap the render method so the
-    // v2.1.1 label is applied every time the panel rebuilds its DOM.
+    // _render() replaces the panel's innerHTML. Keep the version label correct
+    // even if an initial render happened before this loader patched the method.
     if (typeof proto._render === "function" && !proto.__energyiqVersionPatched) {
       const originalRender = proto._render;
       proto._render = function (...args) {
@@ -54,8 +55,21 @@
   await load("./energyiq-long-cycle.js");
   await load("./energyiq-accounting.js");
 
+  const applyVersion = () => setVersion(document.querySelector("energyiq-panel-v209"));
+  applyVersion();
+
+  // The panel can render/re-render asynchronously. Observe its light DOM so
+  // the visible build label cannot be overwritten by the legacy v2.0.9 markup.
   const panel = document.querySelector("energyiq-panel-v209");
-  setVersion(panel);
-  setTimeout(() => setVersion(document.querySelector("energyiq-panel-v209")), 100);
-  setTimeout(() => setVersion(document.querySelector("energyiq-panel-v209")), 500);
+  if (panel && !panel.__energyiqVersionObserver) {
+    const observer = new MutationObserver(applyVersion);
+    observer.observe(panel, { childList: true, subtree: true, characterData: true });
+    panel.__energyiqVersionObserver = observer;
+    applyVersion();
+  }
+
+  setTimeout(applyVersion, 100);
+  setTimeout(applyVersion, 500);
+  setTimeout(applyVersion, 1500);
+  setTimeout(applyVersion, 3000);
 })();
