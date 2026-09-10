@@ -23,7 +23,7 @@ jobs:
 
           # One-time repair of the accidentally moved v2.1.1 tag.
           # v2.1.1 is the last known good baseline before the v2.1.3 UI work.
-          OLD_SHA="eaab3377f34e0a59afd34c528b87e77dbdde2bf9"
+          OLD_SHA="b5bc4e2d54af96ec02468104d2c0d7215143f31f"
           BASELINE_SHA="2738e92c060495b0a3686b36cc9f1ef9840f3b55"
           CURRENT_V211=$(gh api "/repos/${{ github.repository }}/git/ref/tags/v2.1.1" --jq '.object.sha' 2>/dev/null || true)
           if [ "$CURRENT_V211" = "$OLD_SHA" ]; then
