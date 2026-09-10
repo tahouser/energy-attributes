@@ -120,6 +120,8 @@
       const d = monitorBoxDevice(self, box);
       if (!d) return;
       const pending = new Set(self._pendingSelections || persistedIds(self));
+      // This listener runs in the capture phase, before the browser's
+      // default checkbox action. Flip the current value exactly once.
       const next = !box.checked;
       box.checked = next;
       if (next) pending.add(d.device_id); else pending.delete(d.device_id);
