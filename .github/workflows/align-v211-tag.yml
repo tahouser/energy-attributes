@@ -15,7 +15,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Create immutable version tag
+      - name: Create immutable version tag and release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -24,18 +24,8 @@ jobs:
           VERSION=$(jq -r '.version' custom_components/energyiq/manifest.json)
           TAG="v${VERSION}"
 
-          # v2.1.1 is the stable baseline and must never move again.
-          BASELINE_SHA="2738e92c060495b0a3686b36cc9f1ef9840f3b55"
-          gh api --method PATCH \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2026-03-10" \
-            "/repos/${{ github.repository }}/git/refs/tags/v2.1.1" \
-            -f sha="$BASELINE_SHA" \
-            -F force=true
-
-          # A version tag is created only once. Changing code without changing
-          # manifest.json never moves an existing release tag.
-          if [ "$TAG" != "v2.1.1" ] && ! gh api "/repos/${{ github.repository }}/git/ref/tags/$TAG" >/dev/null 2>&1; then
+          # Release tags are immutable. Never move or rewrite an existing tag.
+          if ! gh api "/repos/${{ github.repository }}/git/ref/tags/$TAG" >/dev/null 2>&1; then
             gh api --method POST \
               -H "Accept: application/vnd.github+json" \
               -H "X-GitHub-Api-Version: 2026-03-10" \
@@ -44,5 +34,16 @@ jobs:
               -f sha="${{ github.sha }}"
             echo "Created $TAG at ${{ github.sha }}"
           else
-            echo "$TAG already exists; leaving it unchanged. Bump manifest.json for a new release."
+            echo "$TAG already exists; leaving it unchanged."
+          fi
+
+          # HACS uses GitHub releases for the normal update/download path.
+          # Create the release when the version tag does not already have one.
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "EnergyIQ $TAG" \
+              --generate-notes
+            echo "Created release $TAG"
+          else
+            echo "Release $TAG already exists; leaving it unchanged."
           fi
