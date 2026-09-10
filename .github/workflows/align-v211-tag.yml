@@ -1,0 +1,24 @@
+name: Align v2.1.1 tag
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  align-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Move v2.1.1 tag to this main commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "/repos/${{ github.repository }}/git/refs/tags/v2.1.1" \
+            -f sha="${{ github.sha }}" \
+            -F force=true
