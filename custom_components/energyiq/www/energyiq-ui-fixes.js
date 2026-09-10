@@ -5,8 +5,17 @@
     if (!panel || panel.__energyiqUiFixesInstalled) return;
     panel.__energyiqUiFixesInstalled = true;
 
-    // Save is the commit point. Do not let the UI classification change until
-    // the user actually saves the pending monitoring selection.
+    const ensurePending = () => {
+      if (!(panel._pendingSelections instanceof Set)) {
+        panel._pendingSelections = new Set(
+          (panel.data?.devices || [])
+            .filter(x => x.classification === "monitor")
+            .map(x => x.device_id)
+        );
+      }
+      return panel._pendingSelections;
+    };
+
     if (typeof panel._save === "function") {
       const originalSave = panel._save.bind(panel);
       panel._save = async (...args) => {
@@ -15,9 +24,26 @@
       };
     }
 
-    // The native handler changes the pending selection and can immediately
-    // rebuild the monitored/excluded view. Capture the checkbox event first so
-    // an unchecked device remains in the current Monitored view until Save.
+    // Capture CLICK before the panel's own checkbox handler. The panel can
+    // otherwise rerender/sort the row before the later change event fires.
+    panel.addEventListener("click", (event) => {
+      const box = event.target?.closest?.("input[data-device]");
+      if (!(box instanceof HTMLInputElement) || panel._listMode !== "monitored") return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      const nextChecked = !box.checked;
+      box.checked = nextChecked;
+      const pending = ensurePending();
+      if (nextChecked) pending.add(box.dataset.device);
+      else pending.delete(box.dataset.device);
+
+      panel._listMode = "monitored";
+      panel._render();
+    }, true);
+
+    // Also guard direct/programmatic change events.
     panel.addEventListener("change", (event) => {
       const box = event.target;
       if (!(box instanceof HTMLInputElement) || !box.matches("input[data-device]")) return;
@@ -25,24 +51,14 @@
 
       event.preventDefault();
       event.stopImmediatePropagation();
-
-      if (!(panel._pendingSelections instanceof Set)) {
-        panel._pendingSelections = new Set(
-          (panel.data?.devices || [])
-            .filter(x => x.classification === "monitor")
-            .map(x => x.device_id)
-        );
-      }
-      if (box.checked) panel._pendingSelections.add(box.dataset.device);
-      else panel._pendingSelections.delete(box.dataset.device);
-
-      // Keep the user in the Monitored list while edits are pending.
+      const pending = ensurePending();
+      if (box.checked) pending.add(box.dataset.device);
+      else pending.delete(box.dataset.device);
       panel._listMode = "monitored";
       panel._render();
     }, true);
 
-    // After the native renderer runs, restore any originally monitored rows
-    // that are now unchecked. They remain visible until Save commits the change.
+    // Safety net for any other renderer invocation while edits are pending.
     const originalRender = panel._render.bind(panel);
     panel._render = (...args) => {
       const pending = panel._pendingSelections;
@@ -54,9 +70,9 @@
       originalRender(...args);
 
       if (!(pending instanceof Set) || panel._listMode !== "monitored") return;
-      const devices = panel.data?.devices || [];
       const table = panel.querySelector(".table-wrap table");
       if (!table) return;
+      const devices = panel.data?.devices || [];
 
       for (const device of devices) {
         if (!originalMonitored.has(device.device_id) || pending.has(device.device_id)) continue;
