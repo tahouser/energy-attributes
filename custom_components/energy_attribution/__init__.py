@@ -1,19 +1,20 @@
-"""Energy Attribution integration."""
+"""EnergyIQ Home Assistant integration."""
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .coordinator import EnergyAttributionCoordinator
 from .websocket import async_register as async_register_websocket
 from .long_cycle import async_register as async_register_long_cycle
 from .accounting import async_register as async_register_accounting
+from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
-URL_BASE = "/energy-attribution-static"
+URL_BASE = "/energyiq-static"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     data = hass.data.setdefault(DOMAIN, {})
@@ -28,8 +29,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         ])
         await panel_custom.async_register_panel(
             hass=hass,
-            frontend_url_path="energy-attribution",
-            webcomponent_name="energy-attribution-panel-v35",
+            frontend_url_path="energyiq",
+            webcomponent_name="energyiq-panel-v35",
             module_url=f"{URL_BASE}/energy-attribution-loader.js?v=7",
             sidebar_title="EnergyIQ",
             sidebar_icon="mdi:lightning-bolt",
@@ -39,7 +40,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    response_log_path = migrate_response_log(hass)
     coordinator = EnergyAttributionCoordinator(hass, entry)
+    coordinator._response_log_path = response_log_path
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await coordinator.async_load_training()
     await coordinator.async_config_entry_first_refresh()
