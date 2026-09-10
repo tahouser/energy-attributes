@@ -1,7 +1,7 @@
 /* EnergyIQ v2.1.1 frontend loader, uniquely named to force a fresh browser fetch. */
 (async () => {
   const load = async (path) => {
-    try { await import(`${path}?v=212`); return true; }
+    try { await import(`${path}?v=213`); return true; }
     catch (error) { console.error(`EnergyIQ frontend layer failed: ${path}`, error); return false; }
   };
 
@@ -40,6 +40,7 @@
     }
   }
 
+  await load("./energyiq-ui-v213.js");
   await load("./energyiq-state.js");
   await load("./energyiq-all-views.js");
   await load("./energyiq-diagnostic.js");
