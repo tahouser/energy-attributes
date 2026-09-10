@@ -1,13 +1,15 @@
-/* EnergyIQ v2.1.1 frontend loader. Unique loader URL and component name prevent stale v2.0.9 frontend assets from being reused. */
+/* EnergyIQ v2.1.1 frontend loader. Robust startup and cache-busted frontend. */
 (async () => {
   const load = async (path) => {
-    try { await import(`${path}?v=211`); }
-    catch (error) { console.error(`EnergyIQ frontend layer failed: ${path}`, error); }
+    try { await import(`${path}?v=211`); return true; }
+    catch (error) { console.error(`EnergyIQ frontend layer failed: ${path}`, error); return false; }
   };
 
-  await load("./energyiq-panel.js");
-  await customElements.whenDefined("energyiq-panel-v209");
+  const panelLoaded = await load("./energyiq-panel.js");
+  if (!panelLoaded) return;
 
+  // Patch the historical panel element before any pending upgrade/connected
+  // callback can start its first websocket request.
   const proto = customElements.get("energyiq-panel-v209")?.prototype;
   if (proto) {
     proto._ws = function (message) {
@@ -22,6 +24,7 @@
     };
   }
 
+  // Load the supporting frontend layers without blocking the panel itself.
   await load("./energyiq-state.js");
   await load("./energyiq-all-views.js");
   await load("./energyiq-diagnostic.js");
@@ -34,5 +37,7 @@
     if (sub) sub.textContent = "Whole-home electrical intelligence · v2.1.1";
   };
   setVersion();
+  setTimeout(setVersion, 100);
+  setTimeout(setVersion, 500);
   new MutationObserver(setVersion).observe(document.documentElement, {childList:true, subtree:true});
 })();
