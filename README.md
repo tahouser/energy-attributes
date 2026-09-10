@@ -1,15 +1,20 @@
-# EnergyIQ v1.7.22
+# EnergyIQ v2.0.0
 
 EnergyIQ is a Home Assistant custom integration for whole-home electrical intelligence and load identification.
 
+## v2.0.0
+- Resets the Home Assistant integration domain to `energyiq` for a clean long-term product identity.
+- Uses the `custom_components/energyiq` integration path.
+- Adds automatic migration of the legacy `energy_attribution_response.csv` training log to `energyiq_response.csv` and removes the legacy file only after successful verification.
+- Removes committed Python cache artifacts from the integration package.
+- Uses EnergyIQ branding consistently in the Home Assistant integration.
+
 ## v1.7.22
-- Adds the new EnergyIQ Power & Control integration icon using the light-background design.
-- Keeps the internal `energy_attribution` domain unchanged for compatibility.
+- Added the EnergyIQ Power & Control integration icon using the light-background design.
 
 ## v1.7.21
-- Removes the old `AAA` prefix from user-facing commissioning and integration branding.
+- Removed the old `AAA` prefix from user-facing commissioning and integration branding.
 - Uses **EnergyIQ** consistently as the visible product name.
-- Keeps the internal `energy_attribution` domain unchanged for compatibility.
 
 ## v1.7.20
 - Keeps Trained active watts as the primary value in the existing Trained active watts tile.
@@ -21,15 +26,3 @@ EnergyIQ is a Home Assistant custom integration for whole-home electrical intell
 - Makes the EnergyIQ panel itself vertically scrollable on iOS/mobile layouts.
 - Preserves horizontal table panning with direction-aware touch handling.
 - Forces fresh frontend module URLs for the repaired panel.
-
-## v1.7.17
-- Forces a fresh frontend module load so Home Assistant/mobile browsers cannot continue using the stale v1.7.13 panel bundle.
-- Keeps the current accounting, monitored-load, entity-selection, and supervised Long Cycle frontend modules on explicit cache-busted URLs.
-- Bumps the integration version so the installed version can be verified independently of the GitHub README.
-
-## v1.7.16
-- Added accounting for Home Power, Trained Active, Unaccounted Now, Mystery Watts, Training Coverage, and an explicit observed reference maximum.
-
-## v1.7.15
-- Added supervised Long Cycle training for HVAC and other loads with multi-stage behavior.
-- Long Cycle waits for the first significant event, asks the user to confirm the load, captures the complete cycle, and supports manual end-of-training.
