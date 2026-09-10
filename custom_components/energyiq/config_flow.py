@@ -1,4 +1,4 @@
-"""Config flow for Energy Attribution."""
+"""Config flow for EnergyIQ."""
 from __future__ import annotations
 
 import logging
@@ -27,9 +27,6 @@ _ENERGY_CLASSES = {"energy"}
 _POWER_UNITS = {"W", "kW", "MW", "w", "kw", "mw"}
 _ENERGY_UNITS = {"Wh", "kWh", "MWh", "GWh", "wh", "kwh", "mwh", "gwh"}
 
-# These are normally derived/display-only energy sensors rather than a useful
-# appliance measurement for attribution. Keep the real cumulative energy and
-# live power sensors, not cost/tariff/difference/history derivatives.
 _DERIVED_ENERGY_WORDS = {
     "difference", "saved", "cost", "price", "tariff", "rate", "forecast",
     "daily", "weekly", "monthly", "yearly", "yesterday", "today", "last",
@@ -89,13 +86,57 @@ def _is_battery_entity(hass, entry: er.RegistryEntry) -> bool:
     return state is not None and state.attributes.get("device_class") == "battery"
 
 
-def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[str, Any]]:
-    """Build the Energy Attribution device environment.
+def _is_load_control(hass, entry: er.RegistryEntry) -> bool:
+    """Return True when an entity is plausibly an electrical load control.
 
-    A device is a candidate if it has direct power/energy evidence OR a
-    controllable appliance/load-style entity. This intentionally includes
-    lights, switches/outlets, fans, climate devices, media players (TV/audio),
-    vacuums, water heaters and similar loads so the user can decide later.
+    Keep the first-pass inventory broad enough to catch real loads that do not
+    expose a power sensor, but do not treat every HA entity as a load. Domains
+    such as media_player are checked for actual power capability rather than
+    being accepted solely because the domain exists.
+    """
+    if _is_ignored_entity(entry):
+        return False
+
+    strong_domains = {
+        "light", "switch", "fan", "climate", "humidifier", "water_heater",
+    }
+    if entry.domain in strong_domains:
+        return True
+
+    state = hass.states.get(entry.entity_id)
+    supported = int(state.attributes.get("supported_features", 0)) if state else int(entry.supported_features or 0)
+
+    if entry.domain == "media_player":
+        # HA exposes turn_on/turn_off as MediaPlayerEntityFeature flags.
+        from homeassistant.components.media_player import MediaPlayerEntityFeature
+        required = int(MediaPlayerEntityFeature.TURN_ON | MediaPlayerEntityFeature.TURN_OFF)
+        return (supported & required) == required
+
+    if entry.domain == "vacuum":
+        # A vacuum is a genuine electrical load even though its control API is
+        # start/stop rather than generic turn_on/turn_off.
+        from homeassistant.components.vacuum import VacuumEntityFeature
+        required = int(VacuumEntityFeature.START | VacuumEntityFeature.STOP)
+        return (supported & required) == required
+
+    if entry.domain == "cover":
+        # Motorized shades/doors are also electrical loads. They are included
+        # for commissioning/manual training even when Auto Quick cannot yet
+        # operate them through the generic power service.
+        from homeassistant.components.cover import CoverEntityFeature
+        required = int(CoverEntityFeature.OPEN | CoverEntityFeature.CLOSE)
+        return (supported & required) == required
+
+    return False
+
+
+def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[str, Any]]:
+    """Build the EnergyIQ device environment.
+
+    Candidate evidence comes from either a real power/energy measurement or a
+    load-like entity with meaningful control capability. This is intentionally
+    broader than the old fixed switch/light filter, while still excluding
+    generic helpers, diagnostics and environmental-only entities.
     """
     devices = dr.async_get(hass)
     entities = er.async_get(hass)
@@ -109,32 +150,14 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
         if entry.device_id:
             by_device.setdefault(entry.device_id, []).append(entry)
 
-    # Domains that represent a controllable thing that can itself be an
-    # electrical load, even when it has no direct power sensor.
-    load_domains = {
-        "light", "switch", "fan", "climate", "humidifier", "media_player",
-        "vacuum", "water_heater",
-    }
-
-    # Domains that are explicitly not electrical-load candidates by themselves.
-    ignored_domains = {
-        "binary_sensor", "button", "camera", "event", "image", "input_boolean",
-        "input_button", "input_datetime", "input_number", "input_select",
-        "input_text", "number", "remote", "scene", "select", "sensor",
-        "text", "update", "weather", "device_tracker",
-    }
-
     candidates: list[dict[str, Any]] = []
-
-    # HA 2026.9 no longer exposes the device registry as an iterable mapping.
-    # Iterate the public main-device and child-device collections directly.
     all_devices = [*devices.devices, *devices.child_devices]
-    _LOGGER.debug("EnergyIQ device registry inventory: %d main + %d child devices", len(devices.devices), len(devices.child_devices))
+    _LOGGER.debug(
+        "EnergyIQ device registry inventory: %d main + %d child devices",
+        len(devices.devices), len(devices.child_devices),
+    )
+
     for device in all_devices:
-        # Shelly Energy Meter devices/channels are the whole-home measurement
-        # family and must never appear as appliance/load candidates.  This
-        # also catches phase/channel child devices that HA does not link via
-        # parent_device_id consistently.
         device_name = " ".join(
             str(value or "") for value in (
                 device.name_by_user, device.name, device.manufacturer, device.model
@@ -142,16 +165,17 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
         ).casefold()
         if "shelly" in device_name and "energy meter" in device_name:
             continue
-        # Never treat the whole-home meter device (including phase/child
-        # channels) as an appliance/load. HA can represent those channels as
-        # child devices, so exclude the whole-home device family as well.
+
         if whole_home_device_id:
             whole_home_parent_id = getattr(whole_home_entry, "parent_device_id", None) if whole_home_entry else None
             device_parent_id = getattr(device, "parent_device_id", None)
             if (
                 device.id == whole_home_device_id
                 or device_parent_id == whole_home_device_id
-                or (whole_home_parent_id and (device.id == whole_home_parent_id or device_parent_id == whole_home_parent_id))
+                or (whole_home_parent_id and (
+                    device.id == whole_home_parent_id
+                    or device_parent_id == whole_home_parent_id
+                ))
             ):
                 continue
 
@@ -165,7 +189,6 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
 
             battery = battery or _is_battery_entity(hass, entry)
             kind = _measurement_kind(hass, entry)
-
             if kind:
                 measurements.append({
                     "entity_id": entry.entity_id,
@@ -174,22 +197,16 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
                     "unit": entry.unit_of_measurement or "",
                 })
 
-            if entry.domain in load_domains:
+            if _is_load_control(hass, entry):
                 controls.append({
                     "entity_id": entry.entity_id,
                     "name": _entity_name(hass, entry),
                     "domain": entry.domain,
                 })
 
-        # Measurement evidence is strongest. Otherwise a controllable
-        # load-style entity is enough to put the device into our review
-        # environment. This is deliberate: the user decides what is useful.
         if not measurements and not controls:
             continue
 
-        # A device that is only a battery/environmental sensor still does not
-        # qualify. Hybrid devices with both useful load evidence and battery
-        # entities remain candidates.
         if not measurements and battery and not controls:
             continue
 
@@ -225,7 +242,6 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
             "evidence": "; ".join(evidence),
         })
 
-    # Put measured loads first, then controllable loads without measurement.
     candidates.sort(
         key=lambda c: (
             0 if c["measurements"] else 1,
@@ -234,6 +250,7 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
         )
     )
     return candidates
+
 
 def _candidate_options(candidates: list[dict[str, Any]]) -> list[SelectOptionDict]:
     """Create readable bulk-selection options."""
@@ -248,6 +265,7 @@ def _candidate_options(candidates: list[dict[str, Any]]) -> list[SelectOptionDic
             )
         )
     return options
+
 
 def _monitored_entities(candidates: list[dict[str, Any]], selected: set[str]) -> list[str]:
     return [
@@ -291,11 +309,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 title="EnergyIQ",
                 data={
                     CONF_POWER_ENTITY: self._power_entity,
-                    # Adopt every filtered device into our private environment.
-                    # Selection/ignore is deliberately deferred to Configure.
-                    "candidate_devices": {
-                        c["device_id"]: c for c in self._candidates
-                    },
+                    "candidate_devices": {c["device_id"]: c for c in self._candidates},
                     CONF_MONITORED_ENTITIES: [],
                     "device_classifications": {},
                     "commissioned_devices": {},
@@ -320,13 +334,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
-    """Persistent commissioning workspace.
-
-    Live training is deliberately handled by the dedicated Energy Attribution
-    sidebar workspace; this Options Flow only controls which candidates are
-    monitored. That keeps the HA Configure action on the supported Options
-    Flow path instead of trying to embed a live application inside a form.
-    """
+    """Persistent commissioning workspace."""
 
     async def async_step_init(self, user_input=None):
         candidates = _build_candidates(
@@ -368,9 +376,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
-            description_placeholders={
-                "count": str(len(candidates)),
-            },
+            description_placeholders={"count": str(len(candidates))},
         )
 
 
@@ -382,9 +388,7 @@ def _training_method(candidate: dict[str, Any]) -> str:
         "dishwasher", "dryer", "washer", "washing machine", "oven",
         "range", "heat pump", "furnace", "air conditioner", "hvac",
     )
-    if domains & {"climate", "water_heater"} or any(
-        word in name for word in cycle_words
-    ):
+    if domains & {"climate", "water_heater"} or any(word in name for word in cycle_words):
         return "full_cycle"
     return "quick"
 
@@ -399,6 +403,7 @@ def _training_plan_text(method: str) -> str:
         "Suggested method: Quick ON/OFF test. The system will watch for "
         "consistent transitions and will not assume a fixed number of repeats."
     )
+
 
 def _candidate_category(candidate: dict[str, Any]) -> str:
     """Classify a candidate using HA entity domains, not AI guesses."""
@@ -419,5 +424,6 @@ def _candidate_category(candidate: dict[str, Any]) -> str:
         return "Fan"
     if "switch" in domains:
         return "Appliance"
+    if "cover" in domains:
+        return "Appliance"
     return "Electrical Load"
-
