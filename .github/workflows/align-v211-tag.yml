@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: energyiq-version-release
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -12,14 +16,26 @@ jobs:
   track-version:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
+      - name: Check out repository history
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Create immutable version tag and release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+
+          # Only a commit that actually changes manifest.json is a release
+          # commit. This prevents intermediate frontend/code commits from
+          # consuming the new version before the final manifest commit lands.
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            if git diff --quiet HEAD^ HEAD -- custom_components/energyiq/manifest.json; then
+              echo "manifest.json did not change in this commit; no release needed."
+              exit 0
+            fi
+          fi
 
           VERSION=$(jq -r '.version' custom_components/energyiq/manifest.json)
           TAG="v${VERSION}"
@@ -38,7 +54,6 @@ jobs:
           fi
 
           # HACS uses GitHub releases for the normal update/download path.
-          # Create the release when the version tag does not already have one.
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --title "EnergyIQ $TAG" \
