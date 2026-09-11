@@ -6,7 +6,7 @@
  */
 (() => {
   const TAG = "energyiq-panel-v309";
-  const VERSION = "3.1.7";
+  const VERSION = "3.1.8";
 
   if (customElements.get(TAG)) return;
 
