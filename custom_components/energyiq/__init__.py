@@ -15,7 +15,7 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "3110"
+FRONTEND_VERSION = "31100"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
