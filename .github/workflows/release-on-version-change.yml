@@ -29,42 +29,10 @@ jobs:
           PY
           )
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-      - name: Apply v3.0.6 frontend fixes
-        id: frontend_fix
-        if: steps.version.outputs.version == '3.0.6'
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          path = Path('custom_components/energyiq/www/energyiq-panel.js')
-          text = path.read_text(encoding='utf-8')
-          old = '.monitor{width:22px;height:22px}'
-          new = '.monitor,.train{width:22px;height:22px;margin:0}'
-          if old not in text:
-              raise SystemExit('Expected v3.0.6 monitor CSS was not found; refusing to modify the file.')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
-          PY
-          node --check custom_components/energyiq/www/energyiq-panel.js
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add custom_components/energyiq/www/energyiq-panel.js
-          git commit -m 'Fix v3.0.6 train checkbox sizing'
-          git push origin HEAD:main
-          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Set release target
-        id: target
-        shell: bash
-        run: |
-          if [ -n "${{ steps.frontend_fix.outputs.release_sha }}" ]; then
-            echo "sha=${{ steps.frontend_fix.outputs.release_sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          fi
       - name: Create release if missing
         uses: actions/github-script@v7
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          RELEASE_SHA: ${{ steps.target.outputs.sha }}
         with:
           script: |
             const tag = `v${process.env.VERSION}`;
@@ -81,7 +49,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tag,
-              target_commitish: process.env.RELEASE_SHA,
+              target_commitish: context.sha,
               name: `EnergyIQ ${tag}`,
               body: `EnergyIQ ${tag}\n\nAutomated release.`,
               draft: false,
