@@ -24,7 +24,7 @@ class TrainingEngine:
     baseline_window_s: float = 3.0
     min_event_w: float = 12.0
     stable_window_s: float = 1.0
-    quick_on_measurement_s: float = 3.0
+    quick_on_measurement_s: float = 5.0
     quick_off_settle_s: float = 1.5
     quick_capture_lead_s: float = 0.25
     return_tolerance_w: float = 25.0
