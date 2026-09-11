@@ -25,29 +25,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION=$(python - <<'PY'
+          python - <<'PY'
           import json
-          with open('custom_components/energyiq/manifest.json', encoding='utf-8') as f:
-              print(json.load(f)['version'])
+          from pathlib import Path
+
+          manifest = json.loads(Path('custom_components/energyiq/manifest.json').read_text(encoding='utf-8'))
+          version = manifest['version']
+          init = Path('custom_components/energyiq/__init__.py').read_text(encoding='utf-8')
+          js = Path('custom_components/energyiq/www/energyiq-panel.js').read_text(encoding='utf-8')
+
+          expected_frontend_version = version.replace('.', '') + '0'
+          stable_panel_id = 'energyiq-panel-v309'
+
+          assert f'sidebar_title="EnergyIQ • v{version}"' in init
+          assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
+          assert f'webcomponent_name="{stable_panel_id}"' in init
+          assert 'URL_BASE = "/energyiq-static"' in init
+          assert 'module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}"' in init
+          assert f'const TAG = "{stable_panel_id}";' in js
+          assert f'const VERSION = "{version}";' in js
+
+          assert Path('custom_components/energyiq/www/energyiq-panel.js').is_file()
+          assert not Path('custom_components/energyiq/www/energyiq-panel-entry.js').exists()
+          assert not Path('custom_components/energyiq/www/energyiq-ui.js').exists()
+
+          www = Path('custom_components/energyiq/www')
+          assert not list(www.glob('energyiq-panel-v*.js')), 'Versioned runtime panel copies are not allowed.'
+          assert not list(www.glob('README*.txt')), 'Temporary frontend README files are not allowed.'
+          assert not list(www.glob('*.tmp')), 'Temporary frontend files are not allowed.'
+          assert not list(www.glob('*.bak')), 'Temporary frontend backups are not allowed.'
+
+          print(f'EnergyIQ {version} structure and stable panel identity validated.')
           PY
-          )
-          PANEL_ID="energyiq-panel-v309"
-          FRONTEND_VERSION="${VERSION//./}0"
-          grep -Fq "sidebar_title=\"EnergyIQ • v${VERSION}\"" custom_components/energyiq/__init__.py
-          grep -Fq "webcomponent_name=\"${PANEL_ID}\"" custom_components/energyiq/__init__.py
-          grep -Fq "module_url=f\"/energyiq-static/energyiq-panel.js?v=${FRONTEND_VERSION}\"" custom_components/energyiq/__init__.py
-          grep -Fq "const TAG = \"${PANEL_ID}\";" custom_components/energyiq/www/energyiq-panel.js
-          grep -Fq "const VERSION = \"${VERSION}\";" custom_components/energyiq/www/energyiq-panel.js
-          grep -Fq "FRONTEND_VERSION = \"${FRONTEND_VERSION}\"" custom_components/energyiq/__init__.py
-          test -f custom_components/energyiq/www/energyiq-panel.js
-          test ! -e custom_components/energyiq/www/energyiq-panel-entry.js
-          test ! -e custom_components/energyiq/www/energyiq-ui.js
-          if find custom_components/energyiq/www -maxdepth 1 -type f -name 'energyiq-panel-v*.js' | grep -q .; then
-            echo 'Versioned runtime panel copies are not allowed.'
-            exit 1
-          fi
-          if find custom_components/energyiq/www -maxdepth 1 -type f \( -name 'README*.txt' -o -name '*.tmp' -o -name '*.bak' \) | grep -q .; then
-            echo 'Temporary frontend files are not allowed.'
-            exit 1
-          fi
-          echo "EnergyIQ ${VERSION} structure and stable panel identity validated."
