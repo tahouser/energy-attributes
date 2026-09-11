@@ -1,0 +1,74 @@
+name: Apply EnergyIQ v3.1.29
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply tested patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          
+          p=Path('custom_components/energyiq/websocket.py'); s=p.read_text()
+          s=s.replace('import json\nfrom pathlib import Path','import asyncio\nimport json\nfrom pathlib import Path',1)
+          marker='''@websocket_api.websocket_command({\n    vol.Required("type"): "energy_attribution/retry_training",'''
+          handlers='''@websocket_api.websocket_command({\n    vol.Required("type"): "energy_attribution/confirm_long_cycle",\n    vol.Required("entry_id"): str,\n    vol.Required("device_id"): str,\n    vol.Required("accepted"): bool,\n})\n@websocket_api.require_admin\n@websocket_api.async_response\nasync def ws_confirm_long_cycle(hass, connection, msg):\n    coordinator = _coordinator(hass, msg["entry_id"]); device_id = msg["device_id"]\n    if coordinator._training_device != device_id or coordinator._training_engine is None: raise ValueError("No active training session exists for this device")\n    engine=coordinator._training_engine\n    if engine.method != "full_cycle": raise ValueError("This control is only available for Full Cycle training")\n    result=engine.confirm_full_cycle(msg["accepted"], hass.loop.time()); state=coordinator.training_state.get(device_id,{})\n    state.update({k:result.get(k) for k in ("phase","baseline_w","peak_delta_w","duration_s","energy_wh")}); state["result"]=result\n    if result.get("failed"): state["status"]="error"; state["error"]=result.get("failure_reason"); state["instruction"]=result.get("failure_reason")\n    elif result.get("phase")=="capturing": state["instruction"]="Capturing power. Leave the device ON, then press Stop & Save when the cycle is complete."\n    else: state["instruction"]="Waiting for the target load to be ON. Press Start Power Capture when ready."\n    await coordinator._persist(force=True); connection.send_result(msg["id"], result)\n\n\n@websocket_api.websocket_command({\n    vol.Required("type"): "energy_attribution/end_long_cycle",\n    vol.Required("entry_id"): str,\n    vol.Required("device_id"): str,\n    vol.Optional("force", default=False): bool,\n})\n@websocket_api.require_admin\n@websocket_api.async_response\nasync def ws_end_long_cycle(hass, connection, msg):\n    coordinator=_coordinator(hass,msg["entry_id"]); device_id=msg["device_id"]\n    if coordinator._training_device != device_id or coordinator._training_engine is None: raise ValueError("No active training session exists for this device")\n    engine=coordinator._training_engine\n    if engine.method != "full_cycle": raise ValueError("This control is only available for Full Cycle training")\n    now=hass.loop.time(); result=engine.end_full_cycle(force=msg["force"]); state=coordinator.training_state.get(device_id,{})\n    state.update({k:result.get(k) for k in ("phase","baseline_w","peak_delta_w","duration_s","energy_wh")}); state["result"]=result\n    if result.get("action")=="end_warning": state["instruction"]="Not ready to save: keep the device ON for at least 30 seconds before pressing Stop & Save."\n    elif result.get("completed"):\n        state.update({"status":"complete","learned":True,"completed":True,"completed_at":now})\n        state["learned_signature"]={"method":"full_cycle","baseline_w":result.get("baseline_w"),"load_w":result.get("peak_delta_w"),"duration_s":result.get("duration_s"),"energy_wh":result.get("energy_wh"),"events_detected":result.get("events_detected",0),"observations":result.get("observations",[])}\n        coordinator.last_training_device_id=device_id\n        if coordinator._direct_rpc_task and not coordinator._direct_rpc_task.done(): coordinator._direct_rpc_task.cancel()\n    await coordinator._persist(force=True); connection.send_result(msg["id"], result)\n\n\n'''
+          if marker not in s: raise SystemExit('websocket marker missing')
+          s=s.replace(marker,handlers+marker,1)
+          old='for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_retry_training, ws_stop_training):'
+          new='for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_retry_training, ws_stop_training):'
+          if old not in s: raise SystemExit('websocket registration missing')
+          p.write_text(s.replace(old,new,1))
+          
+          p=Path('custom_components/energyiq/training.py'); s=p.read_text()
+          s=s.replace('    full_cycle_min_active_s: float = 30.0\n','    full_cycle_min_active_s: float = 30.0\n    full_cycle_settle_s: float = 5.0\n',1)
+          s=s.replace('    _end_requested: bool = False\n','    _end_requested: bool = False\n    _full_active_samples: list[PowerSample] = field(default_factory=list)\n',1)
+          old='''    def _full_step(self, s: PowerSample) -> dict:\n        # Long Cycle is deliberately supervised: detect the first event, then\n        # require the user to identify it before treating it as the target load.\n        if self.phase == "waiting_for_start" and s.watts >= self.baseline_w + self.on_threshold_w:\n            self.phase = "awaiting_confirmation"\n            self.cycle_started = s.timestamp\n            self.active_started = s.timestamp\n            self.active_peak_w = s.watts\n            return self.result(action="confirm_start")\n        if self.phase == "capturing":\n            self.active_peak_w = max(self.active_peak_w or s.watts, s.watts)\n        return self.result()\n'''
+          new='''    def _full_step(self, s: PowerSample) -> dict:\n        if self.phase == "waiting_for_start" and s.watts >= (self.baseline_w or s.watts) + self.on_threshold_w:\n            self.phase = "awaiting_confirmation"; self.cycle_started = s.timestamp; self.active_started = s.timestamp; self.active_peak_w = s.watts; self._full_active_samples = [s]\n            return self.result(action="confirm_start")\n        if self.phase == "capturing":\n            self._full_active_samples.append(s); self.active_peak_w = max(self.active_peak_w or s.watts, s.watts)\n        return self.result()\n'''
+          if old not in s: raise SystemExit('full step missing')
+          s=s.replace(old,new,1)
+          old='''            if self.active_peak_w is None:\n                self.active_peak_w = self.samples[-1].watts if self.samples else (self.baseline_w or 0.0)\n            return self.result()\n'''
+          new='''            if self.active_peak_w is None:\n                self.active_peak_w = self.samples[-1].watts if self.samples else (self.baseline_w or 0.0)\n            if self.samples: self._full_active_samples = [self.samples[-1]]\n            return self.result()\n'''
+          if old not in s: raise SystemExit('confirm block missing')
+          s=s.replace(old,new,1)
+          start=s.index('    def end_full_cycle(self, force: bool = False) -> dict:')
+          end=s.index('    def _energy_wh(self) -> float:',start)
+          replacement='''    def end_full_cycle(self, force: bool = False) -> dict:\n        if self.method != "full_cycle" or self.phase != "capturing":\n            return self.result(failed=True, failure_reason="Long-cycle training is not currently capturing a confirmed load.")\n        self._end_requested = True\n        baseline = self.baseline_w if self.baseline_w is not None else 0.0\n        duration = max(0.0, self.samples[-1].timestamp - (self.cycle_started or self.samples[-1].timestamp)) if self.samples else 0.0\n        active = self._full_active_samples or self.samples\n        settled = [x.watts for x in active if self.cycle_started is not None and x.timestamp >= self.cycle_started + self.full_cycle_settle_s]\n        if not settled: settled = [x.watts for x in active]\n        stable_load = median(settled) - baseline if settled else 0.0\n        self.active_peak_w = baseline + max(0.0, stable_load)\n        if not force and duration < self.full_cycle_min_active_s:\n            self._end_requested = False\n            return self.result(action="end_warning", end_ready=False, end_returned=False, end_duration_s=duration)\n        self.completed = True; self.phase = "complete"\n        return self.result()\n\n'''
+          s=s[:start]+replacement+s[end:]
+          old='''        peak_delta = None; duration = None\n        if self.method == "quick" and self.observations: peak_delta = median(o.delta_w for o in self.observations)\n        elif self.baseline_w is not None: peak_delta = max(0.0, max((s.watts for s in self.samples), default=self.baseline_w)-self.baseline_w)\n'''
+          new='''        peak_delta = None; duration = None\n        if self.method == "quick" and self.observations: peak_delta = median(o.delta_w for o in self.observations)\n        elif self.baseline_w is not None and self.method == "full_cycle" and self.phase in {"capturing", "complete"}:\n            active = self._full_active_samples or self.samples\n            values = [x.watts for x in active if self.cycle_started is None or x.timestamp >= self.cycle_started + self.full_cycle_settle_s]\n            if not values: values = [x.watts for x in active]\n            peak_delta = max(0.0, median(values) - self.baseline_w) if values else 0.0\n        elif self.baseline_w is not None: peak_delta = max(0.0, max((s.watts for s in self.samples), default=self.baseline_w)-self.baseline_w)\n'''
+          if old not in s: raise SystemExit('result block missing')
+          p.write_text(s.replace(old,new,1))
+          
+          p=Path('custom_components/energyiq/www/energyiq-panel.js'); s=p.read_text()
+          old='''    async startTraining(deviceId, method) { const device = this.getDevices().find(d => d.device_id === deviceId); if (!device) return; const message = method === "quick" ? `EnergyIQ will automatically turn “${device.name}” ON and OFF during Quick Training. Continue?` : method === "manual" ? `Manual training for “${device.name}”. No command will be sent to the device. Continue?` : `Run a Full Cycle training session for “${device.name}”?`; if (!window.confirm(message)) return; try { await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: deviceId, method }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to start training", true); } }\n    async stopTraining(deviceId) { try { await this.ws({ type: "energy_attribution/stop_training", entry_id: this.entryId, device_id: deviceId }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to stop training", true); } }\n'''
+          new='''    async _refreshPreserveTableScroll() { const scroller=this.querySelector(".table-scroll"); const top=scroller ? scroller.scrollTop : 0; await this.refresh(true); requestAnimationFrame(()=>{ const next=this.querySelector(".table-scroll"); if(next) next.scrollTop=top; }); }\n    async startTraining(deviceId, method) { const device = this.getDevices().find(d => d.device_id === deviceId); if (!device) return; const message = method === "quick" ? `EnergyIQ will automatically turn “${device.name}” ON and OFF during Quick Training. Continue?` : method === "manual" ? `Manual training for “${device.name}”. No command will be sent to the device. Continue?` : `Run a Full Cycle training session for “${device.name}”?`; if (!window.confirm(message)) return; try { await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: deviceId, method }); await this._refreshPreserveTableScroll(); } catch (error) { this.showToast(error?.message || "Unable to start training", true); } }\n    async stopTraining(deviceId) { try { await this.ws({ type: "energy_attribution/stop_training", entry_id: this.entryId, device_id: deviceId }); await this._refreshPreserveTableScroll(); } catch (error) { this.showToast(error?.message || "Unable to stop training", true); } }\n'''
+          if old not in s: raise SystemExit('frontend methods missing')
+          s=s.replace(old,new,1).replace('        await this.refresh(true);\n      } catch (error) {\n        this.showToast(error?.message || "Unable to control Full Cycle capture", true);','        await this._refreshPreserveTableScroll();\n      } catch (error) {\n        this.showToast(error?.message || "Unable to control Full Cycle capture", true);',1)
+          p.write_text(s)
+          
+          p=Path('custom_components/energyiq/manifest.json'); s=p.read_text().replace('"version": "3.1.28"','"version": "3.1.29"',1); p.write_text(s)
+          p=Path('custom_components/energyiq/__init__.py'); s=p.read_text().replace('FRONTEND_VERSION = "31280"','FRONTEND_VERSION = "31290"',1).replace('EnergyIQ • v3.1.28','EnergyIQ • v3.1.29',1); p.write_text(s)
+          PY
+      - name: Validate and commit
+        run: |
+          python -m compileall -q custom_components/energyiq tests
+          node --check custom_components/energyiq/www/energyiq-panel.js
+          python - <<'PY'
+          import json
+          assert json.load(open('custom_components/energyiq/manifest.json'))['version']=='3.1.29'
+          print('EnergyIQ v3.1.29 validation passed')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add custom_components/energyiq .github/workflows/energyiq-v3-1-29-fix.yml .github/workflows/apply-v3-1-29.yml
+          git commit -m 'Fix Full Cycle training and preserve table scroll'
+          git rm .github/workflows/energyiq-v3-1-29-fix.yml .github/workflows/apply-v3-1-29.yml
+          git commit -m 'Remove temporary v3.1.29 patch workflows'
+          git push
