@@ -46,13 +46,16 @@ jobs:
           panel_id = panel_match.group(1)
           loader_name = module_match.group(1)
           loader = Path('custom_components/energyiq/www') / loader_name
+          loader_js = loader.read_text(encoding='utf-8') if loader.is_file() else ''
 
           assert f'sidebar_title="EnergyIQ • v{version}"' in init
           assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
           assert 'URL_BASE = "/energyiq-static"' in init
           assert loader.is_file(), f'Registered frontend loader does not exist: {loader_name}'
-          assert f'customElements.define("{panel_id}"' in loader.read_text(encoding='utf-8')
-          assert 'energyiq-panel.js' in loader.read_text(encoding='utf-8')
+          assert f'const TAG = "{panel_id}";' in loader_js
+          assert 'customElements.define(TAG' in loader_js
+          assert 'await import(' in loader_js
+          assert 'energyiq-panel.js' in loader_js
           assert 'const TAG = "energyiq-panel-v309";' in js
 
           assert Path('custom_components/energyiq/www/energyiq-panel.js').is_file()
