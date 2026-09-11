@@ -89,6 +89,7 @@ Before telling the user to update HACS, verify:
 - Manifest and integration/frontend version metadata are consistent.
 - Frontend registration and JavaScript custom-element identity match exactly.
 - WebSocket commands referenced by the frontend exist in the backend.
+- Every `DataUpdateCoordinator` subclass used by `async_config_entry_first_refresh()` implements a working `_async_update_data()` method. A missing method causes Home Assistant startup to fail with `NotImplementedError: Update method not implemented` even when Python compilation succeeds.
 - No obsolete runtime frontend files or temporary workflow files remain.
 
 ### Required functional sanity checks
@@ -96,10 +97,13 @@ Before telling the user to update HACS, verify:
 - The panel registration is valid.
 - The main JavaScript file exists at the registered URL.
 - The panel can instantiate its registered custom element.
+- The integration can complete `async_setup_entry()` through its first coordinator refresh without raising a startup exception.
 - A backend-only change has not altered the frontend unnecessarily.
 - A frontend change has not altered backend persistence/training behavior unnecessarily.
 - The release tag points to the exact commit that contains the final validated code.
 - The GitHub release is published and not draft/prerelease.
+- The published release version exactly matches the final manifest version on the release target commit.
+- HACS-visible release verification is performed only after the GitHub release itself has been confirmed to exist.
 
 ## 7. Release procedure
 
@@ -109,10 +113,22 @@ Before telling the user to update HACS, verify:
 4. Ensure the final manifest version is correct.
 5. Ensure the release workflow creates the tag/release from the validated final commit.
 6. Verify the published release tag and target commit.
-7. Verify the repository no longer contains temporary change-application workflows/scripts.
-8. Only then tell the user to refresh/update HACS.
+7. Verify the published release is not draft/prerelease and that its version exactly matches the manifest on that target commit.
+8. Verify the repository no longer contains temporary change-application workflows/scripts.
+9. Re-run or inspect the final validation workflow against the **exact release target commit**, not merely the current `main` branch.
+10. Only then tell the user to refresh/update HACS.
 
 Do not ask the user to create branches, tags, releases, or pull requests as part of this procedure.
+
+### Release failure lesson — v3.1.8 / v3.1.9
+
+A release/version change was reported as corrected before the corresponding GitHub release actually existed. The repository had advanced, but HACS could only see the published release (v3.1.8), not the intended v3.1.9.
+
+Therefore:
+
+> **Never report a version as released, HACS-available, or ready to install until the GitHub release has been directly verified by its tag, target commit, published status, and manifest version.**
+
+A commit on `main` is not a release. A successful validation run is not a release. A version string in the manifest is not a release. All four release conditions must be verified before giving the user an update instruction.
 
 ## 8. Post-change report
 
@@ -125,6 +141,8 @@ Every completed change order should report briefly:
 - Release/tag verification result.
 - Any known limitation or follow-up.
 
+If a release has **not** been published and verified, explicitly say that it is not yet available through HACS rather than implying that it is.
+
 ## 9. Failure-prevention rule
 
 If a requested change can be implemented without touching a subsystem, do not touch that subsystem.
@@ -134,3 +152,9 @@ In particular:
 > **Changing backend training timing does not justify changing frontend registration.**
 
 The v3.1.1 blank-panel failure demonstrated why this rule is mandatory.
+
+A second mandatory lesson is:
+
+> **Never confuse a validated repository state with a published HACS release.**
+
+The v3.1.8/v3.1.9 incident demonstrated why release existence and target-commit verification must be the final gate.
