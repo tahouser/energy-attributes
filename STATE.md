@@ -1,7 +1,7 @@
 # EnergyIQ Project State
 
 **Architecture:** Clean rebuild based on `ENERGYIQ_DESIGN.md`.
-**Current release:** v3.1.1
+**Current release:** v3.1.18
 **Working repository:** `tahouser/energy-attributes`
 
 ## Canonical design
@@ -39,7 +39,7 @@ The current release preserves the established EnergyIQ behavior:
 
 - Historical runtime JavaScript is not retained as active files.
 - Temporary backups/placeholders are not part of the runtime tree.
-- The frontend custom-element identity is stable and must not be changed for ordinary version bumps.
+- The frontend uses a version-isolated custom-element identity for frontend releases; ordinary backend-only version bumps should not change it.
 - There is one release workflow.
 - The manifest version is changed only after the complete release snapshot is ready.
 - The final Git tag/release must point to that exact final commit before HACS testing.

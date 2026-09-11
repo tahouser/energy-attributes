@@ -5,7 +5,7 @@
  * interaction only; it does not maintain a second copy of EnergyIQ state.
  */
 (() => {
-  const TAG = "energyiq-panel-v309";
+  const TAG = "energyiq-panel-v315";
   const VERSION = null;
 
   if (customElements.get(TAG)) return;
