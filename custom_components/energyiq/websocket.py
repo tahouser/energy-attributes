@@ -41,9 +41,25 @@ def _candidate_current_power(hass: HomeAssistant, candidate: dict, training: dic
         learned_w = None
 
     controls = candidate.get("controls", [])
+
+    def _control_is_active(control: dict) -> bool:
+        entity_id = control.get("entity_id")
+        state = hass.states.get(entity_id) if entity_id else None
+        if state is None:
+            return False
+        domain = str(control.get("domain") or entity_id.split(".", 1)[0]).casefold()
+        value = str(state.state).casefold()
+        if value in {"off", "unavailable", "unknown", "none"}:
+            return False
+        if domain == "climate":
+            action = str(state.attributes.get("hvac_action") or "").casefold()
+            if action in {"heating", "cooling", "fan", "drying", "idle"}:
+                return action != "idle"
+            return value not in {"off", "auto_off"}
+        return value in {"on", "active", "running", "playing", "heating", "cooling"}
+
     control_on = any(
-        (hass.states.get(c.get("entity_id")) is not None
-         and hass.states.get(c.get("entity_id")).state == "on")
+        _control_is_active(c)
         for c in controls if isinstance(c, dict) and c.get("entity_id")
     )
 
