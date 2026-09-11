@@ -19,14 +19,17 @@ jobs:
         run: python -m compileall -q custom_components/energyiq tests
 
       - name: Validate frontend JavaScript syntax
-        run: node --check custom_components/energyiq/www/energyiq-panel.js
+        run: |
+          node --check custom_components/energyiq/www/energyiq-panel.js
+          node --check custom_components/energyiq/www/energyiq-loader-v314.js
 
-      - name: Validate release structure and panel identity
+      - name: Validate release structure and panel loading
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
+          import re
           from pathlib import Path
 
           manifest = json.loads(Path('custom_components/energyiq/manifest.json').read_text(encoding='utf-8'))
@@ -35,24 +38,29 @@ jobs:
           js = Path('custom_components/energyiq/www/energyiq-panel.js').read_text(encoding='utf-8')
 
           expected_frontend_version = version.replace('.', '') + '0'
-          stable_panel_id = 'energyiq-panel-v309'
+          panel_match = re.search(r'webcomponent_name="([^"]+)"', init)
+          module_match = re.search(r'module_url=f"\{URL_BASE\}/([^"?]+)\?v=\{FRONTEND_VERSION\}"', init)
+          assert panel_match, 'Panel webcomponent_name is missing.'
+          assert module_match, 'Panel module_url is missing.'
+
+          panel_id = panel_match.group(1)
+          loader_name = module_match.group(1)
+          loader = Path('custom_components/energyiq/www') / loader_name
 
           assert f'sidebar_title="EnergyIQ • v{version}"' in init
           assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
-          assert f'webcomponent_name="{stable_panel_id}"' in init
           assert 'URL_BASE = "/energyiq-static"' in init
-          assert 'module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}"' in init
-          assert f'const TAG = "{stable_panel_id}";' in js
+          assert loader.is_file(), f'Registered frontend loader does not exist: {loader_name}'
+          assert f'customElements.define("{panel_id}"' in loader.read_text(encoding='utf-8')
+          assert 'energyiq-panel.js' in loader.read_text(encoding='utf-8')
+          assert 'const TAG = "energyiq-panel-v309";' in js
 
           assert Path('custom_components/energyiq/www/energyiq-panel.js').is_file()
           assert not Path('custom_components/energyiq/www/energyiq-panel-entry.js').exists()
           assert not Path('custom_components/energyiq/www/energyiq-ui.js').exists()
+          assert not list(Path('custom_components/energyiq/www').glob('README*.txt'))
+          assert not list(Path('custom_components/energyiq/www').glob('*.tmp'))
+          assert not list(Path('custom_components/energyiq/www').glob('*.bak'))
 
-          www = Path('custom_components/energyiq/www')
-          assert not list(www.glob('energyiq-panel-v*.js')), 'Versioned runtime panel copies are not allowed.'
-          assert not list(www.glob('README*.txt')), 'Temporary frontend README files are not allowed.'
-          assert not list(www.glob('*.tmp')), 'Temporary frontend files are not allowed.'
-          assert not list(www.glob('*.bak')), 'Temporary frontend backups are not allowed.'
-
-          print(f'EnergyIQ {version} structure and stable panel identity validated.')
+          print(f'EnergyIQ {version} structure and isolated frontend loader validated.')
           PY
