@@ -5,8 +5,8 @@
  * interaction only; it does not maintain a second copy of EnergyIQ state.
  */
 (() => {
-  const TAG = "energyiq-panel-v307";
-  const VERSION = "3.0.7";
+  const TAG = "energyiq-panel-v308";
+  const VERSION = "3.0.8";
 
   if (customElements.get(TAG)) return;
 
@@ -23,7 +23,6 @@
       this.loading = false;
       this.refreshTimer = null;
       this.bulkTimer = null;
-      this.scrollTop = 0;
     }
 
     setConfig() {}
@@ -75,13 +74,14 @@
       }
     }
 
-    async refresh() {
+    async refresh(forceRender = false) {
       if (!this.hass || !this.entryId) return;
       try {
+        const hadWorkspace = !!this.workspace;
         this.workspace = await this.ws({ type: "energy_attribution/workspace", entry_id: this.entryId });
         this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
         if (this.bulk?.status === "running") this.startBulkPolling(); else this.stopBulkPolling();
-        this.render();
+        if (!hadWorkspace || forceRender) this.render(); else this.updateLiveData();
       } catch (error) {
         console.error("EnergyIQ refresh failed", error);
       }
@@ -92,7 +92,7 @@
       this.bulkTimer = setInterval(async () => {
         try {
           this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
-          this.render();
+          this.updateLiveData();
           if (this.bulk?.status !== "running") this.stopBulkPolling();
         } catch (error) {
           console.error("EnergyIQ bulk status", error);
@@ -103,6 +103,48 @@
     stopBulkPolling() {
       if (this.bulkTimer) clearInterval(this.bulkTimer);
       this.bulkTimer = null;
+    }
+
+    updateLiveData() {
+      const devices = this.getDevices();
+      const byId = new Map(devices.map(d => [d.device_id, d]));
+      this.querySelectorAll("tr[data-device-id]").forEach(row => {
+        const device = byId.get(row.dataset.deviceId);
+        if (!device) return;
+        const power = Number(device.current_power);
+        const powerCell = row.querySelector(".power-cell");
+        if (powerCell) powerCell.textContent = Number.isFinite(power) ? `${power.toFixed(0)} W` : "—";
+        const stateCell = row.querySelector(".state-cell");
+        if (stateCell) stateCell.innerHTML = this.renderState(device);
+        const training = device.training || {};
+        const trainingCell = row.querySelector(".training");
+        if (trainingCell) trainingCell.textContent = this.trainingLabel(training);
+        const methodCell = row.querySelector(".method-cell");
+        if (methodCell) methodCell.textContent = training.method || "—";
+        const actionsCell = row.querySelector(".actions");
+        if (actionsCell) {
+          const monitored = this.getSelectedIds().has(device.device_id);
+          const manual = String(device.source || "").toLowerCase() === "manual";
+          const action = training.status === "active"
+            ? `<button data-stop="${this.attr(device.device_id)}">Stop</button>`
+            : manual
+              ? `<button data-manual="${this.attr(device.device_id)}">${training.status === "complete" ? "Retrain Manual" : "Manual Training"}</button>`
+              : `<button data-quick="${this.attr(device.device_id)}">Quick ON/OFF</button><button data-full="${this.attr(device.device_id)}">Full Cycle</button>`;
+          actionsCell.innerHTML = monitored ? action : "";
+        }
+      });
+      const summary = this.querySelector("#summary-area");
+      if (summary) summary.innerHTML = this.renderSummary();
+      const bulk = this.querySelector("#bulk-area");
+      if (bulk) bulk.innerHTML = this.renderBulk();
+      this.bindActionButtons();
+    }
+
+    bindActionButtons() {
+      this.querySelectorAll("[data-quick]").forEach(b => b.onclick = () => this.startTraining(b.dataset.quick, "quick"));
+      this.querySelectorAll("[data-full]").forEach(b => b.onclick = () => this.startTraining(b.dataset.full, "full_cycle"));
+      this.querySelectorAll("[data-manual]").forEach(b => b.onclick = () => this.startTraining(b.dataset.manual, "manual"));
+      this.querySelectorAll("[data-stop]").forEach(b => b.onclick = () => this.stopTraining(b.dataset.stop));
     }
 
     renderLoading() {
@@ -182,13 +224,8 @@
       return `<div class="bulk"><strong>Bulk training in progress</strong><span>${current} of ${total}${currentDevice ? ` · ${this.escape(currentDevice.name)}` : ""}</span><div class="progress"><i style="width:${percent}%"></i></div><small>${completed} completed · ${percent}%</small></div>`;
     }
 
-    render(previousScroll = null) {
+    render() {
       if (!this.workspace) return;
-      if (previousScroll === null) {
-        const scroller = this.querySelector(".table-scroll");
-        previousScroll = scroller ? scroller.scrollTop : this.scrollTop;
-      }
-      this.scrollTop = previousScroll;
       const devices = this.getDevices();
       const persisted = this.getPersistedIds();
       const selected = this.getSelectedIds();
@@ -204,7 +241,7 @@
           <header><div><h1>EnergyIQ</h1><p>Whole-home electrical intelligence · v${VERSION}</p></div>
             <div class="header-actions"><button id="add">＋ Add Device / Entity</button><button id="save" class="primary">Save Monitoring</button></div>
           </header>
-          ${this.renderSummary()}${this.renderBulk()}
+          <div id="summary-area">${this.renderSummary()}</div><div id="bulk-area">${this.renderBulk()}</div>
           <div class="toolbar"><div class="views"><button id="all" class="${this.view === "all" ? "selected" : ""}">All (${devices.length})</button><button id="monitored" class="${this.view === "monitored" ? "selected" : ""}">Monitored (${persisted.size})</button><button id="excluded" class="${this.view === "excluded" ? "selected" : ""}">Excluded (${Math.max(0, devices.length - persisted.size)})</button></div>
             <div class="bulk-actions"><button id="bulk-train" ${trainSelected.size ? "" : "disabled"}>Auto Train Selected (${trainSelected.size})</button></div>
           </div>
@@ -214,13 +251,6 @@
         </div>`;
 
       this.bind();
-      requestAnimationFrame(() => {
-        const scroller = this.querySelector(".table-scroll");
-        if (scroller) {
-          scroller.scrollTop = this.scrollTop;
-          scroller.addEventListener("scroll", () => { this.scrollTop = scroller.scrollTop; }, { passive: true });
-        }
-      });
     }
 
     row(device, selected) {
@@ -234,32 +264,32 @@
           ? `<button data-manual="${this.attr(device.device_id)}">${training.status === "complete" ? "Retrain Manual" : "Manual Training"}</button>`
           : `<button data-quick="${this.attr(device.device_id)}">Quick ON/OFF</button><button data-full="${this.attr(device.device_id)}">Full Cycle</button>`;
       const trainChecked = this.trainSelected.has(device.device_id);
-      return `<tr><td><input class="monitor" type="checkbox" data-monitor="${this.attr(device.device_id)}" ${monitored ? "checked" : ""}></td>
+      return `<tr data-device-id="${this.attr(device.device_id)}"><td><input class="monitor" type="checkbox" data-monitor="${this.attr(device.device_id)}" ${monitored ? "checked" : ""}></td>
         <td><input class="train" type="checkbox" data-train="${this.attr(device.device_id)}" ${trainChecked ? "checked" : ""} ${monitored ? "" : "disabled"}></td>
         <td><strong>${this.escape(device.name || device.device_id)}</strong><small>${this.escape(device.category || device.model || "")}</small></td>
         <td>${this.escape(device.area || "")}</td><td>${manual ? "Manual" : "HA"}</td>
-        <td>${Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"}</td><td class="state-cell">${this.renderState(device)}</td>
-        <td class="training">${this.escape(this.trainingLabel(training))}</td><td>${this.escape(training.method || "—")}</td><td class="actions">${monitored ? action : ""}</td></tr>`;
+        <td class="power-cell">${Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"}</td><td class="state-cell">${this.renderState(device)}</td>
+        <td class="training">${this.escape(this.trainingLabel(training))}</td><td class="method-cell">${this.escape(training.method || "—")}</td><td class="actions">${monitored ? action : ""}</td></tr>`;
     }
 
     bind() {
       this.querySelector("#save")?.addEventListener("click", () => this.saveMonitoring());
       this.querySelector("#add")?.addEventListener("click", () => this.openAddDialog());
-      this.querySelector("#all")?.addEventListener("click", () => { this.view = "all"; this.render(this.scrollTop); });
-      this.querySelector("#monitored")?.addEventListener("click", () => { this.view = "monitored"; this.render(this.scrollTop); });
-      this.querySelector("#excluded")?.addEventListener("click", () => { this.view = "excluded"; this.render(this.scrollTop); });
+      this.querySelector("#all")?.addEventListener("click", () => { this.view = "all"; this.render(); });
+      this.querySelector("#monitored")?.addEventListener("click", () => { this.view = "monitored"; this.render(); });
+      this.querySelector("#excluded")?.addEventListener("click", () => { this.view = "excluded"; this.render(); });
       this.querySelector("#bulk-train")?.addEventListener("click", () => this.bulkTrain());
       this.querySelectorAll("[data-train]").forEach(box => box.addEventListener("change", event => {
         const id = event.currentTarget.dataset.train;
         if (event.currentTarget.checked) this.trainSelected.add(id); else this.trainSelected.delete(id);
-        this.render(this.scrollTop);
+        this.render();
       }));
       this.querySelectorAll("[data-monitor]").forEach(box => box.addEventListener("change", event => {
         const selected = this.getSelectedIds();
         const id = event.currentTarget.dataset.monitor;
         if (event.currentTarget.checked) selected.add(id); else selected.delete(id);
         this.pending = selected;
-        this.render(this.scrollTop);
+        this.render();
       }));
       this.querySelectorAll("[data-quick]").forEach(b => b.addEventListener("click", () => this.startTraining(b.dataset.quick, "quick")));
       this.querySelectorAll("[data-full]").forEach(b => b.addEventListener("click", () => this.startTraining(b.dataset.full, "full_cycle")));
@@ -271,7 +301,7 @@
       try {
         await this.ws({ type: "energy_attribution/set_monitoring", entry_id: this.entryId, device_ids: [...this.getSelectedIds()] });
         this.pending = null;
-        await this.refresh();
+        await this.refresh(true);
       } catch (error) { this.showToast(error?.message || "Unable to save monitoring selections", true); }
     }
 
@@ -282,12 +312,12 @@
       if (!window.confirm(message)) return;
       try {
         await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: deviceId, method });
-        await this.refresh();
+        await this.refresh(true);
       } catch (error) { this.showToast(error?.message || "Unable to start training", true); }
     }
 
     async stopTraining(deviceId) {
-      try { await this.ws({ type: "energy_attribution/stop_training", entry_id: this.entryId, device_id: deviceId }); await this.refresh(); }
+      try { await this.ws({ type: "energy_attribution/stop_training", entry_id: this.entryId, device_id: deviceId }); await this.refresh(true); }
       catch (error) { this.showToast(error?.message || "Unable to stop training", true); }
     }
 
@@ -301,7 +331,7 @@
       try {
         await this.ws({ type: "energy_attribution/bulk_auto_training", entry_id: this.entryId, device_ids: autoIds });
         this.startBulkPolling();
-        await this.refresh();
+        await this.refresh(true);
       } catch (error) { this.showToast(error?.message || "Unable to start bulk training", true); }
     }
 
@@ -334,7 +364,7 @@
       search.addEventListener("input", draw); domain.addEventListener("change", draw); choices.addEventListener("change", updateOwnership); choices.addEventListener("dblclick", () => backdrop.querySelector("#add-selected").click());
       backdrop.querySelector("#close").onclick = () => backdrop.remove(); backdrop.querySelector("#cancel").onclick = () => backdrop.remove(); backdrop.addEventListener("click", event => { if (event.target === backdrop) backdrop.remove(); });
       backdrop.querySelector("#manual").onclick = () => { backdrop.remove(); this.openManualDialog(); };
-      backdrop.querySelector("#add-selected").onclick = async () => { const entityId = choices.value, entity = entities.find(e => e.entity_id === entityId); if (!entity) return; if (entity.disabled) { this.showToast("Enable the entity in Home Assistant before adding it.", true); return; } try { const result = await this.ws({ type: "energy_attribution/add_entity", entry_id: this.entryId, entity_id: entityId }); backdrop.remove(); this.view = "monitored"; await this.refresh(); if (result?.action === "already_monitored") this.showToast("That exact entity is already associated with EnergyIQ."); } catch (error) { this.showToast(error?.message || "Unable to add entity", true); } };
+      backdrop.querySelector("#add-selected").onclick = async () => { const entityId = choices.value, entity = entities.find(e => e.entity_id === entityId); if (!entity) return; if (entity.disabled) { this.showToast("Enable the entity in Home Assistant before adding it.", true); return; } try { const result = await this.ws({ type: "energy_attribution/add_entity", entry_id: this.entryId, entity_id: entityId }); backdrop.remove(); this.view = "monitored"; await this.refresh(true); if (result?.action === "already_monitored") this.showToast("That exact entity is already associated with EnergyIQ."); } catch (error) { this.showToast(error?.message || "Unable to add entity", true); } };
       draw(); search.focus();
     }
 
@@ -342,7 +372,7 @@
       const backdrop = document.createElement("div"); backdrop.className = "modal-backdrop";
       backdrop.innerHTML = `<div class="modal small"><div class="modal-head"><div><h2>Manual Electrical Device</h2><p>For a physical load with no usable HA entity.</p></div><button id="close">×</button></div><label>Name<input id="name" type="text" placeholder="e.g. Shop Compressor"></label><label>Category<input id="category" type="text" value="Appliance"></label><div class="modal-actions"><span></span><button id="cancel">Cancel</button><button id="create" class="primary">Add Device</button></div></div>`;
       this.appendChild(backdrop); const name = backdrop.querySelector("#name"); backdrop.querySelector("#close").onclick = () => backdrop.remove(); backdrop.querySelector("#cancel").onclick = () => backdrop.remove();
-      backdrop.querySelector("#create").onclick = async () => { if (!name.value.trim()) { name.focus(); return; } try { await this.ws({ type: "energy_attribution/add_manual_device", entry_id: this.entryId, name: name.value.trim(), category: backdrop.querySelector("#category").value.trim() || "Appliance" }); backdrop.remove(); this.view = "monitored"; await this.refresh(); } catch (error) { this.showToast(error?.message || "Unable to add manual device", true); } };
+      backdrop.querySelector("#create").onclick = async () => { if (!name.value.trim()) { name.focus(); return; } try { await this.ws({ type: "energy_attribution/add_manual_device", entry_id: this.entryId, name: name.value.trim(), category: backdrop.querySelector("#category").value.trim() || "Appliance" }); backdrop.remove(); this.view = "monitored"; await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to add manual device", true); } };
       name.focus();
     }
 
