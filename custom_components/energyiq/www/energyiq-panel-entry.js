@@ -19,7 +19,7 @@ if (!customElements.get(TAG)) {
     _render() {
       super._render();
       const sub = this.querySelector?.(".sub");
-      if (sub) sub.textContent = "Whole-home electrical intelligence · v2.2.8";
+      if (sub) sub.textContent = "Whole-home electrical intelligence · v2.2.9";
     }
   }
   customElements.define(TAG, EnergyIQPanel);
