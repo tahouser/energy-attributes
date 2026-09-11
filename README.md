@@ -30,3 +30,4 @@ The functional specification is documented in [`ENERGYIQ_DESIGN.md`](ENERGYIQ_DE
 ## Release discipline
 
 The repository uses one authoritative version/release workflow. The version is finalized only after the complete code and runtime file tree has been validated. Historical implementations remain in Git history rather than the runtime directory.
+
