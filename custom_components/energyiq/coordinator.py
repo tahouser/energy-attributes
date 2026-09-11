@@ -61,7 +61,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         the direct Shelly RPC sampler when available, but the normal coordinator
         data remains based on the configured Home Assistant whole-home entity.
         """
-        state = self.hass.states.get(self.power_entity)
+        power_entity = self._fast_power_entity()
+        state = self.hass.states.get(power_entity)
         watts = None
         if state is not None:
             try:
@@ -70,7 +71,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 watts = None
         return {
             "whole_home_power": watts,
-            "power_entity": self.power_entity,
+            "power_entity": power_entity,
             "training_state": self.training_state,
         }
 
@@ -228,6 +229,44 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self._training_task=self.hass.async_create_task(self._training_loop(device_id,method))
             return state
 
+    def _fast_power_entity(self) -> str:
+        """Return the fastest available live whole-home power sensor.
+
+        Prefer the Shelly Pro 3EM Total Active Power sensor because Shelly
+        pushes its live measurements to Home Assistant. The direct Shelly RPC
+        sampler remains the primary training source and is even faster.
+        Never use a switch/control entity as a power measurement.
+        """
+        reg = er.async_get(self.hass)
+        candidates = []
+        for entry in reg.entities.values():
+            if entry.domain != "sensor":
+                continue
+            state = self.hass.states.get(entry.entity_id)
+            if state is None:
+                continue
+            attrs = state.attributes
+            if attrs.get("device_class") != "power":
+                continue
+            unit = str(attrs.get("unit_of_measurement") or "").casefold()
+            if unit not in {"w", "kw"}:
+                continue
+            score = 0
+            text = f"{entry.entity_id} {attrs.get('friendly_name', '')}".casefold()
+            if "total_active_power" in text or "total active power" in text:
+                score += 3000
+            if entry.config_entry_id:
+                config_entry = self.hass.config_entries.async_get_entry(entry.config_entry_id)
+                if config_entry and config_entry.domain == "shelly":
+                    score += 1000
+            if entry.entity_id == self.power_entity:
+                score += 500
+            candidates.append((score, entry.entity_id))
+        if candidates:
+            candidates.sort(reverse=True)
+            return candidates[0][1]
+        return self.power_entity
+
     def _shelly_rpc_config(self) -> tuple[str, int, str | None, str | None] | None:
         """Resolve a local Shelly connection from the selected whole-home entity.
 
@@ -236,7 +275,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         Shelly integration device.
         """
         reg = er.async_get(self.hass)
-        entity_entry = reg.async_get(self.power_entity)
+        fast_entity = self._fast_power_entity()
+        entity_entry = reg.async_get(fast_entity) or reg.async_get(self.power_entity)
         if entity_entry and entity_entry.config_entry_id:
             config_entry = self.hass.config_entries.async_get_entry(entity_entry.config_entry_id)
             if config_entry and config_entry.domain == "shelly":
@@ -310,7 +350,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                     self._direct_rpc_available = True
                     self._direct_rpc_host = host
                     self._direct_rpc_samples.append((sample_time, total))
-                    whole = self.hass.states.get(self.power_entity)
+                    fast_entity = self._fast_power_entity()
+                    whole = self.hass.states.get(fast_entity)
                     ha_w = None
                     ha_updated = ""
                     if whole is not None:
@@ -319,7 +360,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         except (TypeError, ValueError):
                             pass
                         ha_updated = whole.last_updated.isoformat()
-                    await self._response_log("shelly_rpc_sample", device_id, shelly_host=host, rpc_source=source, rpc_power_w=round(total, 3), rpc_elapsed_ms=round(elapsed_ms, 2), ha_power_w=ha_w, ha_last_updated=ha_updated)
+                    await self._response_log("shelly_rpc_sample", device_id, shelly_host=host, rpc_source=source, rpc_power_w=round(total, 3), rpc_elapsed_ms=round(elapsed_ms, 2), ha_power_w=ha_w, ha_last_updated=ha_updated, power_entity=fast_entity)
                 except Exception as err:
                     await self._response_log("shelly_rpc_error", device_id, shelly_host=host, error=str(err))
                 await asyncio.sleep(0.25)
@@ -340,7 +381,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         samples = self._direct_rpc_samples[direct_cursor:]
                         direct_cursor = len(self._direct_rpc_samples)
                 else:
-                    whole = self.hass.states.get(self.power_entity)
+                    fast_entity = self._fast_power_entity()
+                    whole = self.hass.states.get(fast_entity)
                     try:
                         watts = float(whole.state) if whole else None
                     except (TypeError, ValueError):
