@@ -5,7 +5,7 @@
  * interaction only; it does not maintain a second copy of EnergyIQ state.
  */
 (() => {
-  const TAG = "energyiq-panel-v315";
+  const TAG = "energyiq-panel-v316";
   const VERSION = null;
 
   if (customElements.get(TAG)) return;
@@ -59,7 +59,7 @@
         this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
         if (this.bulk?.status === "running") this.startBulkPolling(); else this.stopBulkPolling();
         if (!hadWorkspace || forceRender) this.render(); else this.updateLiveData();
-      } catch (error) { console.error("EnergyIQ refresh failed", error); }
+      } catch (error) { console.error("EnergyIQ refresh failed", error); if (!this.workspace) this.renderError(error); }
     }
 
     startBulkPolling() {
