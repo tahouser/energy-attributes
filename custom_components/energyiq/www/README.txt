@@ -1,0 +1,1 @@
+The EnergyIQ frontend is intentionally consolidated into energyiq-panel.js. Historical iterations are preserved in Git history/tags, not as runtime files.
