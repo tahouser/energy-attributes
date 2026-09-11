@@ -6,7 +6,7 @@
  */
 (() => {
   const TAG = "energyiq-panel-v309";
-  const VERSION = "3.0.9";
+  const VERSION = "3.1.2";
 
   if (customElements.get(TAG)) return;
 
@@ -111,12 +111,14 @@
       this.querySelectorAll("tr[data-device-id]").forEach(row => {
         const device = byId.get(row.dataset.deviceId);
         if (!device) return;
-        const power = Number(device.current_power);
+        const training = device.training || {};
+        const liveDelta = Number(training.live_delta_w);
+        const normalPower = Number(device.current_power);
+        const power = training.status === "active" && Number.isFinite(liveDelta) ? liveDelta : normalPower;
         const powerCell = row.querySelector(".power-cell");
         if (powerCell) powerCell.textContent = Number.isFinite(power) ? `${power.toFixed(0)} W` : "—";
         const stateCell = row.querySelector(".state-cell");
         if (stateCell) stateCell.innerHTML = this.renderState(device);
-        const training = device.training || {};
         const trainingCell = row.querySelector(".training");
         if (trainingCell) trainingCell.textContent = this.trainingLabel(training);
         const methodCell = row.querySelector(".method-cell");
@@ -257,7 +259,9 @@
       const monitored = selected.has(device.device_id);
       const training = device.training || {};
       const manual = String(device.source || "").toLowerCase() === "manual";
-      const power = Number(device.current_power);
+      const liveDelta = Number(training.live_delta_w);
+      const normalPower = Number(device.current_power);
+      const power = training.status === "active" && Number.isFinite(liveDelta) ? liveDelta : normalPower;
       const action = training.status === "active"
         ? `<button data-stop="${this.attr(device.device_id)}">Stop</button>`
         : manual
