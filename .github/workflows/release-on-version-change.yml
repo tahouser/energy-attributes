@@ -50,7 +50,7 @@ jobs:
               tag_name: tag,
               target_commitish: context.sha,
               name: `EnergyIQ ${tag}`,
-              body: `EnergyIQ ${tag}`,
+              body: `EnergyIQ ${tag}\n\nAutomated release.`,
               draft: false,
               prerelease: false
             });
