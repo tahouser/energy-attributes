@@ -46,10 +46,7 @@
           const n = Number(item?.entity_id ? panel._hass?.states?.[item.entity_id]?.state : NaN);
           if (Number.isFinite(n)) { state = n > 0 ? "on" : "off"; break; }
         }
-        cell.textContent = state === "on" ? "ON" : state === "off" ? "OFF" : "—";
-        cell.style.fontWeight = "600";
-        cell.style.whiteSpace = "nowrap";
-        cell.style.color = state === "on" ? "var(--success-color,#2e7d32)" : state === "off" ? "var(--error-color,#c62828)" : "var(--secondary-text-color)";
+        cell.innerHTML = state === "on" ? '<span class="energyiq-state energyiq-state-on">ON</span>' : state === "off" ? '<span class="energyiq-state energyiq-state-off">OFF</span>' : '<span class="energyiq-state energyiq-state-unknown">—</span>';
       }
     };
     const originalRender = proto._render;
@@ -67,6 +64,14 @@
       try { await originalSave.apply(this,args); const x=this.querySelector("#save"); if(x){x.disabled=true;x.textContent="✓ Saved";} setTimeout(()=>{const y=this.querySelector("#save");if(y){y.disabled=false;y.textContent="Save monitoring selections";}},2200); }
       catch(e){const x=this.querySelector("#save");if(x){x.disabled=false;x.textContent="Save monitoring selections";}this._showNotice?.("Save failed");throw e;}
     };
+    const style = document.createElement("style");
+    style.textContent = `
+      .energyiq-state{display:inline-flex;align-items:center;justify-content:center;width:44px;height:22px;box-sizing:border-box;border-radius:3px;font-size:11px;font-weight:700;line-height:1;color:#fff;text-align:center;}
+      .energyiq-state-on{background:#2e9d50;}
+      .energyiq-state-off{background:#d13b3b;}
+      .energyiq-state-unknown{background:var(--secondary-text-color);}
+    `;
+    document.head.appendChild(style);
     const tick=()=>document.querySelectorAll(TAG).forEach(normalizeStateColumn);
     setInterval(tick,500);
     return true;
