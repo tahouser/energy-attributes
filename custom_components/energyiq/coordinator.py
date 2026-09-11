@@ -54,6 +54,26 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self._last_persist=0.0
         super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
 
+    async def _async_update_data(self) -> dict:
+        """Provide the coordinator's regular HA power snapshot.
+
+        DataUpdateCoordinator requires a concrete update method. Training uses
+        the direct Shelly RPC sampler when available, but the normal coordinator
+        data remains based on the configured Home Assistant whole-home entity.
+        """
+        state = self.hass.states.get(self.power_entity)
+        watts = None
+        if state is not None:
+            try:
+                watts = float(state.state)
+            except (TypeError, ValueError):
+                watts = None
+        return {
+            "whole_home_power": watts,
+            "power_entity": self.power_entity,
+            "training_state": self.training_state,
+        }
+
     def _remove_shelly_energy_meter_candidates(self):
         """Remove stale Shelly Energy Meter candidates from persisted inventory."""
         removed = []
@@ -251,9 +271,6 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 try:
                     total = None
                     source = None
-                    # Older Shelly Pro 3EM firmware used EM1.GetStatus?id=0
-                    # for the aggregate meter value. This is the direct path
-                    # historically used by EnergyIQ and avoids HA sensor lag.
                     if self._direct_rpc_mode in (None, "em1"):
                         try:
                             url = f"http://{host}:{port}/rpc/EM1.GetStatus?id=0"
@@ -268,8 +285,6 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                             if err.status != 404:
                                 raise
                             self._direct_rpc_mode = "em"
-
-                    # Newer Pro 3EM firmware exposes the aggregate as EM.GetStatus.
                     if total is None:
                         url = f"http://{host}:{port}/rpc/EM.GetStatus?id=0"
                         async with session.get(url, auth=auth, timeout=timeout) as response:
@@ -283,10 +298,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         if total is not None:
                             source = "EM.GetStatus"
                             self._direct_rpc_mode = "em"
-
                     if total is None:
                         raise RuntimeError("Shelly direct power response did not contain active power")
-
                     elapsed_ms = (self.hass.loop.time() - started) * 1000.0
                     total = float(total)
                     sample_time = self.hass.loop.time()
