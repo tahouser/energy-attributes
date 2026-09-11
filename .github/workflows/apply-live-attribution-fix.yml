@@ -1,0 +1,48 @@
+name: Apply live attribution fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-live-attribution-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fix active-state detection
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('custom_components/energyiq/websocket.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    controls = candidate.get("controls", [])\n    control_on = any(\n        (hass.states.get(c.get("entity_id")) is not None\n         and hass.states.get(c.get("entity_id")).state == "on")\n        for c in controls if isinstance(c, dict) and c.get("entity_id")\n    )\n'''
+          new = '''    controls = candidate.get("controls", [])\n\n    def _control_is_active(control: dict) -> bool:\n        entity_id = control.get("entity_id")\n        state = hass.states.get(entity_id) if entity_id else None\n        if state is None:\n            return False\n        domain = str(control.get("domain") or entity_id.split(".", 1)[0]).casefold()\n        value = str(state.state).casefold()\n        if value in {"off", "unavailable", "unknown", "none"}:\n            return False\n        if domain == "climate":\n            action = str(state.attributes.get("hvac_action") or "").casefold()\n            if action in {"heating", "cooling", "fan", "drying", "idle"}:\n                return action != "idle"\n            return value not in {"off", "auto_off"}\n        return value in {"on", "active", "running", "playing", "heating", "cooling"}\n\n    control_on = any(\n        _control_is_active(c)\n        for c in controls if isinstance(c, dict) and c.get("entity_id")\n    )\n'''
+          if old not in text:
+              raise SystemExit('Expected active-state block was not found; refusing to modify the file.')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Commit fix and remove workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add custom_components/energyiq/websocket.py .github/workflows/apply-live-attribution-fix.yml
+          git commit -m 'Fix live trained-load attribution state detection'
+          git rm .github/workflows/apply-live-attribution-fix.yml
+          git commit -m 'Remove temporary live attribution workflow'
+          git push origin HEAD:main
+
