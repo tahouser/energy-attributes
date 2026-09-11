@@ -171,13 +171,16 @@ class TrainingEngine:
         return self.result()
 
     def confirm_full_cycle(self, accepted: bool, timestamp: float) -> dict:
-        if self.method != "full_cycle" or self.phase != "awaiting_confirmation":
-            return self.result(failed=True, failure_reason="Long-cycle training is not waiting for event confirmation.")
+        if self.method != "full_cycle" or self.phase not in {"awaiting_confirmation", "waiting_for_start"}:
+            return self.result(failed=True, failure_reason="Long-cycle training is not waiting to start or confirm an event.")
         if accepted:
             self.phase = "capturing"
             self._end_requested = False
-            if self.cycle_started is None: self.cycle_started = timestamp
+            if self.cycle_started is None:
+                self.cycle_started = timestamp
             self.active_started = self.cycle_started
+            if self.active_peak_w is None:
+                self.active_peak_w = self.samples[-1].watts if self.samples else (self.baseline_w or 0.0)
             return self.result()
         # Discard the rejected event while retaining the original baseline.
         # This prevents an unrelated appliance from contaminating the signature.
