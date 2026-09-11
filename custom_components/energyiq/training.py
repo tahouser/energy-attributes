@@ -178,7 +178,7 @@ class TrainingEngine:
         self._full_stable_load_w = center
         self._full_stability_range_w = spread
         tolerance = max(15.0, center * self.full_cycle_stability_tolerance_w)
-        self._full_capture_valid = active_for >= self.full_cycle_min_active_s and spread <= tolerance and center >= self.min_event_w
+        self._full_capture_valid = active_for >= self.stable_window_s and spread <= tolerance and center >= self.min_event_w
 
     def confirm_full_cycle(self, accepted: bool, timestamp: float) -> dict:
         if self.method != "full_cycle" or self.phase not in {"awaiting_confirmation", "waiting_for_start"}:
