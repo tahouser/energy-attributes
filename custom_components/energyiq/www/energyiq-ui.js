@@ -5,7 +5,7 @@
     const Panel = customElements.get(TAG);
     if (!Panel?.prototype) return false;
     const proto = Panel.prototype;
-    if (proto.__energyiqCleanStable) return true;
+    if (proto.__energyiqCleanStable) return false;
     proto.__energyiqCleanStable = true;
     const devices = panel => panel?.data?.devices || [];
     const deviceForBox = (panel, box) => {
@@ -24,14 +24,24 @@
       }
       const currentHeaders = [...headerRow.children];
       let stateIndex = currentHeaders.findIndex(h=>(h.textContent||"").trim().toLowerCase()==="status");
-      if (stateIndex < 0) return;
-      currentHeaders[stateIndex].textContent = "State";
-      if (stateIndex !== 5) {
-        for (const row of rows) {
-          const cell = row.children[stateIndex];
-          if (cell) row.insertBefore(cell, row.children[5] || null);
+      if (stateIndex < 0) {
+        stateIndex = Math.min(5, currentHeaders.length);
+        const th = document.createElement("th");
+        th.textContent = "State";
+        headerRow.insertBefore(th, headerRow.children[stateIndex] || null);
+        for (const row of rows.slice(1)) {
+          const td = document.createElement("td");
+          row.insertBefore(td, row.children[stateIndex] || null);
         }
-        stateIndex = 5;
+      } else {
+        currentHeaders[stateIndex].textContent = "State";
+        if (stateIndex !== 5) {
+          for (const row of rows) {
+            const cell = row.children[stateIndex];
+            if (cell) row.insertBefore(cell, row.children[5] || null);
+          }
+          stateIndex = 5;
+        }
       }
       for (const row of rows.slice(1)) {
         const cell = row.children[stateIndex];
