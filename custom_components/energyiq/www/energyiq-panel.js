@@ -167,8 +167,9 @@
     }
 
     async saveMonitoring() { try { await this.ws({ type: "energy_attribution/set_monitoring", entry_id: this.entryId, device_ids: [...this.getSelectedIds()] }); this.pending = null; await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to save monitoring selections", true); } }
-    async startTraining(deviceId, method) { const device = this.getDevices().find(d => d.device_id === deviceId); if (!device) return; const message = method === "quick" ? `EnergyIQ will automatically turn “${device.name}” ON and OFF during Quick Training. Continue?` : method === "manual" ? `Manual training for “${device.name}”. No command will be sent to the device. Continue?` : `Run a Full Cycle training session for “${device.name}”?`; if (!window.confirm(message)) return; try { await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: deviceId, method }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to start training", true); } }
-    async stopTraining(deviceId) { try { await this.ws({ type: "energy_attribution/stop_training", entry_id: this.entryId, device_id: deviceId }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to stop training", true); } }
+    async _refreshPreserveTableScroll() { const scroller=this.querySelector(".table-scroll"); const top=scroller ? scroller.scrollTop : 0; await this.refresh(true); requestAnimationFrame(()=>{ const next=this.querySelector(".table-scroll"); if(next) next.scrollTop=top; }); }
+    async startTraining(deviceId, method) { const device = this.getDevices().find(d => d.device_id === deviceId); if (!device) return; const message = method === "quick" ? `EnergyIQ will automatically turn “${device.name}” ON and OFF during Quick Training. Continue?` : method === "manual" ? `Manual training for “${device.name}”. No command will be sent to the device. Continue?` : `Run a Full Cycle training session for “${device.name}”?`; if (!window.confirm(message)) return; try { await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: deviceId, method }); await this._refreshPreserveTableScroll(); } catch (error) { this.showToast(error?.message || "Unable to start training", true); } }
+    async stopTraining(deviceId) { try { await this.ws({ type: "energy_attribution/stop_training", entry_id: this.entryId, device_id: deviceId }); await this._refreshPreserveTableScroll(); } catch (error) { this.showToast(error?.message || "Unable to stop training", true); } }
     async fullCycleAction(deviceId, action) {
       try {
         if (action === "start_capture") {
@@ -176,7 +177,7 @@
         } else if (action === "stop_capture") {
           await this.ws({ type: "energy_attribution/end_long_cycle", entry_id: this.entryId, device_id: deviceId, force: false });
         }
-        await this.refresh(true);
+        await this._refreshPreserveTableScroll();
       } catch (error) {
         this.showToast(error?.message || "Unable to control Full Cycle capture", true);
       }

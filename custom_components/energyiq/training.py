@@ -31,6 +31,7 @@ class TrainingEngine:
     max_quick_duration_s: float = 120.0
     max_full_cycle_duration_s: float = 8 * 3600.0
     full_cycle_min_active_s: float = 30.0
+    full_cycle_settle_s: float = 5.0
     manual_min_active_s: float = 5.0
     idle_window_s: float = 5.0
     samples: list[PowerSample] = field(default_factory=list)
@@ -51,6 +52,7 @@ class TrainingEngine:
     _on_capture_w: float | None = None
     cycles_required: int = 3
     _end_requested: bool = False
+    _full_active_samples: list[PowerSample] = field(default_factory=list)
 
     def add_sample(self, timestamp: float, watts: float) -> dict:
         if watts != watts or watts < 0:
@@ -158,16 +160,11 @@ class TrainingEngine:
         return self.result()
 
     def _full_step(self, s: PowerSample) -> dict:
-        # Long Cycle is deliberately supervised: detect the first event, then
-        # require the user to identify it before treating it as the target load.
-        if self.phase == "waiting_for_start" and s.watts >= self.baseline_w + self.on_threshold_w:
-            self.phase = "awaiting_confirmation"
-            self.cycle_started = s.timestamp
-            self.active_started = s.timestamp
-            self.active_peak_w = s.watts
+        if self.phase == "waiting_for_start" and s.watts >= (self.baseline_w or s.watts) + self.on_threshold_w:
+            self.phase = "awaiting_confirmation"; self.cycle_started = s.timestamp; self.active_started = s.timestamp; self.active_peak_w = s.watts; self._full_active_samples = [s]
             return self.result(action="confirm_start")
         if self.phase == "capturing":
-            self.active_peak_w = max(self.active_peak_w or s.watts, s.watts)
+            self._full_active_samples.append(s); self.active_peak_w = max(self.active_peak_w or s.watts, s.watts)
         return self.result()
 
     def confirm_full_cycle(self, accepted: bool, timestamp: float) -> dict:
@@ -181,6 +178,7 @@ class TrainingEngine:
             self.active_started = self.cycle_started
             if self.active_peak_w is None:
                 self.active_peak_w = self.samples[-1].watts if self.samples else (self.baseline_w or 0.0)
+            if self.samples: self._full_active_samples = [self.samples[-1]]
             return self.result()
         # Discard the rejected event while retaining the original baseline.
         # This prevents an unrelated appliance from contaminating the signature.
@@ -197,11 +195,14 @@ class TrainingEngine:
         self._end_requested = True
         baseline = self.baseline_w if self.baseline_w is not None else 0.0
         duration = max(0.0, self.samples[-1].timestamp - (self.cycle_started or self.samples[-1].timestamp)) if self.samples else 0.0
-        recent_samples = [x for x in self.samples if self.samples and x.timestamp >= self.samples[-1].timestamp - self.idle_window_s]
-        returned = bool(recent_samples) and max(abs(x.watts - baseline) for x in recent_samples) <= self.return_tolerance_w
-        if not force and (not returned or duration < self.full_cycle_min_active_s):
+        active = self._full_active_samples or self.samples
+        settled = [x.watts for x in active if self.cycle_started is not None and x.timestamp >= self.cycle_started + self.full_cycle_settle_s]
+        if not settled: settled = [x.watts for x in active]
+        stable_load = median(settled) - baseline if settled else 0.0
+        self.active_peak_w = baseline + max(0.0, stable_load)
+        if not force and duration < self.full_cycle_min_active_s:
             self._end_requested = False
-            return self.result(action="end_warning", end_ready=returned and duration >= self.full_cycle_min_active_s, end_returned=returned, end_duration_s=duration)
+            return self.result(action="end_warning", end_ready=False, end_returned=False, end_duration_s=duration)
         self.completed = True; self.phase = "complete"
         return self.result()
 
@@ -212,6 +213,11 @@ class TrainingEngine:
     def result(self, *, action: str | None = None, failed: bool = False, failure_reason: str | None = None, **extra) -> dict:
         peak_delta = None; duration = None
         if self.method == "quick" and self.observations: peak_delta = median(o.delta_w for o in self.observations)
+        elif self.baseline_w is not None and self.method == "full_cycle" and self.phase in {"capturing", "complete"}:
+            active = self._full_active_samples or self.samples
+            values = [x.watts for x in active if self.cycle_started is None or x.timestamp >= self.cycle_started + self.full_cycle_settle_s]
+            if not values: values = [x.watts for x in active]
+            peak_delta = max(0.0, median(values) - self.baseline_w) if values else 0.0
         elif self.baseline_w is not None: peak_delta = max(0.0, max((s.watts for s in self.samples), default=self.baseline_w)-self.baseline_w)
         if self.method in {"full_cycle", "manual"} and self.cycle_started is not None and self.samples:
             duration = max(0.0, self.samples[-1].timestamp-self.cycle_started)

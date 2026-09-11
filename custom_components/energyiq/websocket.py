@@ -1,6 +1,7 @@
 """WebSocket API for the Energy Attribution workspace."""
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -398,6 +399,51 @@ async def ws_bulk_training_state(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/confirm_long_cycle",
+    vol.Required("entry_id"): str,
+    vol.Required("device_id"): str,
+    vol.Required("accepted"): bool,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_confirm_long_cycle(hass, connection, msg):
+    coordinator = _coordinator(hass, msg["entry_id"]); device_id = msg["device_id"]
+    if coordinator._training_device != device_id or coordinator._training_engine is None: raise ValueError("No active training session exists for this device")
+    engine=coordinator._training_engine
+    if engine.method != "full_cycle": raise ValueError("This control is only available for Full Cycle training")
+    result=engine.confirm_full_cycle(msg["accepted"], hass.loop.time()); state=coordinator.training_state.get(device_id,{})
+    state.update({k:result.get(k) for k in ("phase","baseline_w","peak_delta_w","duration_s","energy_wh")}); state["result"]=result
+    if result.get("failed"): state["status"]="error"; state["error"]=result.get("failure_reason"); state["instruction"]=result.get("failure_reason")
+    elif result.get("phase")=="capturing": state["instruction"]="Capturing power. Leave the device ON, then press Stop & Save when the cycle is complete."
+    else: state["instruction"]="Waiting for the target load to be ON. Press Start Power Capture when ready."
+    await coordinator._persist(force=True); connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/end_long_cycle",
+    vol.Required("entry_id"): str,
+    vol.Required("device_id"): str,
+    vol.Optional("force", default=False): bool,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_end_long_cycle(hass, connection, msg):
+    coordinator=_coordinator(hass,msg["entry_id"]); device_id=msg["device_id"]
+    if coordinator._training_device != device_id or coordinator._training_engine is None: raise ValueError("No active training session exists for this device")
+    engine=coordinator._training_engine
+    if engine.method != "full_cycle": raise ValueError("This control is only available for Full Cycle training")
+    now=hass.loop.time(); result=engine.end_full_cycle(force=msg["force"]); state=coordinator.training_state.get(device_id,{})
+    state.update({k:result.get(k) for k in ("phase","baseline_w","peak_delta_w","duration_s","energy_wh")}); state["result"]=result
+    if result.get("action")=="end_warning": state["instruction"]="Not ready to save: keep the device ON for at least 30 seconds before pressing Stop & Save."
+    elif result.get("completed"):
+        state.update({"status":"complete","learned":True,"completed":True,"completed_at":now})
+        state["learned_signature"]={"method":"full_cycle","baseline_w":result.get("baseline_w"),"load_w":result.get("peak_delta_w"),"duration_s":result.get("duration_s"),"energy_wh":result.get("energy_wh"),"events_detected":result.get("events_detected",0),"observations":result.get("observations",[])}
+        coordinator.last_training_device_id=device_id
+        if coordinator._direct_rpc_task and not coordinator._direct_rpc_task.done(): coordinator._direct_rpc_task.cancel()
+    await coordinator._persist(force=True); connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "energy_attribution/retry_training",
     vol.Required("entry_id"): str,
     vol.Required("device_id"): str,
@@ -452,5 +498,5 @@ async def ws_stop_training(hass, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_retry_training, ws_stop_training):
+    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_retry_training, ws_stop_training):
         websocket_api.async_register_command(hass, handler)
