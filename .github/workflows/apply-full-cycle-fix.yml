@@ -1,0 +1,123 @@
+name: Apply controlled Full Cycle fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch coordinator and frontend
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('custom_components/energyiq/coordinator.py')
+          s = p.read_text()
+          old = 'state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed")})'
+          new = 'state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed", "capture_valid", "stable_load_w", "stability_range_w", "instruction")})'
+          if old not in s: raise SystemExit('coordinator state update pattern not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          p = Path('custom_components/energyiq/www/energyiq-panel.js')
+          s = p.read_text()
+          old = 'const training = device.training || {};\n        const liveDelta = Number(training.live_delta_w), normalPower = Number(device.current_power);'
+          new = 'const training = device.training || {};\n        const liveDelta = Number(training.live_delta_w), normalPower = Number(device.current_power);\n        const result = training.result || {};\n        const fullCaptureValid = training.method === "full_cycle" && training.status === "active" && result.capture_valid === true;'
+          if old not in s: raise SystemExit('frontend updateLiveData pattern not found')
+          s = s.replace(old, new, 1)
+          old = 'const powerCell = row.querySelector(".power-cell"); if (powerCell) powerCell.textContent = Number.isFinite(power) ? `${power.toFixed(0)} W` : "—";'
+          new = 'const powerCell = row.querySelector(".power-cell"); if (powerCell) { powerCell.textContent = Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"; powerCell.classList.toggle("capture-valid", fullCaptureValid); powerCell.title = fullCaptureValid ? `Capture valid · stable load ${Number(result.stable_load_w || liveDelta).toFixed(0)} W` : ""; }'
+          if old not in s: raise SystemExit('frontend power cell pattern not found')
+          s = s.replace(old, new, 1)
+          old = 'fullPhase === "capturing" ? `<button data-full-action="${this.attr(device.device_id)}" data-full-op="stop_capture">Stop &amp; Save</button>`'
+          new = 'fullPhase === "capturing" ? `<button data-full-action="${this.attr(device.device_id)}" data-full-op="stop_capture" ${result.capture_valid === true ? "" : "disabled"}>Stop &amp; Save</button>`'
+          if old not in s: raise SystemExit('frontend live action pattern not found')
+          s = s.replace(old, new, 1)
+          old = 'const status = training?.status || "not trained", observations = this.quickObservationText(training);'
+          new = 'const status = training?.status || "not trained", observations = this.quickObservationText(training), result = training?.result || {}, learned = Number(training?.learned_signature?.load_w ?? result?.peak_delta_w), learnedText = Number.isFinite(learned) && learned > 0 ? ` · Load: ${learned.toFixed(0)} W` : "";'
+          if old not in s: raise SystemExit('frontend trainingLabel pattern not found')
+          s = s.replace(old, new, 1)
+          old = 'if (status === "complete") return observations ? `Complete · ${observations}` : "Complete";'
+          new = 'if (status === "complete") return observations ? `Complete · ${observations}${learnedText}` : `Complete${learnedText}`;'
+          if old not in s: raise SystemExit('frontend complete label pattern not found')
+          s = s.replace(old, new, 1)
+          old = 'const monitored = selected.has(device.device_id), training = device.training || {}, manual = String(device.source || "").toLowerCase() === "manual", liveDelta = Number(training.live_delta_w), normalPower = Number(device.current_power), power = training.status === "active" && Number.isFinite(liveDelta) ? liveDelta : normalPower;'
+          new = 'const monitored = selected.has(device.device_id), training = device.training || {}, manual = String(device.source || "").toLowerCase() === "manual", result = training.result || {}, liveDelta = Number(training.live_delta_w), normalPower = Number(device.current_power), power = training.status === "active" && Number.isFinite(liveDelta) ? liveDelta : normalPower, fullCaptureValid = training.method === "full_cycle" && training.status === "active" && result.capture_valid === true;'
+          if old not in s: raise SystemExit('frontend row power pattern not found')
+          s = s.replace(old, new, 1)
+          old = 'fullPhase === "capturing" ? `<button data-full-action="${this.attr(device.device_id)}" data-full-op="stop_capture">Stop &amp; Save</button>`'
+          new = 'fullPhase === "capturing" ? `<button data-full-action="${this.attr(device.device_id)}" data-full-op="stop_capture" ${fullCaptureValid ? "" : "disabled"}>Stop &amp; Save</button>`'
+          if old not in s: raise SystemExit('frontend row action pattern not found')
+          s = s.replace(old, new, 1)
+          old = '<td class="power-cell">${Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"}</td>'
+          new = '<td class="power-cell ${fullCaptureValid ? "capture-valid" : ""}" title="${fullCaptureValid ? `Capture valid · stable load ${Number(result.stable_load_w || liveDelta).toFixed(0)} W` : ""}">${Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"}</td>'
+          if old not in s: raise SystemExit('frontend row cell pattern not found')
+          s = s.replace(old, new, 1)
+          old = '.state-cell{text-align:center;width:74px}.'
+          if old not in s: raise SystemExit('frontend css anchor not found')
+          s = s.replace('.state-cell{text-align:center;width:74px}', '.state-cell{text-align:center;width:74px}.power-cell.capture-valid{background:#2e7d32;color:#fff;font-weight:700;border-radius:4px}', 1)
+          p.write_text(s)
+          PY
+      - name: Add focused Full Cycle tests
+        run: |
+          cat > tests/test_full_cycle_controlled.py <<'PY'
+          from custom_components.energyiq.training import TrainingEngine
+
+          def feed(engine, start, values, step=1.0):
+              for i, watts in enumerate(values):
+                  engine.add_sample(start + i * step, watts)
+
+          def test_full_cycle_requires_explicit_start_and_uses_off_baseline():
+              e = TrainingEngine("full_cycle", baseline_window_s=3, full_cycle_min_active_s=30)
+              feed(e, 0, [100] * 4)
+              assert e.phase == "waiting_for_start"
+              feed(e, 4, [220] * 10)
+              assert e.phase == "waiting_for_start"
+              e.confirm_full_cycle(True, 14)
+              feed(e, 14, [220] * 40)
+              r = e.result()
+              assert r["baseline_w"] == 100
+              assert r["capture_valid"] is True
+              assert 110 <= r["stable_load_w"] <= 130
+              assert r["peak_delta_w"] == r["stable_load_w"]
+
+          def test_full_cycle_stop_blocked_until_stable_valid():
+              e = TrainingEngine("full_cycle", baseline_window_s=3, full_cycle_min_active_s=30)
+              feed(e, 0, [100] * 4)
+              e.confirm_full_cycle(True, 4)
+              feed(e, 4, [220] * 10)
+              r = e.end_full_cycle()
+              assert r["phase"] == "capturing"
+              assert r["end_ready"] is False
+
+          def test_full_cycle_saves_after_valid_capture_without_return_to_baseline():
+              e = TrainingEngine("full_cycle", baseline_window_s=3, full_cycle_min_active_s=30)
+              feed(e, 0, [100] * 4)
+              e.confirm_full_cycle(True, 4)
+              feed(e, 4, [220] * 40)
+              r = e.end_full_cycle()
+              assert r["completed"] is True
+              assert r["peak_delta_w"] == 120
+          PY
+      - name: Validate
+        run: |
+          python3 -m compileall custom_components/energyiq
+          python3 -m pytest -q tests/test_full_cycle_controlled.py
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add custom_components/energyiq/coordinator.py custom_components/energyiq/www/energyiq-panel.js tests/test_full_cycle_controlled.py
+          git diff --cached --quiet || git commit -m 'Fix controlled Full Cycle capture workflow'
+          git push
+      - name: Remove temporary workflow
+        run: |
+          git rm .github/workflows/apply-full-cycle-fix.yml
+          git commit -m 'Remove temporary Full Cycle patch workflow'
+          git push
