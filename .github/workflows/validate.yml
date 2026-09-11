@@ -19,9 +19,7 @@ jobs:
         run: python -m compileall -q custom_components/energyiq tests
 
       - name: Validate frontend JavaScript syntax
-        run: |
-          node --check custom_components/energyiq/www/energyiq-panel.js
-          node --check custom_components/energyiq/www/energyiq-loader-v314.js
+        run: node --check custom_components/energyiq/www/energyiq-panel.js
 
       - name: Validate release structure and panel loading
         shell: bash
@@ -44,26 +42,32 @@ jobs:
           assert module_match, 'Panel module_url is missing.'
 
           panel_id = panel_match.group(1)
-          loader_name = module_match.group(1)
-          loader = Path('custom_components/energyiq/www') / loader_name
-          loader_js = loader.read_text(encoding='utf-8') if loader.is_file() else ''
+          module_name = module_match.group(1)
+          module = Path('custom_components/energyiq/www') / module_name
+          assert module.is_file(), f'Registered frontend module does not exist: {module_name}'
+          assert module_name == 'energyiq-panel.js', 'EnergyIQ must load the panel directly; no legacy loader layer is permitted.'
 
           assert f'sidebar_title="EnergyIQ • v{version}"' in init
           assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
           assert 'URL_BASE = "/energyiq-static"' in init
-          assert loader.is_file(), f'Registered frontend loader does not exist: {loader_name}'
-          assert f'const TAG = "{panel_id}";' in loader_js
-          assert 'customElements.define(TAG' in loader_js
-          assert 'await import(' in loader_js
-          assert 'energyiq-panel.js' in loader_js
-          assert 'const TAG = "energyiq-panel-v309";' in js
+          assert f'const TAG = "{panel_id}";' in js
+          assert 'customElements.define(TAG' in js
+          assert panel_id != 'energyiq-panel-v309'
+          assert panel_id == 'energyiq-panel-v316'
 
           assert Path('custom_components/energyiq/www/energyiq-panel.js').is_file()
+          assert not list(Path('custom_components/energyiq/www').glob('energyiq-loader-*.js'))
           assert not Path('custom_components/energyiq/www/energyiq-panel-entry.js').exists()
           assert not Path('custom_components/energyiq/www/energyiq-ui.js').exists()
           assert not list(Path('custom_components/energyiq/www').glob('README*.txt'))
           assert not list(Path('custom_components/energyiq/www').glob('*.tmp'))
           assert not list(Path('custom_components/energyiq/www').glob('*.bak'))
 
-          print(f'EnergyIQ {version} structure and isolated frontend loader validated.')
+          coordinator = Path('custom_components/energyiq/coordinator.py').read_text(encoding='utf-8')
+          assert 'def _fast_power_entity(self)' in coordinator
+          assert 'Never use a switch/control entity as a power measurement.' in coordinator
+          assert 'EM1.GetStatus(sum)' in coordinator
+          assert 'EM.GetStatus' in coordinator
+
+          print(f'EnergyIQ {version} structure, direct frontend loading, and fast power measurement validated.')
           PY
