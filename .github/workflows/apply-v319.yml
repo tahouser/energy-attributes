@@ -1,0 +1,54 @@
+name: Apply EnergyIQ v3.1.19 frontend fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-v319.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply frontend fix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('custom_components/energyiq/www/energyiq-panel.js')
+          s = p.read_text()
+          s = s.replace('const TAG = "energyiq-panel-v315";', 'const TAG = "energyiq-panel-v316";', 1)
+          s = s.replace('catch (error) { console.error("EnergyIQ refresh failed", error); }', 'catch (error) { console.error("EnergyIQ refresh failed", error); if (!this.workspace) this.renderError(error); }', 1)
+          p.write_text(s)
+
+          p = Path('custom_components/energyiq/__init__.py')
+          s = p.read_text()
+          s = s.replace('FRONTEND_VERSION = "31180"', 'FRONTEND_VERSION = "31190"')
+          s = s.replace('webcomponent_name="energyiq-panel-v315"', 'webcomponent_name="energyiq-panel-v316"')
+          s = s.replace('module_url=f"{URL_BASE}/energyiq-loader-v315.js?v={FRONTEND_VERSION}"', 'module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}"')
+          s = s.replace('sidebar_title="EnergyIQ • v3.1.18"', 'sidebar_title="EnergyIQ • v3.1.19"')
+          p.write_text(s)
+
+          p = Path('custom_components/energyiq/manifest.json')
+          s = p.read_text().replace('"version": "3.1.18"', '"version": "3.1.19"')
+          p.write_text(s)
+
+          loader = Path('custom_components/energyiq/www/energyiq-loader-v315.js')
+          if loader.exists(): loader.unlink()
+          PY
+          node --check custom_components/energyiq/www/energyiq-panel.js
+          python -m json.tool custom_components/energyiq/manifest.json >/dev/null
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add custom_components/energyiq .github/workflows/apply-v319.yml
+          git commit -m 'Release EnergyIQ v3.1.19 frontend loading fix'
+          git push
+          gh release create v3.1.19 --target main --title 'EnergyIQ v3.1.19' --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
