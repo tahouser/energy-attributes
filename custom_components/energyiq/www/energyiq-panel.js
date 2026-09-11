@@ -5,8 +5,8 @@
  * interaction only; it does not maintain a second copy of EnergyIQ state.
  */
 (() => {
-  const TAG = "energyiq-panel-v305";
-  const VERSION = "3.0.5";
+  const TAG = "energyiq-panel-v306";
+  const VERSION = "3.0.6";
 
   if (customElements.get(TAG)) return;
 
@@ -78,7 +78,8 @@
     async refresh() {
       if (!this.hass || !this.entryId) return;
       try {
-        const previousScroll = this.scrollTop;
+        const scrollerBeforeRender = this.querySelector(".table-scroll");
+        const previousScroll = scrollerBeforeRender ? scrollerBeforeRender.scrollTop : this.scrollTop;
         this.workspace = await this.ws({ type: "energy_attribution/workspace", entry_id: this.entryId });
         this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
         if (this.bulk?.status === "running") this.startBulkPolling(); else this.stopBulkPolling();
@@ -150,7 +151,7 @@
     renderState(device) {
       const state = this.stateFor(device);
       const label = state === "on" ? "ON" : state === "off" ? "OFF" : "—";
-      return `<span class="state-box ${state || "unknown"}">${label}</span>`;
+      return `\n        .table-scroll input.train, .table-scroll input.monitor { width:18px; height:18px; margin:0; }<span class="state-box ${state || "unknown"}">${label}</span>`;
     }
 
     renderSummary() {
