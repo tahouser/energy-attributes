@@ -1,0 +1,48 @@
+name: One-time EnergyIQ frontend version repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/fix-frontend-version.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Repair frontend/backend version source
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          js_path = Path('custom_components/energyiq/www/energyiq-panel.js')
+          js = js_path.read_text(encoding='utf-8')
+          js = js.replace('const VERSION = "3.1.8";', 'const VERSION = null;')
+          js = js.replace('Whole-home electrical intelligence · v${VERSION}', 'Whole-home electrical intelligence · v${this.workspace?.version || "?"}')
+          js_path.write_text(js, encoding='utf-8')
+
+          ws_path = Path('custom_components/energyiq/websocket.py')
+          ws = ws_path.read_text(encoding='utf-8')
+          if '_MANIFEST_VERSION' not in ws:
+              ws = ws.replace('import voluptuous as vol\n', 'import json\nfrom pathlib import Path\n\nimport voluptuous as vol\n')
+              ws = ws.replace('from .const import DOMAIN\n', 'from .const import DOMAIN\n\n_MANIFEST_VERSION = json.loads((Path(__file__).with_name("manifest.json")).read_text(encoding="utf-8"))["version"]\n')
+          marker = '        "entry_id": msg["entry_id"],\n'
+          if '"version": _MANIFEST_VERSION,' not in ws:
+              ws = ws.replace(marker, marker + '        "version": _MANIFEST_VERSION,\n', 1)
+          ws_path.write_text(ws, encoding='utf-8')
+          PY
+
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/energyiq/www/energyiq-panel.js custom_components/energyiq/websocket.py
+          git diff --cached --quiet || git commit -m "Fix frontend version display source"
+          git push
