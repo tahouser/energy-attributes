@@ -34,13 +34,6 @@ jobs:
           if old not in text:
               raise SystemExit('Expected trainingLabel block not found')
           text = text.replace(old, new, 1)
-
-          old = '''        const training = device.training || {};\n        const liveDelta = Number(training.live_delta_w);\n        const normalPower = Number(device.current_power);\n        const power = training.status === "active" && Number.isFinite(liveDelta) ? liveDelta : normalPower;'''
-          new = '''        const training = device.training || {};\n        const liveDelta = Number(training.live_delta_w);\n        const resultDelta = Number(training.result?.peak_delta_w);\n        const normalPower = Number(device.current_power);\n        const power = training.status === "active"\n          ? (Number.isFinite(liveDelta) ? liveDelta : (Number.isFinite(resultDelta) ? resultDelta : normalPower))\n          : normalPower;'''
-          if text.count(old) != 2:
-              raise SystemExit(f'Expected two power blocks, found {text.count(old)}')
-          text = text.replace(old, new)
-
           js.write_text(text, encoding='utf-8')
 
           init = Path('custom_components/energyiq/__init__.py')
@@ -115,7 +108,7 @@ jobs:
               tag_name: tag,
               target_commitish: target,
               name: `EnergyIQ ${tag}`,
-              body: 'Show live Quick training watts and the three captured ON/OFF cycle deltas during and after training. No training acceptance criteria changed.',
+              body: 'Show the live Quick training wattage and the three captured ON/OFF cycle deltas during and after training. No training acceptance criteria changed.',
               draft: false,
               prerelease: false
             });
