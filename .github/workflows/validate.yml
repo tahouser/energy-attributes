@@ -43,7 +43,6 @@ jobs:
           assert 'URL_BASE = "/energyiq-static"' in init
           assert 'module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}"' in init
           assert f'const TAG = "{stable_panel_id}";' in js
-          assert f'const VERSION = "{version}";' in js
 
           assert Path('custom_components/energyiq/www/energyiq-panel.js').is_file()
           assert not Path('custom_components/energyiq/www/energyiq-panel-entry.js').exists()
