@@ -245,10 +245,6 @@ async def ws_list_available_entities(hass, connection, msg):
     registry = er.async_get(hass)
     entities = []
     for entry in registry.entities.values():
-        # Show the complete entity registry. This is intentionally not limited
-        # to the enabled subset so the Add Entity browser matches HA's full
-        # entity inventory. Disabled entities are visible for discovery but
-        # remain non-addable until they are enabled in Home Assistant.
         state = hass.states.get(entry.entity_id)
         attrs = state.attributes if state is not None else {}
         matches = []
