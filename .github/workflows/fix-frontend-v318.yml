@@ -20,65 +20,39 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import json
-
           root = Path('.')
           panel = root / 'custom_components/energyiq/www/energyiq-panel.js'
           text = panel.read_text(encoding='utf-8')
           old = 'const TAG = "energyiq-panel-v309";'
           new = 'const TAG = "energyiq-panel-v315";'
-          assert old in text, 'Expected v309 panel tag not found.'
-          text = text.replace(old, new, 1)
-          panel.write_text(text, encoding='utf-8')
-
-          loader = root / 'custom_components/energyiq/www/energyiq-loader-v315.js'
-          loader.write_text('''/* EnergyIQ version-isolated frontend loader. Top-level await guarantees the panel element exists before Home Assistant instantiates it. */\nconst path = "./energyiq-panel.js?v=315";\n\ntry {\n  await import(path);\n  const TAG = "energyiq-panel-v315";\n  if (!customElements.get(TAG)) throw new Error("EnergyIQ panel element was not registered.");\n} catch (error) {\n  console.error("EnergyIQ frontend loader failed", error);\n  throw error;\n}\n''', encoding='utf-8')
-
+          assert old in text
+          panel.write_text(text.replace(old, new, 1), encoding='utf-8')
+          (root / 'custom_components/energyiq/www/energyiq-loader-v315.js').write_text('''/* EnergyIQ version-isolated frontend loader. */\nconst path = "./energyiq-panel.js?v=315";\ntry {\n  await import(path);\n  const TAG = "energyiq-panel-v315";\n  if (!customElements.get(TAG)) throw new Error("EnergyIQ panel element was not registered.");\n} catch (error) {\n  console.error("EnergyIQ frontend loader failed", error);\n  throw error;\n}\n''', encoding='utf-8')
           init = root / 'custom_components/energyiq/__init__.py'
           text = init.read_text(encoding='utf-8')
-          replacements = {
+          for old, new in {
               'FRONTEND_VERSION = "31170"': 'FRONTEND_VERSION = "31180"',
               'webcomponent_name="energyiq-panel-v314"': 'webcomponent_name="energyiq-panel-v315"',
               'module_url=f"{URL_BASE}/energyiq-loader-v314.js?v={FRONTEND_VERSION}"': 'module_url=f"{URL_BASE}/energyiq-loader-v315.js?v={FRONTEND_VERSION}"',
               'sidebar_title="EnergyIQ • v3.1.17"': 'sidebar_title="EnergyIQ • v3.1.18"',
-          }
-          for old, new in replacements.items():
-              assert old in text, f'Expected init text not found: {old}'
+          }.items():
+              assert old in text
               text = text.replace(old, new, 1)
           init.write_text(text, encoding='utf-8')
-
           manifest = root / 'custom_components/energyiq/manifest.json'
           data = json.loads(manifest.read_text(encoding='utf-8'))
           assert data['version'] == '3.1.17'
           data['version'] = '3.1.18'
           manifest.write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
-
-          validate = root / '.github/workflows/validate.yml'
-          text = validate.read_text(encoding='utf-8')
-          text = text.replace('energyiq-loader-v314.js', 'energyiq-loader-v315.js')
-          text = text.replace("assert 'customElements.define(TAG' in loader_js\n", "assert 'customElements.get(TAG)' in loader_js\n")
-          text = text.replace("assert 'const TAG = \\\"energyiq-panel-v309\\\";' in js", "assert f'const TAG = \\\"{panel_id}\\\";' in js")
-          validate.write_text(text, encoding='utf-8')
-
-          change = root / 'CHANGE_PROCEDURE.md'
-          text = change.read_text(encoding='utf-8')
-          start = text.index('## 3. Frontend identity safety')
-          end = text.index('## 4. Versioning', start)
-          replacement = '''## 3. Frontend identity safety\n\nEnergyIQ uses a version-isolated Home Assistant custom-panel loader. The registered `webcomponent_name`, the JavaScript `TAG`, and the loader module URL must agree.\n\nFor a frontend change, increment the isolated frontend identity deliberately (for example `energyiq-panel-v315` and its matching loader) so a previously loaded custom element cannot take control of the new panel. The loader must use top-level `await import(...)` and must verify that the expected panel element exists before Home Assistant instantiates it.\n\nThe main panel JavaScript must define its own registered element directly. Do not subclass or inherit an older EnergyIQ custom element. Do not rely on deleting files from `/config/www` or on manual browser-cache cleanup.\n\nVerify all of the following before release:\n\n- `webcomponent_name` matches the JavaScript `TAG` exactly.\n- The module URL points to the versioned loader.\n- The loader imports the current panel JavaScript with a versioned query string.\n- The loader verifies the current panel element exists.\n- The panel JavaScript defines the same current tag.\n- No stale frontend loader is registered by `__init__.py`.\n\nA mismatch is a release blocker because it can produce a blank or stale sidebar panel.\n\n'''
-          text = text[:start] + replacement + text[end:]
-          change.write_text(text, encoding='utf-8')
-
           state = root / 'STATE.md'
           text = state.read_text(encoding='utf-8').replace('**Current release:** v3.1.1', '**Current release:** v3.1.18', 1)
           text = text.replace('The frontend custom-element identity is stable and must not be changed for ordinary version bumps.', 'The frontend uses a version-isolated custom-element identity for frontend releases; ordinary backend-only version bumps should not change it.')
           state.write_text(text, encoding='utf-8')
           PY
-
           node --check custom_components/energyiq/www/energyiq-panel.js
           node --check custom_components/energyiq/www/energyiq-loader-v315.js
-
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add custom_components/energyiq/www/energyiq-panel.js custom_components/energyiq/www/energyiq-loader-v315.js custom_components/energyiq/__init__.py custom_components/energyiq/manifest.json .github/workflows/validate.yml CHANGE_PROCEDURE.md STATE.md .github/workflows/fix-frontend-v318.yml
-          git rm .github/workflows/fix-frontend-v318.yml
+          git add custom_components/energyiq/www/energyiq-panel.js custom_components/energyiq/www/energyiq-loader-v315.js custom_components/energyiq/__init__.py custom_components/energyiq/manifest.json STATE.md
           git commit -m 'Apply EnergyIQ v3.1.18 frontend isolation fix'
           git push
