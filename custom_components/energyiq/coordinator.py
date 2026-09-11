@@ -406,7 +406,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                     if state.get("live_peak_w") is None or watts > state.get("live_peak_w", watts):
                         state["live_peak_w"] = watts
                     result = self._training_engine.add_sample(now, watts)
-                    state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed")})
+                    state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed", "capture_valid", "stable_load_w", "stability_range_w", "instruction")})
                     baseline = state.get("baseline_w")
                     state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
                     state["result"] = result
