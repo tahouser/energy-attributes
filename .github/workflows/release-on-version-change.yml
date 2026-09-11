@@ -29,53 +29,10 @@ jobs:
           PY
           )
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-      - name: Apply v3.0.7 frontend fixes
-        id: frontend_fix
-        if: steps.version.outputs.version == '3.0.7'
-        shell: bash
-        run: |
-          python - <<'PY'
-          import re
-          from pathlib import Path
-          path = Path('custom_components/energyiq/www/energyiq-panel.js')
-          text = path.read_text(encoding='utf-8')
-          text, count = re.subn(r'return `\\n\s*\.table-scroll input\.train, \.table-scroll input\.monitor \{ width:18px; height:18px; margin:0; \}<span', 'return `<span', text, count=1)
-          if count != 1:
-              raise SystemExit('Expected broken State-cell markup was not found; refusing to modify the file.')
-          old = 'const scrollerBeforeRender = this.querySelector(".table-scroll");\\n        const previousScroll = scrollerBeforeRender ? scrollerBeforeRender.scrollTop : this.scrollTop;\\n        '
-          if old not in text:
-              raise SystemExit('Expected stale scroll capture was not found; refusing to modify the file.')
-          text = text.replace(old, '', 1)
-          text = text.replace('this.render(previousScroll);', 'this.render();', 1)
-          text = text.replace('this.render(this.scrollTop);\\n          if (this.bulk?.status !== "running") this.stopBulkPolling();', 'this.render();\\n          if (this.bulk?.status !== "running") this.stopBulkPolling();', 1)
-          old_render = 'render(previousScroll = 0) {\\n      if (!this.workspace) return;\\n      this.scrollTop = previousScroll;'
-          new_render = 'render(previousScroll = null) {\\n      if (!this.workspace) return;\\n      if (previousScroll === null) {\\n        const scroller = this.querySelector(".table-scroll");\\n        previousScroll = scroller ? scroller.scrollTop : this.scrollTop;\\n      }\\n      this.scrollTop = previousScroll;'
-          if old_render not in text:
-              raise SystemExit('Expected render implementation was not found; refusing to modify the file.')
-          text = text.replace(old_render, new_render, 1)
-          path.write_text(text, encoding='utf-8')
-          PY
-          node --check custom_components/energyiq/www/energyiq-panel.js
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add custom_components/energyiq/www/energyiq-panel.js
-          git commit -m 'Fix v3.0.7 table rendering and scroll preservation'
-          git push origin HEAD:main
-          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Set release target
-        id: target
-        shell: bash
-        run: |
-          if [ -n "${{ steps.frontend_fix.outputs.release_sha }}" ]; then
-            echo "sha=${{ steps.frontend_fix.outputs.release_sha }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
-          fi
       - name: Create release if missing
         uses: actions/github-script@v7
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          RELEASE_SHA: ${{ steps.target.outputs.sha }}
         with:
           script: |
             const tag = `v${process.env.VERSION}`;
@@ -92,7 +49,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: tag,
-              target_commitish: process.env.RELEASE_SHA,
+              target_commitish: context.sha,
               name: `EnergyIQ ${tag}`,
               body: `EnergyIQ ${tag}\n\nAutomated release.`,
               draft: false,
