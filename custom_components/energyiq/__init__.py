@@ -40,7 +40,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass=hass,
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v301",
-            module_url=f"{URL_BASE}/energyiq-panel-v301.js?v={FRONTEND_VERSION}",
+            module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
             sidebar_title="EnergyIQ • v3.0.1",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
