@@ -5,8 +5,8 @@
  * interaction only; it does not maintain a second copy of EnergyIQ state.
  */
 (() => {
-  const TAG = "energyiq-panel-v303";
-  const VERSION = "3.0.3";
+  const TAG = "energyiq-panel-v304";
+  const VERSION = "3.0.4";
 
   if (customElements.get(TAG)) return;
 
@@ -117,9 +117,13 @@
       return Array.isArray(this.workspace?.devices) ? this.workspace.devices : [];
     }
 
+    getPersistedIds() {
+      return new Set(this.getDevices().filter(d => d.classification === "monitor").map(d => d.device_id));
+    }
+
     getSelectedIds() {
       if (this.pending) return new Set(this.pending);
-      return new Set(this.getDevices().filter(d => d.classification === "monitor").map(d => d.device_id));
+      return this.getPersistedIds();
     }
 
     stateFor(device) {
@@ -150,8 +154,7 @@
 
     renderSummary() {
       const devices = this.getDevices();
-      const selected = this.getSelectedIds();
-      const monitored = devices.filter(d => selected.has(d.device_id));
+      const monitored = devices.filter(d => this.getPersistedIds().has(d.device_id));
       const trained = monitored.filter(d => d.training?.status === "complete").length;
       const untrained = monitored.length - trained;
       const home = Number(this.workspace?.whole_home_power);
@@ -183,8 +186,13 @@
       if (!this.workspace) return;
       this.scrollTop = previousScroll;
       const devices = this.getDevices();
+      const persisted = this.getPersistedIds();
       const selected = this.getSelectedIds();
-      const visible = devices.filter(d => this.view === "monitored" ? selected.has(d.device_id) : !selected.has(d.device_id)).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      const visible = devices.filter(d => {
+        if (this.view === "all") return true;
+        if (this.view === "monitored") return persisted.has(d.device_id);
+        return !persisted.has(d.device_id);
+      }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
       this.innerHTML = `<style>${this.styles()}</style>
         <div class="shell">
@@ -192,7 +200,7 @@
             <div class="header-actions"><button id="add">＋ Add Device / Entity</button><button id="save" class="primary">Save Monitoring</button></div>
           </header>
           ${this.renderSummary()}${this.renderBulk()}
-          <div class="toolbar"><div class="views"><button id="monitored" class="${this.view === "monitored" ? "selected" : ""}">Monitored (${selected.size})</button><button id="excluded" class="${this.view === "excluded" ? "selected" : ""}">Excluded (${Math.max(0, devices.length - selected.size)})</button></div>
+          <div class="toolbar"><div class="views"><button id="all" class="${this.view === "all" ? "selected" : ""}">All (${devices.length})</button><button id="monitored" class="${this.view === "monitored" ? "selected" : ""}">Monitored (${persisted.size})</button><button id="excluded" class="${this.view === "excluded" ? "selected" : ""}">Excluded (${Math.max(0, devices.length - persisted.size)})</button></div>
             <div class="bulk-actions"><button id="bulk-train" ${this.view !== "monitored" || !visible.some(d => d.source !== "manual") ? "disabled" : ""}>Auto Train Monitored</button></div>
           </div>
           <div class="table-scroll"><table><thead><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Source</th><th>Power</th><th>State</th><th>Training</th><th>Method</th><th>Action</th></tr></thead><tbody>
@@ -230,6 +238,7 @@
     bind() {
       this.querySelector("#save")?.addEventListener("click", () => this.saveMonitoring());
       this.querySelector("#add")?.addEventListener("click", () => this.openAddDialog());
+      this.querySelector("#all")?.addEventListener("click", () => { this.view = "all"; this.render(this.scrollTop); });
       this.querySelector("#monitored")?.addEventListener("click", () => { this.view = "monitored"; this.render(this.scrollTop); });
       this.querySelector("#excluded")?.addEventListener("click", () => { this.view = "excluded"; this.render(this.scrollTop); });
       this.querySelector("#bulk-train")?.addEventListener("click", () => this.bulkTrain());
