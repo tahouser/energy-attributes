@@ -1,0 +1,1 @@
+EnergyIQ v3.1.26 includes the Full Cycle frontend cache-busting fix.
