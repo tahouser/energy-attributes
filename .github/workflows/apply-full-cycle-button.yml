@@ -1,0 +1,73 @@
+name: Apply Full Cycle Capture Button
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch backend and frontend
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          ws = Path('custom_components/energyiq/websocket.py')
+          s = ws.read_text(encoding='utf-8')
+          anchor = '@websocket_api.websocket_command({\n    vol.Required("type"): "energy_attribution/retry_training",'
+          assert anchor in s, 'retry_training anchor not found'
+          block = '''@websocket_api.websocket_command({\n    vol.Required("type"): "energy_attribution/full_cycle_action",\n    vol.Required("entry_id"): str,\n    vol.Required("device_id"): str,\n    vol.Required("action"): vol.In(["start_capture", "stop_capture"]),\n})\n@websocket_api.require_admin\n@websocket_api.async_response\nasync def ws_full_cycle_action(hass, connection, msg):\n    coordinator = _coordinator(hass, msg["entry_id"])\n    if coordinator._training_device != msg["device_id"] or coordinator._training_engine is None:\n        raise ValueError("No active training session exists for this device")\n    engine = coordinator._training_engine\n    if engine.method != "full_cycle":\n        raise ValueError("This control is only available for Full Cycle training")\n    now = hass.loop.time()\n    if msg["action"] == "start_capture":\n        result = engine.confirm_full_cycle(True, now)\n        if result.get("failed"):\n            raise ValueError(result.get("failure_reason") or "Unable to start power capture")\n        state = coordinator.training_state.get(msg["device_id"], {})\n        state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "duration_s", "energy_wh")})\n        state["result"] = result\n        state["instruction"] = "Capturing power. Leave the device ON, then turn it OFF when finished."\n    else:\n        result = engine.end_full_cycle(force=False)\n        state = coordinator.training_state.get(msg["device_id"], {})\n        state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "duration_s", "energy_wh")})\n        state["result"] = result\n        if result.get("failed") or result.get("action") == "end_warning":\n            state["instruction"] = (\n                "Not ready to save: keep the device ON for at least 30 seconds, then turn it OFF and press Stop & Save."\n            )\n        await coordinator._persist(force=True)\n        if result.get("completed"):\n            state["status"] = "complete"\n            state["learned"] = True\n            state["completed"] = True\n            state["completed_at"] = now\n            state["learned_signature"] = {\n                "method": "full_cycle",\n                "baseline_w": result.get("baseline_w"),\n                "load_w": result.get("peak_delta_w"),\n                "duration_s": result.get("duration_s"),\n                "energy_wh": result.get("energy_wh"),\n                "events_detected": result.get("events_detected", 0),\n                "observations": result.get("observations", []),\n            }\n            await coordinator._persist(force=True)\n            if coordinator._direct_rpc_task and not coordinator._direct_rpc_task.done():\n                coordinator._direct_rpc_task.cancel()\n    connection.send_result(msg["id"], result)\n\n\n'''
+          s = s.replace(anchor, block + anchor, 1)
+          old = 'for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_retry_training, ws_stop_training):'
+          new = 'for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_full_cycle_action, ws_retry_training, ws_stop_training):'
+          assert old in s, 'handler registration anchor not found'
+          s = s.replace(old, new, 1)
+          ws.write_text(s, encoding='utf-8')
+
+          js = Path('custom_components/energyiq/www/energyiq-panel.js')
+          s = js.read_text(encoding='utf-8')
+
+          old_action = 'const action = training.status === "active" ? `<button data-stop="${this.attr(device.device_id)}">Stop</button>` : manual ? `<button data-manual="${this.attr(device.device_id)}">${training.status === "complete" ? "Retrain Manual" : "Manual Training"}</button>` : `<button data-quick="${this.attr(device.device_id)}">Quick ON/OFF</button><button data-full="${this.attr(device.device_id)}">Full Cycle</button>`;'
+          new_action = 'const fullActive = training.status === "active" && training.method === "full_cycle"; const fullPhase = String(training.phase || ""); const action = fullActive ? (fullPhase === "awaiting_confirmation" || fullPhase === "waiting_for_start" ? `<button data-full-action="${this.attr(device.device_id)}" data-full-op="start_capture">Start Power Capture</button>` : fullPhase === "capturing" ? `<button data-full-action="${this.attr(device.device_id)}" data-full-op="stop_capture">Stop &amp; Save</button>` : `<button data-stop="${this.attr(device.device_id)}">Stop</button>`) : training.status === "active" ? `<button data-stop="${this.attr(device.device_id)}">Stop</button>` : manual ? `<button data-manual="${this.attr(device.device_id)}">${training.status === "complete" ? "Retrain Manual" : "Manual Training"}</button>` : `<button data-quick="${this.attr(device.device_id)}">Quick ON/OFF</button><button data-full="${this.attr(device.device_id)}">Full Cycle</button>`;'
+          assert s.count(old_action) == 1, f'expected one updateLiveData action expression, found {s.count(old_action)}'
+          s = s.replace(old_action, new_action, 1)
+
+          row_action = 'const action = training.status === "active" ? `<button data-stop="${this.attr(device.device_id)}">Stop</button>` : manual ? `<button data-manual="${this.attr(device.device_id)}">${training.status === "complete" ? "Retrain Manual" : "Manual Training"}</button>` : `<button data-quick="${this.attr(device.device_id)}">Quick ON/OFF</button><button data-full="${this.attr(device.device_id)}">Full Cycle</button>`;'
+          assert s.count(row_action) == 1, f'expected one row action expression, found {s.count(row_action)}'
+          s = s.replace(row_action, new_action, 1)
+
+          bind_anchor = 'this.querySelectorAll("[data-quick]").forEach(b => b.onclick = () => this.startTraining(b.dataset.quick, "quick"));'
+          bind_insert = 'this.querySelectorAll("[data-full-action]").forEach(b => b.onclick = () => this.fullCycleAction(b.dataset.fullAction, b.dataset.fullOp));'
+          assert bind_anchor in s, 'bindActionButtons anchor not found'
+          s = s.replace(bind_anchor, bind_anchor + ' ' + bind_insert, 1)
+
+          bind2_anchor = 'this.querySelectorAll("[data-quick]").forEach(b => b.addEventListener("click", () => this.startTraining(b.dataset.quick, "quick")));'
+          bind2_insert = 'this.querySelectorAll("[data-full-action]").forEach(b => b.addEventListener("click", () => this.fullCycleAction(b.dataset.fullAction, b.dataset.fullOp)));'
+          assert bind2_anchor in s, 'bind anchor not found'
+          s = s.replace(bind2_anchor, bind2_anchor + ' ' + bind2_insert, 1)
+
+          method_anchor = '    async stopTraining(deviceId) { try { await this.ws({ type: "energy_attribution/stop_training", entry_id: this.entryId, device_id: deviceId }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to stop training", true); } }'
+          method_new = method_anchor + '\n    async fullCycleAction(deviceId, action) { try { await this.ws({ type: "energy_attribution/full_cycle_action", entry_id: this.entryId, device_id: deviceId, action }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to control Full Cycle capture", true); } }'
+          assert s.count(method_anchor) == 1, 'stopTraining method anchor not found'
+          s = s.replace(method_anchor, method_new, 1)
+          js.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Validate
+        run: |
+          python -m compileall -q custom_components/energyiq
+          node --check custom_components/energyiq/www/energyiq-panel.js
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/energyiq/websocket.py custom_components/energyiq/www/energyiq-panel.js
+          git diff --cached --quiet && exit 0
+          git commit -m "Add manual Full Cycle capture control"
+          git push
