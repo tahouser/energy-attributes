@@ -5,8 +5,8 @@
  * interaction only; it does not maintain a second copy of EnergyIQ state.
  */
 (() => {
-  const TAG = "energyiq-panel-v304";
-  const VERSION = "3.0.4";
+  const TAG = "energyiq-panel-v305";
+  const VERSION = "3.0.5";
 
   if (customElements.get(TAG)) return;
 
@@ -19,6 +19,7 @@
       this.bulk = null;
       this.view = "monitored";
       this.pending = null;
+      this.trainSelected = new Set();
       this.loading = false;
       this.refreshTimer = null;
       this.bulkTimer = null;
@@ -188,6 +189,7 @@
       const devices = this.getDevices();
       const persisted = this.getPersistedIds();
       const selected = this.getSelectedIds();
+      const trainSelected = this.trainSelected;
       const visible = devices.filter(d => {
         if (this.view === "all") return true;
         if (this.view === "monitored") return persisted.has(d.device_id);
@@ -201,10 +203,10 @@
           </header>
           ${this.renderSummary()}${this.renderBulk()}
           <div class="toolbar"><div class="views"><button id="all" class="${this.view === "all" ? "selected" : ""}">All (${devices.length})</button><button id="monitored" class="${this.view === "monitored" ? "selected" : ""}">Monitored (${persisted.size})</button><button id="excluded" class="${this.view === "excluded" ? "selected" : ""}">Excluded (${Math.max(0, devices.length - persisted.size)})</button></div>
-            <div class="bulk-actions"><button id="bulk-train" ${this.view !== "monitored" || !visible.some(d => d.source !== "manual") ? "disabled" : ""}>Auto Train Monitored</button></div>
+            <div class="bulk-actions"><button id="bulk-train" ${trainSelected.size ? "" : "disabled"}>Auto Train Selected (${trainSelected.size})</button></div>
           </div>
-          <div class="table-scroll"><table><thead><tr><th>Monitor</th><th>Device</th><th>Area</th><th>Source</th><th>Power</th><th>State</th><th>Training</th><th>Method</th><th>Action</th></tr></thead><tbody>
-            ${visible.length ? visible.map(d => this.row(d, selected)).join("") : `<tr><td colspan="9" class="empty">No loads in this view.</td></tr>`}
+          <div class="table-scroll"><table><thead><tr><th>Monitor</th><th>Train</th><th>Device</th><th>Area</th><th>Source</th><th>Power</th><th>State</th><th>Training</th><th>Method</th><th>Action</th></tr></thead><tbody>
+            ${visible.length ? visible.map(d => this.row(d, selected)).join("") : `<tr><td colspan="10" class="empty">No loads in this view.</td></tr>`}
           </tbody></table></div>
         </div>`;
 
@@ -228,7 +230,9 @@
         : manual
           ? `<button data-manual="${this.attr(device.device_id)}">${training.status === "complete" ? "Retrain Manual" : "Manual Training"}</button>`
           : `<button data-quick="${this.attr(device.device_id)}">Quick ON/OFF</button><button data-full="${this.attr(device.device_id)}">Full Cycle</button>`;
+      const trainChecked = this.trainSelected.has(device.device_id);
       return `<tr><td><input class="monitor" type="checkbox" data-monitor="${this.attr(device.device_id)}" ${monitored ? "checked" : ""}></td>
+        <td><input class="train" type="checkbox" data-train="${this.attr(device.device_id)}" ${trainChecked ? "checked" : ""} ${monitored ? "" : "disabled"}></td>
         <td><strong>${this.escape(device.name || device.device_id)}</strong><small>${this.escape(device.category || device.model || "")}</small></td>
         <td>${this.escape(device.area || "")}</td><td>${manual ? "Manual" : "HA"}</td>
         <td>${Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"}</td><td class="state-cell">${this.renderState(device)}</td>
@@ -242,6 +246,11 @@
       this.querySelector("#monitored")?.addEventListener("click", () => { this.view = "monitored"; this.render(this.scrollTop); });
       this.querySelector("#excluded")?.addEventListener("click", () => { this.view = "excluded"; this.render(this.scrollTop); });
       this.querySelector("#bulk-train")?.addEventListener("click", () => this.bulkTrain());
+      this.querySelectorAll("[data-train]").forEach(box => box.addEventListener("change", event => {
+        const id = event.currentTarget.dataset.train;
+        if (event.currentTarget.checked) this.trainSelected.add(id); else this.trainSelected.delete(id);
+        this.render(this.scrollTop);
+      }));
       this.querySelectorAll("[data-monitor]").forEach(box => box.addEventListener("change", event => {
         const selected = this.getSelectedIds();
         const id = event.currentTarget.dataset.monitor;
@@ -280,13 +289,14 @@
     }
 
     async bulkTrain() {
-      const ids = [...this.getSelectedIds()].filter(id => {
+      const ids = [...this.trainSelected];
+      const autoIds = ids.filter(id => {
         const d = this.getDevices().find(x => x.device_id === id);
         return d && String(d.source || "").toLowerCase() !== "manual";
       });
-      if (!ids.length || !window.confirm(`Auto Train ${ids.length} monitored HA loads sequentially?`)) return;
+      if (!autoIds.length || !window.confirm(`Auto Train ${autoIds.length} selected HA loads sequentially?`)) return;
       try {
-        await this.ws({ type: "energy_attribution/bulk_auto_training", entry_id: this.entryId, device_ids: ids });
+        await this.ws({ type: "energy_attribution/bulk_auto_training", entry_id: this.entryId, device_ids: autoIds });
         this.startBulkPolling();
         await this.refresh();
       } catch (error) { this.showToast(error?.message || "Unable to start bulk training", true); }
