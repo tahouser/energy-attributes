@@ -471,7 +471,32 @@ async def ws_retry_training(hass, connection, msg):
 @websocket_api.async_response
 async def ws_stop_training(hass, connection, msg):
     coordinator = _coordinator(hass, msg["entry_id"])
-    await coordinator.async_stop_training(msg["device_id"])
+    device_id = msg["device_id"]
+    if coordinator._training_device != device_id or coordinator._training_engine is None:
+        raise ValueError("No active training session exists for this device")
+    state = coordinator.training_state.get(device_id, {})
+    state["status"] = "stopped"
+    state["phase"] = "stopped"
+    state["instruction"] = "Training stopped without saving a new signature."
+    state["completed"] = False
+    state["learned"] = False
+    task = coordinator._training_task
+    coordinator._training_engine = None
+    coordinator._training_device = None
+    if coordinator._direct_rpc_task and not coordinator._direct_rpc_task.done():
+        coordinator._direct_rpc_task.cancel()
+        try:
+            await coordinator._direct_rpc_task
+        except asyncio.CancelledError:
+            pass
+    if task and not task.done() and task is not asyncio.current_task():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    coordinator._training_task = None
+    await coordinator._persist(force=True)
     connection.send_result(msg["id"], {"stopped": True})
 
 
