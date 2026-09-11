@@ -5,8 +5,8 @@
  * interaction only; it does not maintain a second copy of EnergyIQ state.
  */
 (() => {
-  const TAG = "energyiq-panel-v308";
-  const VERSION = "3.0.8";
+  const TAG = "energyiq-panel-v309";
+  const VERSION = "3.0.9";
 
   if (customElements.get(TAG)) return;
 
@@ -285,11 +285,21 @@
         this.render();
       }));
       this.querySelectorAll("[data-monitor]").forEach(box => box.addEventListener("change", event => {
+        const scroller = this.querySelector(".table-scroll");
+        const scrollTop = scroller ? scroller.scrollTop : 0;
+        const scrollLeft = scroller ? scroller.scrollLeft : 0;
         const selected = this.getSelectedIds();
         const id = event.currentTarget.dataset.monitor;
         if (event.currentTarget.checked) selected.add(id); else selected.delete(id);
         this.pending = selected;
         this.render();
+        requestAnimationFrame(() => {
+          const nextScroller = this.querySelector(".table-scroll");
+          if (nextScroller) {
+            nextScroller.scrollTop = scrollTop;
+            nextScroller.scrollLeft = scrollLeft;
+          }
+        });
       }));
       this.querySelectorAll("[data-quick]").forEach(b => b.addEventListener("click", () => this.startTraining(b.dataset.quick, "quick")));
       this.querySelectorAll("[data-full]").forEach(b => b.addEventListener("click", () => this.startTraining(b.dataset.full, "full_cycle")));
