@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Add Full Cycle frontend cache-busting fix workflow')
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'Fix frontend patch workflow permissions')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,14 +43,15 @@ jobs:
           s = validate.read_text()
           s = s.replace("assert panel_id == 'energyiq-panel-v316'", "assert panel_id == 'energyiq-panel-v324'")
           validate.write_text(s)
-
-          workflow = Path('.github/workflows/fix-full-cycle-frontend.yml')
-          workflow.unlink()
           PY
       - name: Commit permanent fix
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add custom_components/energyiq/manifest.json custom_components/energyiq/__init__.py custom_components/energyiq/www/energyiq-panel.js .github/workflows/validate.yml .github/workflows/fix-full-cycle-frontend.yml
+          git add custom_components/energyiq/manifest.json custom_components/energyiq/__init__.py custom_components/energyiq/www/energyiq-panel.js .github/workflows/validate.yml
+          if git diff --cached --quiet; then
+            echo 'No changes required.'
+            exit 0
+          fi
           git commit -m 'Fix Full Cycle frontend loading and bump to v3.1.24'
           git push
