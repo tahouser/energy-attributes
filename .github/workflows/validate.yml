@@ -21,7 +21,7 @@ jobs:
       - name: Validate frontend JavaScript syntax
         run: node --check custom_components/energyiq/www/energyiq-panel.js
 
-      - name: Validate release structure
+      - name: Validate release structure and panel identity
         shell: bash
         run: |
           set -euo pipefail
@@ -31,7 +31,13 @@ jobs:
               print(json.load(f)['version'])
           PY
           )
+          PANEL_ID="energyiq-panel-v${VERSION//./}"
+          FRONTEND_VERSION="${VERSION//./}0"
           grep -Fq "sidebar_title=\"EnergyIQ • v${VERSION}\"" custom_components/energyiq/__init__.py
+          grep -Fq "webcomponent_name=\"${PANEL_ID}\"" custom_components/energyiq/__init__.py
+          grep -Fq "module_url=f\"/energyiq-static/energyiq-panel.js?v=${FRONTEND_VERSION}\"" custom_components/energyiq/__init__.py
+          grep -Fq "const TAG = \"${PANEL_ID}\";" custom_components/energyiq/www/energyiq-panel.js
+          grep -Fq "const VERSION = \"${VERSION}\";" custom_components/energyiq/www/energyiq-panel.js
           test -f custom_components/energyiq/www/energyiq-panel.js
           test ! -e custom_components/energyiq/www/energyiq-panel-entry.js
           test ! -e custom_components/energyiq/www/energyiq-ui.js
@@ -43,4 +49,4 @@ jobs:
             echo 'Temporary frontend files are not allowed.'
             exit 1
           fi
-          echo "EnergyIQ ${VERSION} structure validated."
+          echo "EnergyIQ ${VERSION} structure and panel identity validated."
