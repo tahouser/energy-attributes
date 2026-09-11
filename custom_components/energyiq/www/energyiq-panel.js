@@ -6,7 +6,7 @@
  */
 (() => {
   const TAG = "energyiq-panel-v309";
-  const VERSION = "3.1.2";
+  const VERSION = "3.1.3";
 
   if (customElements.get(TAG)) return;
 
@@ -180,12 +180,28 @@
       return null;
     }
 
+    quickObservationText(training) {
+      const observations = training?.result?.observations || training?.learned_signature?.observations || [];
+      if (!Array.isArray(observations) || !observations.length) return "";
+      return observations.map((item, index) => {
+        const value = Number(item?.delta_w);
+        return `C${index + 1}: ${Number.isFinite(value) ? value.toFixed(0) : "—"} W`;
+      }).join(" · ");
+    }
+
     trainingLabel(training) {
       const status = training?.status || "not trained";
-      if (status === "active") return training.instruction || `Training: ${training.phase || "in progress"}`;
-      if (status === "complete") return "Complete";
-      if (status === "error") return `Error: ${training.error || training.instruction || "training failed"}`;
-      if (status === "stopped") return "Stopped";
+      const observations = this.quickObservationText(training);
+      if (status === "active") {
+        const base = training.instruction || `Training: ${training.phase || "in progress"}`;
+        return observations ? `${base} · ${observations}` : base;
+      }
+      if (status === "complete") return observations ? `Complete · ${observations}` : "Complete";
+      if (status === "error") {
+        const base = training.error || training.instruction || "training failed";
+        return observations ? `Error: ${base} · ${observations}` : `Error: ${base}`;
+      }
+      if (status === "stopped") return observations ? `Stopped · ${observations}` : "Stopped";
       if (status === "interrupted") return "Interrupted";
       return "Not trained";
     }
