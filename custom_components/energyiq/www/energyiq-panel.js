@@ -169,7 +169,18 @@
     async saveMonitoring() { try { await this.ws({ type: "energy_attribution/set_monitoring", entry_id: this.entryId, device_ids: [...this.getSelectedIds()] }); this.pending = null; await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to save monitoring selections", true); } }
     async startTraining(deviceId, method) { const device = this.getDevices().find(d => d.device_id === deviceId); if (!device) return; const message = method === "quick" ? `EnergyIQ will automatically turn “${device.name}” ON and OFF during Quick Training. Continue?` : method === "manual" ? `Manual training for “${device.name}”. No command will be sent to the device. Continue?` : `Run a Full Cycle training session for “${device.name}”?`; if (!window.confirm(message)) return; try { await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: deviceId, method }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to start training", true); } }
     async stopTraining(deviceId) { try { await this.ws({ type: "energy_attribution/stop_training", entry_id: this.entryId, device_id: deviceId }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to stop training", true); } }
-    async fullCycleAction(deviceId, action) { try { await this.ws({ type: "energy_attribution/full_cycle_action", entry_id: this.entryId, device_id: deviceId, action }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to control Full Cycle capture", true); } }
+    async fullCycleAction(deviceId, action) {
+      try {
+        if (action === "start_capture") {
+          await this.ws({ type: "energy_attribution/confirm_long_cycle", entry_id: this.entryId, device_id: deviceId, accepted: true });
+        } else if (action === "stop_capture") {
+          await this.ws({ type: "energy_attribution/end_long_cycle", entry_id: this.entryId, device_id: deviceId, force: false });
+        }
+        await this.refresh(true);
+      } catch (error) {
+        this.showToast(error?.message || "Unable to control Full Cycle capture", true);
+      }
+    }
     async bulkTrain() { const ids = [...this.trainSelected], autoIds = ids.filter(id => { const d = this.getDevices().find(x => x.device_id === id); return d && String(d.source || "").toLowerCase() !== "manual"; }); if (!autoIds.length || !window.confirm(`Auto Train ${autoIds.length} selected HA loads sequentially?`)) return; try { await this.ws({ type: "energy_attribution/bulk_auto_training", entry_id: this.entryId, device_ids: autoIds }); this.startBulkPolling(); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to start bulk training", true); } }
 
     async openAddDialog() { try { const result = await this.ws({ type: "energy_attribution/list_available_entities", entry_id: this.entryId }); this.showAddDialog(result.entities || []); } catch (error) { this.showToast(error?.message || "Unable to load Home Assistant entities", true); } }
