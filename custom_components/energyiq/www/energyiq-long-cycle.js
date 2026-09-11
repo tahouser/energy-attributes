@@ -1,6 +1,6 @@
-/* EnergyIQ supervised Long Cycle training UI. Loaded after the main panel. */
+/* EnergyIQ supervised Long Cycle training UI. */
 (async () => {
-  const TAG = "energyiq-panel-v209";
+  const TAG = "energyiq-panel";
   await customElements.whenDefined(TAG);
   const Panel = customElements.get(TAG);
   if (!Panel || Panel.prototype.__energyIQLongCyclePatched) return;
