@@ -5,8 +5,8 @@
  * interaction only; it does not maintain a second copy of EnergyIQ state.
  */
 (() => {
-  const TAG = "energyiq-panel-v306";
-  const VERSION = "3.0.6";
+  const TAG = "energyiq-panel-v307";
+  const VERSION = "3.0.7";
 
   if (customElements.get(TAG)) return;
 
@@ -78,12 +78,10 @@
     async refresh() {
       if (!this.hass || !this.entryId) return;
       try {
-        const scrollerBeforeRender = this.querySelector(".table-scroll");
-        const previousScroll = scrollerBeforeRender ? scrollerBeforeRender.scrollTop : this.scrollTop;
         this.workspace = await this.ws({ type: "energy_attribution/workspace", entry_id: this.entryId });
         this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
         if (this.bulk?.status === "running") this.startBulkPolling(); else this.stopBulkPolling();
-        this.render(previousScroll);
+        this.render();
       } catch (error) {
         console.error("EnergyIQ refresh failed", error);
       }
@@ -94,7 +92,7 @@
       this.bulkTimer = setInterval(async () => {
         try {
           this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
-          this.render(this.scrollTop);
+          this.render();
           if (this.bulk?.status !== "running") this.stopBulkPolling();
         } catch (error) {
           console.error("EnergyIQ bulk status", error);
@@ -151,7 +149,7 @@
     renderState(device) {
       const state = this.stateFor(device);
       const label = state === "on" ? "ON" : state === "off" ? "OFF" : "—";
-      return `\n        .table-scroll input.train, .table-scroll input.monitor { width:18px; height:18px; margin:0; }<span class="state-box ${state || "unknown"}">${label}</span>`;
+      return `<span class="state-box ${state || "unknown"}">${label}</span>`;
     }
 
     renderSummary() {
@@ -184,8 +182,12 @@
       return `<div class="bulk"><strong>Bulk training in progress</strong><span>${current} of ${total}${currentDevice ? ` · ${this.escape(currentDevice.name)}` : ""}</span><div class="progress"><i style="width:${percent}%"></i></div><small>${completed} completed · ${percent}%</small></div>`;
     }
 
-    render(previousScroll = 0) {
+    render(previousScroll = null) {
       if (!this.workspace) return;
+      if (previousScroll === null) {
+        const scroller = this.querySelector(".table-scroll");
+        previousScroll = scroller ? scroller.scrollTop : this.scrollTop;
+      }
       this.scrollTop = previousScroll;
       const devices = this.getDevices();
       const persisted = this.getPersistedIds();
