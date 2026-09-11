@@ -236,6 +236,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         return None
 
     async def _direct_shelly_poll(self, device_id: str):
+        """Poll the whole-home Shelly directly so training never waits for HA state propagation."""
         cfg = self._shelly_rpc_config()
         if not cfg:
             self._direct_rpc_available = False
@@ -250,40 +251,41 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 try:
                     total = None
                     source = None
-                    if self._direct_rpc_mode in (None, "em"):
+                    # Older Shelly Pro 3EM firmware used EM1.GetStatus?id=0
+                    # for the aggregate meter value. This is the direct path
+                    # historically used by EnergyIQ and avoids HA sensor lag.
+                    if self._direct_rpc_mode in (None, "em1"):
                         try:
-                            url = f"http://{host}:{port}/rpc/EM.GetStatus?id=0"
+                            url = f"http://{host}:{port}/rpc/EM1.GetStatus?id=0"
                             async with session.get(url, auth=auth, timeout=timeout) as response:
                                 response.raise_for_status()
                                 payload = await response.json(content_type=None)
-                            if isinstance(payload, dict):
-                                for key in ("total_act_power", "total_power", "act_power"):
-                                    if payload.get(key) is not None:
-                                        total = float(payload[key])
-                                        break
-                            if total is not None:
-                                source = "EM.GetStatus"
-                                self._direct_rpc_mode = "em"
+                            if isinstance(payload, dict) and payload.get("act_power") is not None:
+                                total = float(payload["act_power"])
+                                source = "EM1.GetStatus(sum)"
+                                self._direct_rpc_mode = "em1"
                         except aiohttp.ClientResponseError as err:
                             if err.status != 404:
                                 raise
-                            self._direct_rpc_mode = "em1"
+                            self._direct_rpc_mode = "em"
+
+                    # Newer Pro 3EM firmware exposes the aggregate as EM.GetStatus.
+                    if total is None:
+                        url = f"http://{host}:{port}/rpc/EM.GetStatus?id=0"
+                        async with session.get(url, auth=auth, timeout=timeout) as response:
+                            response.raise_for_status()
+                            payload = await response.json(content_type=None)
+                        if isinstance(payload, dict):
+                            for key in ("total_act_power", "total_power", "act_power"):
+                                if payload.get(key) is not None:
+                                    total = float(payload[key])
+                                    break
+                        if total is not None:
+                            source = "EM.GetStatus"
+                            self._direct_rpc_mode = "em"
 
                     if total is None:
-                        phase_values = []
-                        for phase_id in (0, 1, 2):
-                            phase_url = f"http://{host}:{port}/rpc/EM1.GetStatus?id={phase_id}"
-                            async with session.get(phase_url, auth=auth, timeout=timeout) as phase_response:
-                                phase_response.raise_for_status()
-                                phase_payload = await phase_response.json(content_type=None)
-                            value = phase_payload.get("act_power") if isinstance(phase_payload, dict) else None
-                            if value is not None:
-                                phase_values.append(float(value))
-                        if len(phase_values) != 3:
-                            raise RuntimeError("Shelly EM1 phase readings were incomplete")
-                        total = sum(phase_values)
-                        source = "EM1.GetStatus(sum)"
-                        self._direct_rpc_mode = "em1"
+                        raise RuntimeError("Shelly direct power response did not contain active power")
 
                     elapsed_ms = (self.hass.loop.time() - started) * 1000.0
                     total = float(total)
@@ -418,34 +420,3 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         if self._training_device == device_id:
             await self.async_stop_training(device_id)
         self.training_state.pop(device_id, None)
-        self.training_samples.pop(device_id, None)
-        await self._persist()
-
-    async def async_stop_training(self, device_id:str):
-        if self._direct_rpc_task and not self._direct_rpc_task.done():
-            self._direct_rpc_task.cancel()
-            try: await self._direct_rpc_task
-            except asyncio.CancelledError: pass
-        if self._training_task and not self._training_task.done():
-            self._training_task.cancel()
-            try: await self._training_task
-            except asyncio.CancelledError: pass
-        state=self.training_state.get(device_id)
-        if state and state.get("status")=="active":
-            state["status"]="stopped"
-            state["instruction"]="Training stopped. No learned signature was saved."
-            state["learned"] = False
-        await self._persist()
-
-    @callback
-    def training_snapshot(self)->dict:
-        return self.training_state
-
-    async def _async_update_data(self)->dict:
-        states=self.hass.states
-        whole=states.get(self.power_entity)
-        whole_power=None
-        if whole is not None:
-            try: whole_power=float(whole.state)
-            except (TypeError,ValueError): pass
-        return {"whole_home_power":whole_power,"entities":{e:states.get(e) for e in self.monitored_entities if states.get(e) is not None}}
