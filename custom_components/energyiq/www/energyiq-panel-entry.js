@@ -1,5 +1,5 @@
 /* EnergyIQ stable frontend entry point. */
-import "./energyiq-panel.js?v=2212";
+import "./energyiq-panel.js?v=2213";
 
 const BASE_TAG = "energyiq-panel-v209";
 const TAG = "energyiq-panel";
@@ -19,14 +19,14 @@ if (!customElements.get(TAG)) {
     _render() {
       super._render();
       const sub = this.querySelector?.(".sub");
-      if (sub) sub.textContent = "Whole-home electrical intelligence · v2.2.12";
+      if (sub) sub.textContent = "Whole-home electrical intelligence · v2.2.13";
     }
   }
   customElements.define(TAG, EnergyIQPanel);
 }
 
 const loadExtension = async (path) => {
-  try { await import(`${path}?v=2212`); }
+  try { await import(`${path}?v=2213`); }
   catch (error) { console.error(`EnergyIQ frontend extension failed: ${path}`, error); }
 };
 
@@ -36,4 +36,4 @@ await loadExtension("./energyiq-accounting.js");
 
 const panel = document.querySelector("energyiq-panel");
 const sub = panel?.querySelector?.(".sub");
-if (sub) sub.textContent = "Whole-home electrical intelligence · v2.2.12";
+if (sub) sub.textContent = "Whole-home electrical intelligence · v2.2.13";
