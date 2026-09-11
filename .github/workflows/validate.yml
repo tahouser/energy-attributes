@@ -6,62 +6,10 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply-controlled-full-cycle:
-    if: github.actor != 'github-actions[bot]' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Patch runtime
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('custom_components/energyiq/coordinator.py')
-          s = p.read_text()
-          old = 'state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed")})'
-          new = 'state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed", "capture_valid", "stable_load_w", "stability_range_w", "instruction")})'
-          if old not in s: raise SystemExit('coordinator state update pattern not found')
-          p.write_text(s.replace(old, new, 1))
-
-          p = Path('custom_components/energyiq/www/energyiq-panel.js')
-          s = p.read_text()
-          replacements = [
-            ('const training = device.training || {};\n        const liveDelta = Number(training.live_delta_w), normalPower = Number(device.current_power);', 'const training = device.training || {};\n        const liveDelta = Number(training.live_delta_w), normalPower = Number(device.current_power);\n        const result = training.result || {};\n        const fullCaptureValid = training.method === "full_cycle" && training.status === "active" && result.capture_valid === true;'),
-            ('const powerCell = row.querySelector(".power-cell"); if (powerCell) powerCell.textContent = Number.isFinite(power) ? `${power.toFixed(0)} W` : "—";', 'const powerCell = row.querySelector(".power-cell"); if (powerCell) { powerCell.textContent = Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"; powerCell.classList.toggle("capture-valid", fullCaptureValid); powerCell.title = fullCaptureValid ? `Capture valid · stable load ${Number(result.stable_load_w || liveDelta).toFixed(0)} W` : ""; }'),
-            ('fullPhase === "capturing" ? `<button data-full-action="${this.attr(device.device_id)}" data-full-op="stop_capture">Stop &amp; Save</button>`', 'fullPhase === "capturing" ? `<button data-full-action="${this.attr(device.device_id)}" data-full-op="stop_capture" ${training.result?.capture_valid === true ? "" : "disabled"}>Stop &amp; Save</button>`'),
-            ('const status = training?.status || "not trained", observations = this.quickObservationText(training);', 'const status = training?.status || "not trained", observations = this.quickObservationText(training), result = training?.result || {}, learned = Number(training?.learned_signature?.load_w ?? result?.peak_delta_w), learnedText = Number.isFinite(learned) && learned > 0 ? ` · Load: ${learned.toFixed(0)} W` : "";'),
-            ('if (status === "complete") return observations ? `Complete · ${observations}` : "Complete";', 'if (status === "complete") return observations ? `Complete · ${observations}${learnedText}` : `Complete${learnedText}`;'),
-            ('const monitored = selected.has(device.device_id), training = device.training || {}, manual = String(device.source || "").toLowerCase() === "manual", liveDelta = Number(training.live_delta_w), normalPower = Number(device.current_power), power = training.status === "active" && Number.isFinite(liveDelta) ? liveDelta : normalPower;', 'const monitored = selected.has(device.device_id), training = device.training || {}, manual = String(device.source || "").toLowerCase() === "manual", result = training.result || {}, liveDelta = Number(training.live_delta_w), normalPower = Number(device.current_power), power = training.status === "active" && Number.isFinite(liveDelta) ? liveDelta : normalPower, fullCaptureValid = training.method === "full_cycle" && training.status === "active" && result.capture_valid === true;'),
-            ('<td class="power-cell">${Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"}</td>', '<td class="power-cell ${fullCaptureValid ? "capture-valid" : ""}" title="${fullCaptureValid ? `Capture valid · stable load ${Number(result.stable_load_w || liveDelta).toFixed(0)} W` : ""}">${Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"}</td>'),
-            ('.state-cell{text-align:center;width:74px}', '.state-cell{text-align:center;width:74px}.power-cell.capture-valid{background:#2e7d32;color:#fff;font-weight:700;border-radius:4px}'),
-          ]
-          for old, new in replacements:
-              if old not in s: raise SystemExit(f'frontend pattern not found: {old[:70]}')
-              s = s.replace(old, new, 1)
-          p.write_text(s)
-
-          test = Path('tests/test_full_cycle_controlled.py')
-          test.write_text('''from custom_components.energyiq.training import TrainingEngine\n\ndef feed(engine, start, values, step=1.0):\n    for i, watts in enumerate(values):\n        engine.add_sample(start + i * step, watts)\n\ndef test_full_cycle_requires_explicit_start_and_uses_off_baseline():\n    e = TrainingEngine("full_cycle", baseline_window_s=3, full_cycle_min_active_s=30)\n    feed(e, 0, [100] * 4)\n    assert e.phase == "waiting_for_start"\n    feed(e, 4, [220] * 10)\n    assert e.phase == "waiting_for_start"\n    e.confirm_full_cycle(True, 14)\n    feed(e, 14, [220] * 40)\n    r = e.result()\n    assert r["baseline_w"] == 100\n    assert r["capture_valid"] is True\n    assert 110 <= r["stable_load_w"] <= 130\n\ndef test_full_cycle_stop_blocked_until_valid():\n    e = TrainingEngine("full_cycle", baseline_window_s=3, full_cycle_min_active_s=30)\n    feed(e, 0, [100] * 4)\n    e.confirm_full_cycle(True, 4)\n    feed(e, 4, [220] * 10)\n    r = e.end_full_cycle()\n    assert r["phase"] == "capturing"\n    assert r["end_ready"] is False\n\ndef test_full_cycle_saves_after_valid_capture_without_return_to_baseline():\n    e = TrainingEngine("full_cycle", baseline_window_s=3, full_cycle_min_active_s=30)\n    feed(e, 0, [100] * 4)\n    e.confirm_full_cycle(True, 4)\n    feed(e, 4, [220] * 40)\n    r = e.end_full_cycle()\n    assert r["completed"] is True\n    assert r["peak_delta_w"] == 120\n''')
-          PY
-      - name: Validate patched code
-        run: |
-          python -m compileall -q custom_components/energyiq tests
-          node --check custom_components/energyiq/www/energyiq-panel.js
-          python -m pytest -q tests/test_full_cycle_controlled.py
-      - name: Commit runtime patch
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add custom_components/energyiq/coordinator.py custom_components/energyiq/www/energyiq-panel.js tests/test_full_cycle_controlled.py
-          git diff --cached --quiet || git commit -m 'Fix controlled Full Cycle capture workflow'
-          git push
-
   validate:
-    needs: [apply-controlled-full-cycle]
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -81,32 +29,45 @@ jobs:
           import json
           import re
           from pathlib import Path
+
           manifest = json.loads(Path('custom_components/energyiq/manifest.json').read_text(encoding='utf-8'))
           version = manifest['version']
           init = Path('custom_components/energyiq/__init__.py').read_text(encoding='utf-8')
           js = Path('custom_components/energyiq/www/energyiq-panel.js').read_text(encoding='utf-8')
+
           expected_frontend_version = version.replace('.', '') + '0'
           panel_match = re.search(r'webcomponent_name="([^"]+)"', init)
           module_match = re.search(r'module_url=f"\{URL_BASE\}/([^"?]+)\?v=\{FRONTEND_VERSION\}"', init)
-          assert panel_match and module_match
+          assert panel_match, 'Panel webcomponent_name is missing.'
+          assert module_match, 'Panel module_url is missing.'
+
           panel_id = panel_match.group(1)
           module_name = module_match.group(1)
           module = Path('custom_components/energyiq/www') / module_name
-          assert module.is_file()
-          assert module_name == 'energyiq-panel.js'
+          assert module.is_file(), f'Registered frontend module does not exist: {module_name}'
+          assert module_name == 'energyiq-panel.js', 'EnergyIQ must load the panel directly; no legacy loader layer is permitted.'
+
           assert f'sidebar_title="EnergyIQ • v{version}"' in init
           assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
           assert 'URL_BASE = "/energyiq-static"' in init
           assert f'const TAG = "{panel_id}";' in js
           assert 'customElements.define(TAG' in js
+          assert panel_id != 'energyiq-panel-v309'
           assert panel_id == 'energyiq-panel-v324'
+
+          assert Path('custom_components/energyiq/www/energyiq-panel.js').is_file()
           assert not list(Path('custom_components/energyiq/www').glob('energyiq-loader-*.js'))
           assert not Path('custom_components/energyiq/www/energyiq-panel-entry.js').exists()
           assert not Path('custom_components/energyiq/www/energyiq-ui.js').exists()
+          assert not list(Path('custom_components/energyiq/www').glob('README*.txt'))
+          assert not list(Path('custom_components/energyiq/www').glob('*.tmp'))
+          assert not list(Path('custom_components/energyiq/www').glob('*.bak'))
+
           coordinator = Path('custom_components/energyiq/coordinator.py').read_text(encoding='utf-8')
           assert 'def _fast_power_entity(self)' in coordinator
           assert 'Never use a switch/control entity as a power measurement.' in coordinator
           assert 'EM1.GetStatus(sum)' in coordinator
           assert 'EM.GetStatus' in coordinator
-          print(f'EnergyIQ {version} validation passed.')
+
+          print(f'EnergyIQ {version} structure, direct frontend loading, and fast power measurement validated.')
           PY
