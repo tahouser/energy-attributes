@@ -35,46 +35,24 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
           path = Path('custom_components/energyiq/www/energyiq-panel.js')
           text = path.read_text(encoding='utf-8')
-
-          old_state = 'return `\\n        .table-scroll input.train, .table-scroll input.monitor { width:18px; height:18px; margin:0; }<span class="state-box ${state || "unknown"}">${label}</span>`;'
-          new_state = 'return `<span class="state-box ${state || "unknown"}">${label}</span>`;'
-          if old_state not in text:
-              raise SystemExit('Expected broken renderState markup was not found; refusing to modify the file.')
-          text = text.replace(old_state, new_state, 1)
-
-          old_refresh = '''        const scrollerBeforeRender = this.querySelector(".table-scroll");
-        const previousScroll = scrollerBeforeRender ? scrollerBeforeRender.scrollTop : this.scrollTop;
-        this.workspace = await this.ws({ type: "energy_attribution/workspace", entry_id: this.entryId });
-        this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
-        if (this.bulk?.status === "running") this.startBulkPolling(); else this.stopBulkPolling();
-        this.render(previousScroll);'''
-          new_refresh = '''        this.workspace = await this.ws({ type: "energy_attribution/workspace", entry_id: this.entryId });
-        this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
-        if (this.bulk?.status === "running") this.startBulkPolling(); else this.stopBulkPolling();
-        this.render();'''
-          if old_refresh not in text:
-              raise SystemExit('Expected refresh implementation was not found; refusing to modify the file.')
-          text = text.replace(old_refresh, new_refresh, 1)
-
-          text = text.replace('this.render(this.scrollTop);\n          if (this.bulk?.status !== "running") this.stopBulkPolling();', 'this.render();\n          if (this.bulk?.status !== "running") this.stopBulkPolling();', 1)
-
-          old_render = '''    render(previousScroll = 0) {
-      if (!this.workspace) return;
-      this.scrollTop = previousScroll;'''
-          new_render = '''    render(previousScroll = null) {
-      if (!this.workspace) return;
-      if (previousScroll === null) {
-        const scroller = this.querySelector(".table-scroll");
-        previousScroll = scroller ? scroller.scrollTop : this.scrollTop;
-      }
-      this.scrollTop = previousScroll;'''
+          text, count = re.subn(r'return `\\n\s*\.table-scroll input\.train, \.table-scroll input\.monitor \{ width:18px; height:18px; margin:0; \}<span', 'return `<span', text, count=1)
+          if count != 1:
+              raise SystemExit('Expected broken State-cell markup was not found; refusing to modify the file.')
+          old = 'const scrollerBeforeRender = this.querySelector(".table-scroll");\\n        const previousScroll = scrollerBeforeRender ? scrollerBeforeRender.scrollTop : this.scrollTop;\\n        '
+          if old not in text:
+              raise SystemExit('Expected stale scroll capture was not found; refusing to modify the file.')
+          text = text.replace(old, '', 1)
+          text = text.replace('this.render(previousScroll);', 'this.render();', 1)
+          text = text.replace('this.render(this.scrollTop);\\n          if (this.bulk?.status !== "running") this.stopBulkPolling();', 'this.render();\\n          if (this.bulk?.status !== "running") this.stopBulkPolling();', 1)
+          old_render = 'render(previousScroll = 0) {\\n      if (!this.workspace) return;\\n      this.scrollTop = previousScroll;'
+          new_render = 'render(previousScroll = null) {\\n      if (!this.workspace) return;\\n      if (previousScroll === null) {\\n        const scroller = this.querySelector(".table-scroll");\\n        previousScroll = scroller ? scroller.scrollTop : this.scrollTop;\\n      }\\n      this.scrollTop = previousScroll;'
           if old_render not in text:
               raise SystemExit('Expected render implementation was not found; refusing to modify the file.')
           text = text.replace(old_render, new_render, 1)
-
           path.write_text(text, encoding='utf-8')
           PY
           node --check custom_components/energyiq/www/energyiq-panel.js
