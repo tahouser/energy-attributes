@@ -1,6 +1,9 @@
 name: Apply training power display
 
 on:
+  push:
+    paths:
+      - .github/workflows/apply-power-display.yml
   workflow_dispatch:
 
 permissions:
