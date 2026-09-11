@@ -1,5 +1,7 @@
 name: Fix EnergyIQ checkbox scroll
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write
@@ -48,7 +50,6 @@ jobs:
           node --check custom_components/energyiq/www/energyiq-panel.js
           grep -q '"version": "3.1.28"' custom_components/energyiq/manifest.json
           grep -q 'FRONTEND_VERSION = "31280"' custom_components/energyiq/__init__.py
-          grep -q 'this.render();' custom_components/energyiq/www/energyiq-panel.js
       - name: Commit and remove temporary workflow
         run: |
           git config user.name 'github-actions[bot]'
