@@ -1,11 +1,6 @@
 name: Apply EnergyIQ v3.0.8 scroll fix
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/apply-v308-scroll-fix.yml
+on: push
 
 permissions:
   contents: write
@@ -15,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Apply fix
         shell: bash
         run: |
@@ -56,7 +50,6 @@ jobs:
 '''
           if old not in s: raise SystemExit('refresh block not found')
           s = s.replace(old, new, 1)
-
           s = s.replace('          this.render();\n          if (this.bulk?.status !== "running") this.stopBulkPolling();', '          this.updateLiveData();\n          if (this.bulk?.status !== "running") this.stopBulkPolling();', 1)
 
           marker = '''    stopBulkPolling() {
@@ -97,7 +90,6 @@ jobs:
           actionsCell.innerHTML = monitored ? action : "";
         }
       });
-
       const summary = this.querySelector("#summary-area");
       if (summary) summary.innerHTML = this.renderSummary();
       const bulk = this.querySelector("#bulk-area");
@@ -123,18 +115,13 @@ jobs:
       }
       this.scrollTop = previousScroll;
 '''
-          new_render = '''    render() {
-      if (!this.workspace) return;
-'''
           if old_render not in s: raise SystemExit('render scroll block not found')
-          s = s.replace(old_render, new_render, 1)
-
+          s = s.replace(old_render, '    render() {\n      if (!this.workspace) return;\n', 1)
           s = s.replace('          ${this.renderSummary()}${this.renderBulk()}', '          <div id="summary-area">${this.renderSummary()}</div><div id="bulk-area">${this.renderBulk()}</div>', 1)
           s = s.replace('<tr><td><input class="monitor"', '<tr data-device-id="${this.attr(device.device_id)}"><td><input class="monitor"', 1)
           s = s.replace('<td>${Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"}</td><td class="state-cell">', '<td class="power-cell">${Number.isFinite(power) ? `${power.toFixed(0)} W` : "—"}</td><td class="state-cell">', 1)
           s = s.replace('<td class="training">${this.escape(this.trainingLabel(training))}</td><td>${this.escape(training.method || "—")}</td>', '<td class="training">${this.escape(this.trainingLabel(training))}</td><td class="method-cell">${this.escape(training.method || "—")}</td>', 1)
-
-          old = '''      this.bind();
+          scroll_block = '''      this.bind();
       requestAnimationFrame(() => {
         const scroller = this.querySelector(".table-scroll");
         if (scroller) {
@@ -143,14 +130,11 @@ jobs:
         }
       });
 '''
-          if old not in s: raise SystemExit('scroll restore block not found')
-          s = s.replace(old, '      this.bind();\n', 1)
-
+          if scroll_block not in s: raise SystemExit('scroll restore block not found')
+          s = s.replace(scroll_block, '      this.bind();\n', 1)
           s = s.replace('this.render(this.scrollTop)', 'this.render()', 10)
           s = s.replace('await this.refresh();', 'await this.refresh(true);')
           s = s.replace('await this.refresh(true);\n        this.refreshTimer', 'await this.refresh();\n        this.refreshTimer', 1)
-
-          s = s.replace('customElements.define(TAG, EnergyIQPanel);', 'customElements.define(TAG, EnergyIQPanel);', 1)
           p.write_text(s, encoding='utf-8')
 
           init = Path('custom_components/energyiq/__init__.py')
@@ -162,7 +146,6 @@ jobs:
           m['version'] = '3.0.8'
           manifest.write_text(json.dumps(m, indent=2, ensure_ascii=False) + '\n', encoding='utf-8')
           PY
-
           node --check custom_components/energyiq/www/energyiq-panel.js
           python -m compileall -q custom_components/energyiq
 
@@ -173,9 +156,11 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add custom_components/energyiq/www/energyiq-panel.js custom_components/energyiq/__init__.py custom_components/energyiq/manifest.json .github/workflows/apply-v308-scroll-fix.yml
-          git rm .github/workflows/apply-v308-scroll-fix.yml
+          git add custom_components/energyiq/www/energyiq-panel.js custom_components/energyiq/__init__.py custom_components/energyiq/manifest.json
           git commit -m 'Fix EnergyIQ table scroll persistence'
           git push origin HEAD:main
           SHA=$(git rev-parse HEAD)
           gh release create v3.0.8 --target "$SHA" --title 'EnergyIQ v3.0.8' --notes 'Fix table scrolling so live updates do not reposition the user.'
+          git rm .github/workflows/apply-v308-scroll-fix.yml
+          git commit -m 'Remove temporary v3.0.8 workflow'
+          git push origin HEAD:main
