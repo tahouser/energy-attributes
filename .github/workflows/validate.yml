@@ -53,7 +53,7 @@ jobs:
           assert f'const TAG = "{panel_id}";' in js
           assert 'customElements.define(TAG' in js
           assert panel_id != 'energyiq-panel-v309'
-          assert panel_id == 'energyiq-panel-v316'
+          assert panel_id == 'energyiq-panel-v324'
 
           assert Path('custom_components/energyiq/www/energyiq-panel.js').is_file()
           assert not list(Path('custom_components/energyiq/www').glob('energyiq-loader-*.js'))
