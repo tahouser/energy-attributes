@@ -6,7 +6,7 @@
  */
 (() => {
   const TAG = "energyiq-panel-v309";
-  const VERSION = "3.1.8";
+  const VERSION = null;
 
   if (customElements.get(TAG)) return;
 
@@ -147,7 +147,7 @@
       if (!this.workspace) return;
       const devices = this.getDevices(), persisted = this.getPersistedIds(), selected = this.getSelectedIds(), trainSelected = this.trainSelected;
       const visible = devices.filter(d => { if (this.view === "all") return true; if (this.view === "monitored") return persisted.has(d.device_id); return !persisted.has(d.device_id); }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-      this.innerHTML = `<style>${this.styles()}</style><div class="shell"><header><div><h1>EnergyIQ</h1><p>Whole-home electrical intelligence · v${VERSION}</p></div><div class="header-actions"><button id="add">＋ Add Device / Entity</button><button id="save" class="primary">Save Monitoring</button></div></header><div id="summary-area">${this.renderSummary()}</div><div id="bulk-area">${this.renderBulk()}</div><div class="toolbar"><div class="views"><button id="all" class="${this.view === "all" ? "selected" : ""}">All (${devices.length})</button><button id="monitored" class="${this.view === "monitored" ? "selected" : ""}">Monitored (${persisted.size})</button><button id="excluded" class="${this.view === "excluded" ? "selected" : ""}">Excluded (${Math.max(0, devices.length - persisted.size)})</button></div><div class="bulk-actions"><button id="bulk-train" ${trainSelected.size ? "" : "disabled"}>Auto Train Selected (${trainSelected.size})</button></div></div><div class="table-scroll"><table><thead><tr><th>Monitor</th><th>Train</th><th>Device</th><th>Area</th><th>Source</th><th>Power</th><th>State</th><th>Training</th><th>Method</th><th>Action</th></tr></thead><tbody>${visible.length ? visible.map(d => this.row(d, selected)).join("") : `<tr><td colspan="10" class="empty">No loads in this view.</td></tr>`}</tbody></table></div></div>`;
+      this.innerHTML = `<style>${this.styles()}</style><div class="shell"><header><div><h1>EnergyIQ</h1><p>Whole-home electrical intelligence · v${this.workspace?.version || "?"}</p></div><div class="header-actions"><button id="add">＋ Add Device / Entity</button><button id="save" class="primary">Save Monitoring</button></div></header><div id="summary-area">${this.renderSummary()}</div><div id="bulk-area">${this.renderBulk()}</div><div class="toolbar"><div class="views"><button id="all" class="${this.view === "all" ? "selected" : ""}">All (${devices.length})</button><button id="monitored" class="${this.view === "monitored" ? "selected" : ""}">Monitored (${persisted.size})</button><button id="excluded" class="${this.view === "excluded" ? "selected" : ""}">Excluded (${Math.max(0, devices.length - persisted.size)})</button></div><div class="bulk-actions"><button id="bulk-train" ${trainSelected.size ? "" : "disabled"}>Auto Train Selected (${trainSelected.size})</button></div></div><div class="table-scroll"><table><thead><tr><th>Monitor</th><th>Train</th><th>Device</th><th>Area</th><th>Source</th><th>Power</th><th>State</th><th>Training</th><th>Method</th><th>Action</th></tr></thead><tbody>${visible.length ? visible.map(d => this.row(d, selected)).join("") : `<tr><td colspan="10" class="empty">No loads in this view.</td></tr>`}</tbody></table></div></div>`;
       this.bind();
     }
 

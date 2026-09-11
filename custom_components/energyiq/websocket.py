@@ -1,6 +1,9 @@
 """WebSocket API for the Energy Attribution workspace."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.helpers import entity_registry as er
@@ -8,6 +11,8 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
+
+_MANIFEST_VERSION = json.loads((Path(__file__).with_name("manifest.json")).read_text(encoding="utf-8"))["version"]
 
 
 def _candidate_current_power(hass: HomeAssistant, candidate: dict, training: dict | None = None):
@@ -159,6 +164,7 @@ async def ws_workspace(hass, connection, msg):
     trained_live_w, trained_live_count = _trained_live_power(hass, coordinator.candidate_devices, coordinator.training_state)
     connection.send_result(msg["id"], {
         "entry_id": msg["entry_id"],
+        "version": _MANIFEST_VERSION,
         "power_entity": coordinator.power_entity,
         "whole_home_power": state.state if state else None,
         "trained_live_power_w": trained_live_w,
