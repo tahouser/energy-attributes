@@ -7,6 +7,7 @@ on:
     paths:
       - custom_components/energyiq/manifest.json
       - .github/workflows/release-on-version-change.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
