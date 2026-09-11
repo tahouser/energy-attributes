@@ -1,0 +1,46 @@
+name: Validate EnergyIQ
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Python syntax
+        run: python -m compileall -q custom_components/energyiq tests
+
+      - name: Validate frontend JavaScript syntax
+        run: node --check custom_components/energyiq/www/energyiq-panel.js
+
+      - name: Validate release structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(python - <<'PY'
+          import json
+          with open('custom_components/energyiq/manifest.json', encoding='utf-8') as f:
+              print(json.load(f)['version'])
+          PY
+          )
+          grep -Fq "sidebar_title=\"EnergyIQ • v${VERSION}\"" custom_components/energyiq/__init__.py
+          test -f custom_components/energyiq/www/energyiq-panel.js
+          test ! -e custom_components/energyiq/www/energyiq-panel-entry.js
+          test ! -e custom_components/energyiq/www/energyiq-ui.js
+          if find custom_components/energyiq/www -maxdepth 1 -type f -name 'energyiq-panel-v*.js' | grep -q .; then
+            echo 'Versioned runtime panel copies are not allowed.'
+            exit 1
+          fi
+          if find custom_components/energyiq/www -maxdepth 1 -type f \( -name 'README*.txt' -o -name '*.tmp' -o -name '*.bak' \) | grep -q .; then
+            echo 'Temporary frontend files are not allowed.'
+            exit 1
+          fi
+          echo "EnergyIQ ${VERSION} structure validated."
