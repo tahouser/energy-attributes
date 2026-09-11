@@ -398,6 +398,56 @@ async def ws_bulk_training_state(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/full_cycle_action",
+    vol.Required("entry_id"): str,
+    vol.Required("device_id"): str,
+    vol.Required("action"): vol.In(["start_capture", "stop_capture"]),
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_full_cycle_action(hass, connection, msg):
+    coordinator = _coordinator(hass, msg["entry_id"])
+    if coordinator._training_device != msg["device_id"] or coordinator._training_engine is None:
+        raise ValueError("No active training session exists for this device")
+    engine = coordinator._training_engine
+    if engine.method != "full_cycle":
+        raise ValueError("This control is only available for Full Cycle training")
+    now = hass.loop.time()
+    state = coordinator.training_state.get(msg["device_id"], {})
+    if msg["action"] == "start_capture":
+        result = engine.confirm_full_cycle(True, now)
+        if result.get("failed"):
+            raise ValueError(result.get("failure_reason") or "Unable to start power capture")
+        state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "duration_s", "energy_wh")})
+        state["result"] = result
+        state["instruction"] = "Capturing power. Leave the device ON, then turn it OFF when finished."
+    else:
+        result = engine.end_full_cycle(force=False)
+        state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "duration_s", "energy_wh")})
+        state["result"] = result
+        if result.get("action") == "end_warning":
+            state["instruction"] = "Not ready to save: keep the device ON for at least 30 seconds, then turn it OFF and press Stop & Save."
+        elif result.get("completed"):
+            state["status"] = "complete"
+            state["learned"] = True
+            state["completed"] = True
+            state["completed_at"] = now
+            state["learned_signature"] = {
+                "method": "full_cycle",
+                "baseline_w": result.get("baseline_w"),
+                "load_w": result.get("peak_delta_w"),
+                "duration_s": result.get("duration_s"),
+                "energy_wh": result.get("energy_wh"),
+                "events_detected": result.get("events_detected", 0),
+                "observations": result.get("observations", []),
+            }
+            if coordinator._direct_rpc_task and not coordinator._direct_rpc_task.done():
+                coordinator._direct_rpc_task.cancel()
+    await coordinator._persist(force=True)
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "energy_attribution/retry_training",
     vol.Required("entry_id"): str,
     vol.Required("device_id"): str,
@@ -427,5 +477,5 @@ async def ws_stop_training(hass, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_retry_training, ws_stop_training):
+    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_full_cycle_action, ws_retry_training, ws_stop_training):
         websocket_api.async_register_command(hass, handler)
