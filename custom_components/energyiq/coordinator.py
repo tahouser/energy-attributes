@@ -436,3 +436,4 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         """Clear a training session without touching device commissioning."""
         if self._training_device == device_id:
             await self.async_stop_training(device_id)
+        self.training_state.pop(device_id, None)
