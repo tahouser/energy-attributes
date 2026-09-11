@@ -1,7 +1,7 @@
 {
   "domain": "energyiq",
   "name": "EnergyIQ",
-  "version": "2.2.13",
+  "version": "2.2.14",
   "documentation": "https://github.com/tahouser/energy-attributes",
   "issue_tracker": "https://github.com/tahouser/energy-attributes/issues",
   "codeowners": [],
