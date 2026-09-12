@@ -12,10 +12,11 @@ from .websocket import async_register as async_register_websocket
 from .long_cycle import async_register as async_register_long_cycle
 from .accounting import async_register as async_register_accounting
 from .response_migration import migrate_response_log
+from .stable_training_storage import prepare_training_storage
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31360"
+FRONTEND_VERSION = "31370"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -41,7 +42,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v325",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.36",
+            sidebar_title="EnergyIQ • v3.1.37",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
@@ -55,6 +56,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     response_log_path = migrate_response_log(hass)
     coordinator = EnergyAttributionCoordinator(hass, entry)
     coordinator._response_log_path = response_log_path
+    await prepare_training_storage(coordinator)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     await coordinator.async_load_training()
