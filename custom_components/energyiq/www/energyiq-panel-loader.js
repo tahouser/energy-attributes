@@ -1,13 +1,24 @@
 /* EnergyIQ panel loader/fix layer.
  * The main panel now owns Training workspace DOM stability. This loader
  * remains as a compatibility layer for the live-refresh lifecycle.
+ *
+ * v3.1.46 deliberately registers a new custom-element tag. Home Assistant
+ * keeps custom elements registered for the lifetime of the browser page, so
+ * reusing the old tag can silently keep the previous class definition.
  */
 (() => {
   const MAIN = "/energyiq-static/energyiq-panel.js?v=31450";
-  const TAG = "energyiq-panel-v325";
+  const SOURCE_TAG = "energyiq-panel-v325";
+  const TAG = "energyiq-panel-v346";
   const patch = () => {
-    const Ctor = customElements.get(TAG);
-    if (!Ctor || Ctor.prototype.__energyiqTrainingFix) return;
+    const SourceCtor = customElements.get(SOURCE_TAG);
+    if (!SourceCtor) return;
+    let Ctor = customElements.get(TAG);
+    if (!Ctor) {
+      Ctor = class EnergyIQPanelV346 extends SourceCtor {};
+      customElements.define(TAG, Ctor);
+    }
+    if (Ctor.prototype.__energyiqTrainingFix) return;
     Ctor.prototype.__energyiqTrainingFix = true;
 
     const originalLoad = Ctor.prototype.load;
