@@ -12,10 +12,11 @@ from .websocket import async_register as async_register_websocket
 from .long_cycle import async_register as async_register_long_cycle
 from .accounting import async_register as async_register_accounting
 from .response_migration import migrate_response_log
+from .browsermod_filter import filter_browser_mod_candidates
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31360"
+FRONTEND_VERSION = "31370"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -41,8 +42,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v325",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.36",
-            sidebar_icon="mdi:lightning-bolt",
+            sidebar_title="EnergyIQ • v3.1.37",
+            sidebar_icon="mdi:home-lightning-bolt-outline",
             require_admin=True,
         )
         data["_panel_registered"] = True
@@ -58,6 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     await coordinator.async_load_training()
+    filter_browser_mod_candidates(coordinator)
     await coordinator.async_config_entry_first_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
