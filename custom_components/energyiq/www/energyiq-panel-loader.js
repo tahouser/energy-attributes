@@ -31,18 +31,12 @@
       this.refreshTimer = setInterval(() => this.refresh(), 2000);
     };
 
-    // Do not leave the base polling timer running while the workspace is
-    // being configured. This is intentionally separate from updateLiveData:
-    // refreshes started after training begins are still allowed to update the
-    // table and summary.
     Ctor.prototype.load = async function (...args) {
       const result = await originalLoad.apply(this, args);
       if (this.trainingWorkspaceOpen || this.workspace) stopLiveRefresh.call(this);
       return result;
     };
 
-    // Training starts the normal live polling. The updateLiveData patch below
-    // prevents that polling from replacing the Training workspace DOM.
     Ctor.prototype.startWorkspaceTraining = async function (...args) {
       const result = await originalStart.apply(this, args);
       startLiveRefresh.call(this);
@@ -53,19 +47,15 @@
       const result = await originalRefresh.apply(this, args);
       const active = this.activeTrainingId ? this.getDevice(this.activeTrainingId) : null;
       const status = active?.training?.status;
-      if (this.trainingWorkspaceOpen && (status === "complete" || status === "error")) {
-        stopLiveRefresh.call(this);
-      }
+      if (this.trainingWorkspaceOpen && (status === "complete" || status === "error")) stopLiveRefresh.call(this);
       return result;
     };
 
-    // Structural fix: run the original live-data update with the workspace
-    // logically closed, so its table/summary updates still happen, but the
-    // existing #training-area is never replaced. The actual DOM node holding
-    // the method selector therefore survives every polling cycle.
+    // Keep the existing Training workspace DOM alive. The base update method
+    // still refreshes the table and summary, but sees the workspace as closed
+    // and therefore does not replace #training-area.
     Ctor.prototype.updateLiveData = function (...args) {
       if (!this.trainingWorkspaceOpen) return originalUpdate.apply(this, args);
-
       const wasOpen = this.trainingWorkspaceOpen;
       const previousBind = this.bindTrainingWorkspace;
       this.trainingWorkspaceOpen = false;
@@ -90,14 +80,14 @@
       return originalOpen.apply(this, args);
     };
 
-    // Remember the user's method selection for any explicit workspace redraw.
+    // A method change causes the base UI to redraw the training detail. Always
+    // honor the user's newly selected method, even if the backend still has a
+    // previous method stored on the device. This fixes the first-click problem.
     Ctor.prototype.renderTrainingDetail = function (device) {
       if (device) {
         const training = device.training || {};
         const method = this._energyiqWorkspaceMethod || training.method || "quick";
-        if (!training.method) {
-          device = { ...device, training: { ...training, method } };
-        }
+        device = { ...device, training: { ...training, method } };
       }
       return originalRenderDetail.call(this, device);
     };
