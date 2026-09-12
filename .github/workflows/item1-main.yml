@@ -1,0 +1,53 @@
+name: Build Item 1 on main
+on:
+  push:
+    paths:
+      - .github/workflows/item1-main.yml
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Reset to v3.1.36 and apply Item 1
+        run: |
+          git fetch --tags origin
+          git checkout v3.1.36 -- custom_components/energyiq/www/energyiq-panel.js custom_components/energyiq/manifest.json
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('custom_components/energyiq/www/energyiq-panel.js')
+          s = p.read_text()
+          old = '.shell{padding:18px 20px;max-width:1600px;margin:auto}'
+          new = '.shell{padding:18px 20px;max-width:1600px;margin:auto;min-height:calc(100vh - 20px);box-sizing:border-box;display:flex;flex-direction:column}'
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = '.table-scroll{overflow:auto;max-height:calc(100vh - 330px);border:1px solid var(--divider-color);border-radius:10px}'
+          new = '.table-scroll{overflow:auto;flex:1 1 auto;min-height:0;border:1px solid var(--divider-color);border-radius:10px}'
+          assert old in s
+          s = s.replace(old, new, 1)
+          old = 'const VERSION = "31360";'
+          new = 'const VERSION = "31530";'
+          assert old in s
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          m = Path('custom_components/energyiq/manifest.json')
+          ms = m.read_text()
+          ms = ms.replace('"version": "3.1.36"', '"version": "3.1.53"', 1)
+          m.write_text(ms)
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add custom_components/energyiq/www/energyiq-panel.js custom_components/energyiq/manifest.json .github/workflows/item1-main.yml
+          git commit -m 'EnergyIQ v3.1.53: fix Monitored Loads viewport height'
+          git rm .github/workflows/item1-main.yml
+          git commit -m 'Remove temporary Item 1 workflow'
+          git push origin main
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create v3.1.53 --target main --title 'EnergyIQ v3.1.53' --notes 'Item 1 only: Monitored Loads now uses the available viewport height. Based on v3.1.36; no training, Browser Mod, or branding changes.'
