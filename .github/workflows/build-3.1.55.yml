@@ -1,0 +1,88 @@
+name: Build EnergyIQ 3.1.55
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.event.head_commit.message == 'Start EnergyIQ 3.1.55 build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Rebuild 3.1.55 from permanent 3.1.36 baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin tag 3.1.36
+          git checkout 3.1.36 -- .
+
+          python - <<'PY'
+          from pathlib import Path
+          import base64
+
+          root = Path('.')
+
+          # Product version files
+          p = root / 'custom_components/energyiq/manifest.json'
+          s = p.read_text()
+          s = s.replace('"version": "3.1.36"', '"version": "3.1.55"')
+          p.write_text(s)
+
+          p = root / 'custom_components/energyiq/__init__.py'
+          s = p.read_text()
+          s = s.replace('FRONTEND_VERSION = "31360"', 'FRONTEND_VERSION = "31550"')
+          s = s.replace('sidebar_title="EnergyIQ • v3.1.36"', 'sidebar_title="EnergyIQ • v3.1.55"')
+          s = s.replace('sidebar_icon="mdi:lightning-bolt"', 'sidebar_icon="mdi:home-lightning-bolt"')
+          p.write_text(s)
+
+          # Keep the complete HA entity browser and monitoring architecture from 3.1.36;
+          # only exclude Browser Mod from the automatic candidate inventory.
+          p = root / 'custom_components/energyiq/config_flow.py'
+          s = p.read_text()
+          needle = '    candidates = []\n'
+          insert = '''    candidates = []\n    browser_mod_config_entry_ids = {\n        entry.entry_id for entry in hass.config_entries.async_entries("browser_mod")\n    }\n'''
+          if needle not in s:
+              raise SystemExit('config_flow.py anchor not found')
+          s = s.replace(needle, insert, 1)
+          device_needle = '        device = device_registry.async_get_or_create(\n'
+          if device_needle not in s:
+              raise SystemExit('config_flow.py device anchor not found')
+          s = s.replace(device_needle, '        if set(device.config_entries) & browser_mod_config_entry_ids:\n            continue\n\n' + device_needle, 1)
+          p.write_text(s)
+
+          # Fresh frontend from 3.1.36: version plus a real viewport-filling table.
+          p = root / 'custom_components/energyiq/www/energyiq-panel.js'
+          s = p.read_text()
+          s = s.replace('const VERSION = "31360";', 'const VERSION = "31550";', 1)
+          old = '.shell{padding:18px 20px;max-width:1600px;margin:auto}'
+          new = '.shell{padding:18px 20px;max-width:1600px;margin:auto;height:100dvh;box-sizing:border-box;display:flex;flex-direction:column}'
+          if old not in s:
+              raise SystemExit('panel shell anchor not found')
+          s = s.replace(old, new, 1)
+          old = '.table-scroll{overflow:auto;max-height:calc(100vh - 330px);border:1px solid var(--divider-color);border-radius:10px}'
+          new = '.table-scroll{overflow:auto;flex:1 1 auto;min-height:0;max-height:none;border:1px solid var(--divider-color);border-radius:10px}'
+          if old not in s:
+              raise SystemExit('panel table anchor not found')
+          s = s.replace(old, new, 1)
+          s = s.replace('.table-scroll{max-height:none}', '.table-scroll{flex:1 1 auto;min-height:0;max-height:none}', 1)
+          p.write_text(s)
+
+          # Replace the broken integration detail logo with the same house/lightning
+          # concept used by the sidebar: mdi:home-lightning-bolt.
+          logo_b64 = '''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'''
+          (root / 'custom_components/energyiq/brand/logo.png').write_bytes(base64.b64decode(logo_b64))
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'EnergyIQ 3.1.55 attempt from 3.1.36'
+          git push origin HEAD:main
