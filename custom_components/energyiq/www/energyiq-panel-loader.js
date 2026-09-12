@@ -3,7 +3,7 @@
  * remains as a compatibility layer for the live-refresh lifecycle.
  */
 (() => {
-  const MAIN = "/energyiq-static/energyiq-panel.js?v=31430";
+  const MAIN = "/energyiq-static/energyiq-panel.js?v=31450";
   const TAG = "energyiq-panel-v325";
   const patch = () => {
     const Ctor = customElements.get(TAG);
