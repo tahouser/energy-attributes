@@ -1,14 +1,14 @@
 """Stable persistence bridge for EnergyIQ learned training data.
 
 Home Assistant config-entry IDs can change when an integration is removed and
-re-added.  Learned EnergyIQ data must therefore live under a stable Store key.
+re-added. Learned EnergyIQ data must therefore live under a stable Store key.
 This module bridges the existing entry-scoped Store to one common Store without
 requiring a destructive migration of existing installations.
 """
 from __future__ import annotations
 
 from functools import wraps
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from homeassistant.helpers.storage import Store
 
@@ -22,8 +22,8 @@ async def prepare_training_storage(coordinator: Any) -> None:
     """Migrate/seed training storage and keep the stable store synchronized.
 
     Existing installations have learned data in the legacy key
-    ``energyiq.training.<entry_id>``.  On first run, that data is copied to the
-    stable key ``energyiq.training``.  On later installs, the stable data is
+    ``energyiq.training.<entry_id>``. On first run, that data is copied to the
+    stable key ``energyiq.training``. On later installs, the stable data is
     copied into the newly-created entry-scoped store so the existing coordinator
     loading code remains compatible.
     """
