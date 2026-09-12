@@ -39,7 +39,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await panel_custom.async_register_panel(
             hass=hass,
             frontend_url_path="energyiq",
-            webcomponent_name="energyiq-panel-v324",
+            webcomponent_name="energyiq-panel-v325",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
             sidebar_title="EnergyIQ • v3.1.35",
             sidebar_icon="mdi:lightning-bolt",
@@ -64,7 +64,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload EnergyIQ configuration entry cleanly."""
+    """Unload EnergyIQ integration cleanly."""
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if coordinator:
         for device_id in list(coordinator.training_state):
