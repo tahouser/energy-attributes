@@ -1,0 +1,33 @@
+name: Item 1 frontend version
+on:
+  push:
+    branches:
+      - changes/v3.1.52-item1
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: changes/v3.1.52-item1
+      - name: Bump frontend cache version
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('custom_components/energyiq/www/energyiq-panel.js')
+          s = p.read_text()
+          old = 'const VERSION = "31360";'
+          new = 'const VERSION = "31520";'
+          assert s.count(old) == 1
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add custom_components/energyiq/www/energyiq-panel.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'Bump frontend cache version for v3.1.52'
+          git push
