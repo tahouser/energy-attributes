@@ -1,8 +1,7 @@
 /* EnergyIQ panel loader/fix layer.
  * Keep the Training workspace DOM stable during live refreshes.
- * The base panel's updateLiveData() rebuilds #training-area, which destroys
- * the method selector every polling cycle. This layer lets the table and
- * summary refresh normally while leaving the Training workspace intact.
+ * Also capture the method selector value before the base change handler
+ * redraws the training detail.
  */
 (() => {
   const MAIN = "/energyiq-static/energyiq-panel.js?v=31360";
@@ -20,6 +19,7 @@
     const originalUpdate = Ctor.prototype.updateLiveData;
     const originalRenderDetail = Ctor.prototype.renderTrainingDetail;
     const originalBind = Ctor.prototype.bindTrainingWorkspace;
+    const originalRenderInPlace = Ctor.prototype.renderTrainingDetailInPlace;
 
     const stopLiveRefresh = function () {
       if (this.refreshTimer) clearInterval(this.refreshTimer);
@@ -51,9 +51,7 @@
       return result;
     };
 
-    // Keep the existing Training workspace DOM alive. The base update method
-    // still refreshes the table and summary, but sees the workspace as closed
-    // and therefore does not replace #training-area.
+    // Do not allow the base polling update to replace #training-area.
     Ctor.prototype.updateLiveData = function (...args) {
       if (!this.trainingWorkspaceOpen) return originalUpdate.apply(this, args);
       const wasOpen = this.trainingWorkspaceOpen;
@@ -80,9 +78,16 @@
       return originalOpen.apply(this, args);
     };
 
-    // A method change causes the base UI to redraw the training detail. Always
-    // honor the user's newly selected method, even if the backend still has a
-    // previous method stored on the device. This fixes the first-click problem.
+    // The base change handler calls renderTrainingDetailInPlace() before our
+    // secondary change listener gets a chance to remember the new value.
+    // Capture the value at the start of that method so the FIRST selection is
+    // the one rendered, rather than requiring a second click.
+    Ctor.prototype.renderTrainingDetailInPlace = function (...args) {
+      const select = this.querySelector("#training-method");
+      if (select) this._energyiqWorkspaceMethod = select.value || "quick";
+      return originalRenderInPlace.apply(this, args);
+    };
+
     Ctor.prototype.renderTrainingDetail = function (device) {
       if (device) {
         const training = device.training || {};
