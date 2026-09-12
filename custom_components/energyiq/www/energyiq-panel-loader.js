@@ -1,6 +1,5 @@
 /* EnergyIQ panel loader/fix layer.
- * Loads the main panel. The Training workspace is intentionally allowed to
- * remain stable while the main panel refreshes live data every two seconds.
+ * Keeps the training-method selector stable during the two-second live refresh.
  * New training defaults to Quick ON/OFF.
  */
 (() => {
@@ -12,22 +11,29 @@
     if (!Ctor || Ctor.prototype.__energyiqTrainingFix) return;
     Ctor.prototype.__energyiqTrainingFix = true;
 
-    // Never let the live-data refresh replace the Training workspace.
-    // Replacing the DOM node is what causes native <select> controls to close.
     const originalUpdate = Ctor.prototype.updateLiveData;
+    const originalBind = Ctor.prototype.bindTrainingWorkspace;
+
     Ctor.prototype.updateLiveData = function (...args) {
       const trainingArea = this.querySelector("#training-area");
-      if (!trainingArea) return originalUpdate.apply(this, args);
+      const methodSelect = trainingArea?.querySelector("#training-method");
 
-      const parent = trainingArea.parentNode;
-      const marker = document.createComment("energyiq-training-area");
-      parent.replaceChild(marker, trainingArea);
-      try {
-        return originalUpdate.apply(this, args);
-      } finally {
-        marker.replaceWith(trainingArea);
-        this.bindTrainingWorkspace?.();
+      // Before training starts the selector must remain a real, persistent DOM
+      // control. Do not let the periodic refresh replace it or re-bind it.
+      if (trainingArea && methodSelect && !methodSelect.disabled) {
+        const previousOpen = this.trainingWorkspaceOpen;
+        const previousBind = this.bindTrainingWorkspace;
+        this.trainingWorkspaceOpen = false;
+        this.bindTrainingWorkspace = () => {};
+        try {
+          return originalUpdate.apply(this, args);
+        } finally {
+          this.trainingWorkspaceOpen = previousOpen;
+          this.bindTrainingWorkspace = previousBind;
+        }
       }
+
+      return originalUpdate.apply(this, args);
     };
 
     const originalOpen = Ctor.prototype.openTrainingWorkspace;
@@ -48,7 +54,6 @@
       return originalRenderDetail.call(this, device);
     };
 
-    const originalBind = Ctor.prototype.bindTrainingWorkspace;
     Ctor.prototype.bindTrainingWorkspace = function (...args) {
       const result = originalBind.apply(this, args);
       const select = this.querySelector("#training-method");
