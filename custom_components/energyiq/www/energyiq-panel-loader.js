@@ -1,6 +1,7 @@
 /* EnergyIQ panel loader/fix layer.
- * Loads the main panel and preserves the training-method selector during the
- * two-second live refresh cycle. New training defaults to Quick ON/OFF.
+ * Loads the main panel. The Training workspace is intentionally allowed to
+ * remain stable while the main panel refreshes live data every two seconds.
+ * New training defaults to Quick ON/OFF.
  */
 (() => {
   const MAIN = "/energyiq-static/energyiq-panel.js?v=31360";
@@ -11,12 +12,12 @@
     if (!Ctor || Ctor.prototype.__energyiqTrainingFix) return;
     Ctor.prototype.__energyiqTrainingFix = true;
 
+    // Never let the live-data refresh replace the Training workspace.
+    // Replacing the DOM node is what causes native <select> controls to close.
     const originalUpdate = Ctor.prototype.updateLiveData;
     Ctor.prototype.updateLiveData = function (...args) {
       const trainingArea = this.querySelector("#training-area");
-      const methodSelect = trainingArea?.querySelector("#training-method");
-      const preserveTrainingArea = !!(trainingArea && methodSelect && document.activeElement === methodSelect);
-      if (!preserveTrainingArea) return originalUpdate.apply(this, args);
+      if (!trainingArea) return originalUpdate.apply(this, args);
 
       const parent = trainingArea.parentNode;
       const marker = document.createComment("energyiq-training-area");
