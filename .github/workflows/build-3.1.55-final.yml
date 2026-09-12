@@ -1,0 +1,39 @@
+name: Build EnergyIQ 3.1.55 final
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  build:
+    if: github.event.head_commit.message == 'Start EnergyIQ 3.1.55 build'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+      - name: Build fresh from 3.1.36
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch origin cef34f051a540700c96f0427d9fcd953290ba66c
+          git checkout cef34f051a540700c96f0427d9fcd953290ba66c -- .
+          git checkout HEAD -- .github/workflows
+          python - <<'PY'
+          from pathlib import Path
+          root=Path('.')
+          p=root/'custom_components/energyiq/manifest.json'; s=p.read_text().replace('"version": "3.1.36"','"version": "3.1.55"'); p.write_text(s)
+          p=root/'custom_components/energyiq/__init__.py'; s=p.read_text().replace('FRONTEND_VERSION = "31360"','FRONTEND_VERSION = "31550"').replace('sidebar_title="EnergyIQ • v3.1.36"','sidebar_title="EnergyIQ • v3.1.55"').replace('sidebar_icon="mdi:lightning-bolt"','sidebar_icon="mdi:home-lightning-bolt"'); p.write_text(s)
+          p=root/'custom_components/energyiq/config_flow.py'; s=p.read_text(); needle='    candidates: list[dict[str, Any]] = []\n'; insert='    candidates: list[dict[str, Any]] = []\n    browser_mod_config_entry_ids = {entry.entry_id for entry in hass.config_entries.async_entries("browser_mod")}\n'; assert needle in s; s=s.replace(needle,insert,1); needle='    for device in all_devices:\n'; assert needle in s; s=s.replace(needle,needle+'        if set(device.config_entries) & browser_mod_config_entry_ids:\n            continue\n',1); p.write_text(s)
+          p=root/'custom_components/energyiq/www/energyiq-panel.js'; s=p.read_text().replace('const VERSION = "31360";','const VERSION = "31550";',1).replace('.shell{padding:18px 20px;max-width:1600px;margin:auto}','.shell{padding:18px 20px;max-width:1600px;margin:auto;height:100dvh;box-sizing:border-box;display:flex;flex-direction:column}',1).replace('.table-scroll{overflow:auto;max-height:calc(100vh - 330px);border:1px solid var(--divider-color);border-radius:10px}','.table-scroll{overflow:auto;flex:1 1 auto;min-height:0;max-height:none;border:1px solid var(--divider-color);border-radius:10px}',1).replace('.table-scroll{max-height:none}','.table-scroll{flex:1 1 auto;min-height:0;max-height:none}',1); p.write_text(s)
+          PY
+          mkdir -p custom_components/energyiq/brand
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/tahouser/energy-attributes/git/blobs/6ba90bb91be22c0f89cd290e145ad41165abf89f" | jq -r .content | tr -d '\n' | base64 -d > custom_components/energyiq/brand/logo.png
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add custom_components
+          git commit -m 'EnergyIQ 3.1.55 attempt from 3.1.36'
+          git push origin HEAD:main
