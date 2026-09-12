@@ -1,0 +1,37 @@
+name: Apply EnergyIQ four-item UI patch
+
+on:
+  push:
+    branches:
+      - changes/v3.1.37-four-items
+
+permissions:
+  contents: write
+
+jobs:
+  patch-panel:
+    if: ${{ !contains(github.event.head_commit.message, '[auto-patch]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extend monitored-load viewport
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("custom_components/energyiq/www/energyiq-panel.js")
+          text = path.read_text(encoding="utf-8")
+          old = ".table-scroll{overflow:auto;max-height:calc(100vh - 330px);"
+          new = ".table-scroll{overflow:auto;max-height:calc(100vh - 190px);"
+          if text.count(old) != 1:
+              raise SystemExit(f"Expected exactly one table-scroll rule, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+      - name: Commit panel layout change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add custom_components/energyiq/www/energyiq-panel.js
+          git commit -m "Extend EnergyIQ monitored-load viewport [auto-patch]"
+          git push
