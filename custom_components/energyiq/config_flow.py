@@ -152,12 +152,18 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
 
     candidates: list[dict[str, Any]] = []
     all_devices = [*devices.devices, *devices.child_devices]
+    browser_mod_config_entry_ids = {
+        entry.entry_id for entry in hass.config_entries.async_entries("browser_mod")
+    }
     _LOGGER.debug(
         "EnergyIQ device registry inventory: %d main + %d child devices",
         len(devices.devices), len(devices.child_devices),
     )
 
     for device in all_devices:
+        if browser_mod_config_entry_ids.intersection(getattr(device, "config_entries", set())):
+            continue
+
         device_name = " ".join(
             str(value or "") for value in (
                 device.name_by_user, device.name, device.manufacturer, device.model
