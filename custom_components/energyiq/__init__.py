@@ -16,7 +16,7 @@ from .stable_training_storage import prepare_training_storage
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31480"
+FRONTEND_VERSION = "31490"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -26,7 +26,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     if not data.get("_websocket_registered"):
         async_register_websocket(hass)
         await async_register_long_cycle(hass)
-        async_register_accounting(hass)
+        await async_register_accounting(hass)
         data["_websocket_registered"] = True
 
     if not data.get("_panel_registered"):
@@ -40,9 +40,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await panel_custom.async_register_panel(
             hass=hass,
             frontend_url_path="energyiq",
-            webcomponent_name="energyiq-panel-v346",
-            module_url=f"{URL_BASE}/energyiq-panel-31480.js",
-            sidebar_title="EnergyIQ • v3.1.48",
+            webcomponent_name="energyiq-panel-v349",
+            module_url=f"{URL_BASE}/energyiq-panel-31490.js",
+            sidebar_title="EnergyIQ • v3.1.49",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
