@@ -135,9 +135,10 @@
       });
       const summary = this.querySelector("#summary-area");
       if (summary) summary.innerHTML = this.renderSummary();
-      const training = this.querySelector("#training-area");
-      if (training && this.trainingWorkspaceOpen) training.innerHTML = this.renderTrainingWorkspace();
-      this.bindTrainingWorkspace();
+      // IMPORTANT: never rebuild #training-area during live polling.
+      // Replacing it destroys the native method <select> and its focus/value.
+      // Training workspace controls are refreshed only by explicit training
+      // actions, which call refresh(true).
     }
 
     renderLoading() { this.innerHTML = `<ha-card class="loading"><h2>EnergyIQ</h2><p>Loading workspace…</p></ha-card>`; }
@@ -256,14 +257,20 @@
 
     bindTrainingWorkspace() {
       this.querySelector("[data-training-close]")?.addEventListener("click", () => this.closeTrainingWorkspace());
-      this.querySelector("#training-method")?.addEventListener("change", () => this.renderTrainingDetailInPlace());
+      // Do NOT redraw the training detail on selector change. Redrawing here
+      // destroys the native <select> the user is interacting with. The
+      // selected value is read when Start is pressed, and the next explicit
+      // refresh renders the resulting training state.
       this.querySelector("[data-training-start]")?.addEventListener("click", () => this.startWorkspaceTraining());
       this.querySelector("[data-training-retrain]")?.addEventListener("click", () => this.startWorkspaceTraining(true));
       this.querySelector("[data-training-stop]")?.addEventListener("click", () => this.stopWorkspaceTraining());
       this.querySelector("[data-training-full-start]")?.addEventListener("click", () => this.fullWorkspaceAction("start_capture"));
       this.querySelector("[data-training-full-save]")?.addEventListener("click", () => this.fullWorkspaceAction("stop_capture"));
     }
-    renderTrainingDetailInPlace() { const active = this.activeTrainingDevice(), area = this.querySelector(".training-detail"); if (active && area) area.innerHTML = this.renderTrainingDetail(active); this.bindTrainingWorkspace(); }
+    renderTrainingDetailInPlace() {
+      // Kept for compatibility with any callers. Do not replace the training
+      // detail DOM during a method selection change.
+    }
     selectedWorkspaceMethod() { return this.querySelector("#training-method")?.value || "full_cycle"; }
 
     async startWorkspaceTraining(retrain = false) {
