@@ -1,0 +1,17 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "EnergyIQ Instrument",
+        "description": "Choose the Home Assistant whole-home power sensor used as the initial measurement source.",
+        "data": {
+          "power_entity": "Whole-home power sensor"
+        }
+      }
+    },
+    "error": {
+      "entity_not_found": "The selected entity is not available.",
+      "not_power_sensor": "Select a sensor with power device class and W or kW units."
+    }
+  }
+}
