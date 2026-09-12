@@ -16,7 +16,7 @@ from .stable_training_storage import prepare_training_storage
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31440"
+FRONTEND_VERSION = "31450"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -42,7 +42,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v325",
             module_url=f"{URL_BASE}/energyiq-panel-loader.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.44",
+            sidebar_title="EnergyIQ • v3.1.45",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
