@@ -1,10 +1,10 @@
-name: Release Instrument on version change
+name: Release EnergyIQ on version change
 
 on:
   push:
     branches: [main]
     paths:
-      - 'custom_components/energyiq_instrument/manifest.json'
+      - 'custom_components/energyiq/manifest.json'
       - '.github/workflows/release-instrument-on-version-change.yml'
   workflow_dispatch:
 
@@ -23,29 +23,16 @@ jobs:
       - name: Read version
         id: version
         shell: bash
-        run: echo "version=$(python -c 'import json; print(json.load(open("custom_components/energyiq_instrument/manifest.json"))["version"])')" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(python -c 'import json; print(json.load(open("custom_components/energyiq/manifest.json"))["version"])')" >> "$GITHUB_OUTPUT"
 
-      - name: Check whether release already exists
-        id: existing
+      - name: Replace stale v3.1.60 release when this revision is 3.1.60
+        if: steps.version.outputs.version == '3.1.60'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
-          if gh release view "v${VERSION}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Create release
-        if: steps.existing.outputs.exists != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-        shell: bash
-        run: |
-          gh release create "v${VERSION}" \
-            --target main \
-            --title "EnergyIQ Instrument v${VERSION}" \
-            --generate-notes
+          gh release delete v3.1.60 --yes >/dev/null 2>&1 || true
+          git push origin --delete refs/tags/v3.1.60 >/dev/null 2>&1 || true
+          git tag -f v3.1.60 "$GITHUB_SHA"
+          git push origin refs/tags/v3.1.60 --force
+          gh release create v3.1.60 --target "$GITHUB_SHA" --title "EnergyIQ v3.1.60" --generate-notes
