@@ -1,8 +1,8 @@
 /* EnergyIQ training UI v2: five fresh readings, #5 is saved. */
 (() => {
-  const TAG = "energyiq-panel-training-v178";
+  const TAG = "energyiq-panel-training-v179";
   const BASE_TAG = "energyiq-panel-v325";
-  const BASE_URL = "/energyiq-static/energyiq-panel.js?v=31780";
+  const BASE_URL = "/energyiq-static/energyiq-panel.js?v=31790";
   const define = () => {
     const Base = customElements.get(BASE_TAG);
     if (!Base || customElements.get(TAG)) return !!Base;
@@ -25,19 +25,11 @@
           return sum + (Number.isFinite(value) ? Math.max(0, value) : 0);
         }, 0);
         const mystery = Number.isFinite(home) ? Math.max(0, home - actualActive) : null;
-        const delta = actualActive - trainedExpected;
         const fmt = value => Number.isFinite(value) ? `${value.toFixed(0)} W` : "—";
-        const fmt1 = value => Number.isFinite(value) ? `${value.toFixed(1)} W` : "—";
-        const signed = value => Number.isFinite(value)
-          ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)} W`
-          : "—";
         return `<div class="summary">
           <div class="metric"><span>Home Power Now</span><strong>${fmt(home)}</strong></div>
-          <div class="metric">
-            <span>Trained Active Watts</span>
-            <strong>${fmt(trainedExpected)}</strong>
-            <small>Actual Active: ${fmt1(actualActive)} · Δ ${signed(delta)}</small>
-          </div>
+          <div class="metric"><span>Trained Wattage</span><strong>${fmt(trainedExpected)}</strong></div>
+          <div class="metric"><span>Actual Wattage</span><strong>${fmt(actualActive)}</strong></div>
           <div class="metric mystery"><span>Mystery Watts</span><strong>${fmt(mystery)}</strong></div>
           <div class="metric"><span>Monitored</span><strong>${monitored.length}</strong></div>
           <div class="metric"><span>Trained</span><strong>${trained}</strong></div>
@@ -97,7 +89,7 @@
       selectedWorkspaceMethod() { return this.querySelector("#training-method")?.value || "quick"; }
       async startWorkspaceTraining(retrain = false) { const device = this.activeTrainingDevice(); if (!device) return; const method = this.selectedWorkspaceMethod(); const message = method === "manual" ? `Manual training for “${device.name}”. Turn the load ON when the baseline is stable. It will capture five fresh Shelly readings, save #5, and end automatically. There is a 5-second minimum. Continue?` : `Automatic training for “${device.name}”. EnergyIQ will establish the baseline, turn the load ON, capture five fresh Shelly readings, save #5 only, then end automatically. Continue?`; if (!window.confirm(message)) return; try { if (retrain && device.training?.status === "complete") await this.ws({ type: "energy_attribution/retry_training", entry_id: this.entryId, device_id: device.device_id }); else await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: device.device_id, method }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to start training", true); } }
       bindTrainingWorkspace() { this.querySelector("[data-training-close]")?.addEventListener("click", () => this.closeTrainingWorkspace()); this.querySelector("#training-method")?.addEventListener("change", () => this.renderTrainingDetailInPlace()); this.querySelector("[data-training-start]")?.addEventListener("click", () => this.startWorkspaceTraining()); this.querySelector("[data-training-retrain]")?.addEventListener("click", () => this.startWorkspaceTraining(true)); this.querySelector("[data-training-stop]")?.addEventListener("click", () => this.stopWorkspaceTraining()); }
-      styles() { return `${super.styles()} .five-readings{margin-top:12px;padding:10px;border:1px solid var(--divider-color);border-radius:9px}.reading-slots{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.reading-slot{border:1px solid var(--divider-color);border-radius:7px;padding:7px;text-align:center;opacity:.55}.reading-slot.filled{opacity:1}.reading-slot span{display:block;font-size:10px;color:var(--secondary-text-color)}.reading-slot strong{display:block;font-size:15px;margin-top:2px}.training-lock{display:block;padding:10px;border:1px solid var(--divider-color);border-radius:8px;color:var(--secondary-text-color);font-size:12px}.training-dot.trained{background:#9be56f !important}.train:checked{accent-color:#9be56f}`; }
+      styles() { return `${super.styles()} .summary{grid-template-columns:repeat(7,minmax(100px,1fr))}.five-readings{margin-top:12px;padding:10px;border:1px solid var(--divider-color);border-radius:9px}.reading-slots{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.reading-slot{border:1px solid var(--divider-color);border-radius:7px;padding:7px;text-align:center;opacity:.55}.reading-slot.filled{opacity:1}.reading-slot span{display:block;font-size:10px;color:var(--secondary-text-color)}.reading-slot strong{display:block;font-size:15px;margin-top:2px}.training-lock{display:block;padding:10px;border:1px solid var(--divider-color);border-radius:8px;color:var(--secondary-text-color);font-size:12px}.training-dot.trained{background:#9be56f !important}.train:checked{accent-color:#9be56f}@media(max-width:1100px){.summary{grid-template-columns:repeat(3,1fr)}}@media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}}`; }
     }
     customElements.define(TAG, EnergyIQTrainingPanel); return true;
   };
