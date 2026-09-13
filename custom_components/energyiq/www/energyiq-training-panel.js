@@ -1,8 +1,8 @@
 /* EnergyIQ training UI v2: five fresh readings, #5 is saved. */
 (() => {
-  const TAG = "energyiq-panel-training-v179";
+  const TAG = "energyiq-panel-training-v180";
   const BASE_TAG = "energyiq-panel-v325";
-  const BASE_URL = "/energyiq-static/energyiq-panel.js?v=31790";
+  const BASE_URL = "/energyiq-static/energyiq-panel.js?v=31800";
   const define = () => {
     const Base = customElements.get(BASE_TAG);
     if (!Base || customElements.get(TAG)) return !!Base;
@@ -51,7 +51,7 @@
               const action = String(stateObj.attributes?.hvac_action || "").toLowerCase();
               if (["heating", "cooling", "fan", "drying"].includes(action)) return true;
               if (action === "idle") continue;
-              if (!(["off", "auto_off"].includes(value))) return true;
+              if (!( ["off", "auto_off"].includes(value))) return true;
             } else if (["on", "active", "running", "playing", "heating", "cooling"].includes(value)) {
               return true;
             }
