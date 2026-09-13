@@ -89,7 +89,7 @@ class InstrumentCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         latency_ms = (time.monotonic() - started) * 1000.0
         readings = self._extract_readings(payload)
         if readings is None:
-            self._record_error("Shelly response did not contain all three em1 channels")
+            self._record_error("Shelly response did not contain at least two usable em1 channels")
             self.async_set_updated_data(self._snapshot())
             return
 
@@ -143,20 +143,21 @@ class InstrumentCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not isinstance(payload, dict):
             return None
 
-        phase_power: dict[str, float | None] = {}
-        phase_voltage: dict[str, float | None] = {}
-        phase_current: dict[str, float | None] = {}
-        phase_pf: dict[str, float | None] = {}
-        phase_freq: dict[str, float | None] = {}
+        phase_power: dict[str, float | None] = {"0": None, "1": None, "2": None}
+        phase_voltage: dict[str, float | None] = {"0": None, "1": None, "2": None}
+        phase_current: dict[str, float | None] = {"0": None, "1": None, "2": None}
+        phase_pf: dict[str, float | None] = {"0": None, "1": None, "2": None}
+        phase_freq: dict[str, float | None] = {"0": None, "1": None, "2": None}
         total = 0.0
+        usable_channels = 0
 
         for channel in range(3):
             item = payload.get(f"em1:{channel}")
             if not isinstance(item, dict):
-                return None
+                continue
             power = cls._number(item.get("act_power"))
             if power is None:
-                return None
+                continue
             key = str(channel)
             phase_power[key] = power
             phase_voltage[key] = cls._number(item.get("voltage"))
@@ -164,7 +165,10 @@ class InstrumentCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             phase_pf[key] = cls._number(item.get("pf"))
             phase_freq[key] = cls._number(item.get("freq"))
             total += power
+            usable_channels += 1
 
+        if usable_channels < 2:
+            return None
         return total, phase_power, phase_voltage, phase_current, phase_pf, phase_freq
 
     def _snapshot(self) -> dict[str, Any]:
