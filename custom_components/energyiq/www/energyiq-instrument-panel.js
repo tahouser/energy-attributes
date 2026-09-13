@@ -24,7 +24,7 @@ class EnergyIQInstrumentPanel extends HTMLElement {
         @media(max-width:600px){ .instrument{padding:24px 16px}.stats{grid-template-columns:1fr 1fr}.value{font-size:72px} }
       </style>
       <div class="shell"><main class="instrument">
-        <div class="version">ENERGYIQ • v3.1.61</div>
+        <div class="version">ENERGYIQ • v3.1.62</div>
         <div class="label">Total Electrical Load</div>
         <div class="value">—</div><div class="unit">watts</div>
         <div class="status">Connecting to live measurement…</div>
@@ -55,9 +55,9 @@ class EnergyIQInstrumentPanel extends HTMLElement {
     q(".min").textContent = data.min_w == null ? "—" : `${Math.round(data.min_w).toLocaleString()} W`;
     q(".max").textContent = data.max_w == null ? "—" : `${Math.round(data.max_w).toLocaleString()} W`;
     q(".avg").textContent = data.avg_w == null ? "—" : `${Math.round(data.avg_w).toLocaleString()} W`;
-    const source = data.source_entity || "power source";
+    const source = data.source || data.source_entity || "power source";
     const rate = data.sample_rate_hz == null ? "measuring" : `${data.sample_rate_hz.toFixed(1)} Hz`;
-    q(".status").textContent = `${source} · LIVE · ${rate}`;
+    q(".status").textContent = `${source} · DIRECT · LIVE · ${rate}`;
   }
 
   setStatus(text) {
@@ -66,4 +66,4 @@ class EnergyIQInstrumentPanel extends HTMLElement {
   }
 }
 
-customElements.define("energyiq-panel-v361", EnergyIQInstrumentPanel);
+customElements.define("energyiq-panel-v362", EnergyIQInstrumentPanel);
