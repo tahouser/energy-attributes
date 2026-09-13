@@ -21,7 +21,9 @@ def _monitored_entity_ids(coordinator) -> list[str]:
     for did, candidate in coordinator.candidate_devices.items():
         if coordinator.device_classifications.get(did, "ignore") != "monitor":
             continue
-        for item in (*candidate.get("measurements", []) or [], *candidate.get("controls", []) or []):
+        measurements = candidate.get("measurements", []) or []
+        controls = candidate.get("controls", []) or []
+        for item in [*measurements, *controls]:
             entity_id = item.get("entity_id") if isinstance(item, dict) else None
             if entity_id and entity_id not in seen:
                 seen.add(entity_id)
@@ -63,8 +65,13 @@ def _option_monitored_devices(coordinator) -> list[str]:
     monitored_set = {str(entity_id) for entity_id in monitored_entities}
     selected: list[str] = []
     for did, candidate in coordinator.candidate_devices.items():
-        attached = [*(candidate.get("measurements", []) or []), *(candidate.get("controls", []) or [])]
-        if any(isinstance(item, dict) and item.get("entity_id") in monitored_set for item in attached):
+        measurements = candidate.get("measurements", []) or []
+        controls = candidate.get("controls", []) or []
+        attached = [*measurements, *controls]
+        if any(
+            isinstance(item, dict) and item.get("entity_id") in monitored_set
+            for item in attached
+        ):
             selected.append(did)
     return selected
 
