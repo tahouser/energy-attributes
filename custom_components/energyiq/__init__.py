@@ -1,10 +1,14 @@
 """EnergyIQ Home Assistant integration."""
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry, ConfigEntryChange
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigEntryChange,
+    SIGNAL_CONFIG_ENTRY_CHANGED,
+)
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.core import HomeAssistant, SIGNAL_CONFIG_ENTRY_CHANGED, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import DOMAIN
@@ -40,7 +44,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-training-v179",
             module_url=f"{URL_BASE}/energyiq-training-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.85",
+            sidebar_title="EnergyIQ • v3.1.86",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
