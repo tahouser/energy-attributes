@@ -46,7 +46,7 @@ jobs:
           assert 'class EnergyIQTrainingPanel extends Base' in js
           assert 'Automatic — 5 fresh readings' in js
           assert 'Manual — guided 5-reading capture' in js
-          assert 'five-second minimum' in js
+          assert '5-second minimum' in js
           assert f'sidebar_title="EnergyIQ • v{version}"' in init
           assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
           assert 'URL_BASE = "/energyiq-static"' in init
