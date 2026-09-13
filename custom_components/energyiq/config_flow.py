@@ -11,7 +11,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import DEFAULT_HOST, DOMAIN, EM_ID
 
 
-class EnergyIQConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Configure the physical electrical measurement source."""
 
     VERSION = 1
