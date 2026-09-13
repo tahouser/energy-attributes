@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from statistics import median, pstdev
 from typing import Literal
 
-Method = Literal["quick", "manual"]
+Method = Literal["quick", "manual", "full_cycle"]
 
 
 @dataclass(slots=True)
@@ -19,9 +19,9 @@ class PowerSample:
 class TrainingEngine:
     """Train one load from the fifth fresh Shelly measurement.
 
-    The engine deliberately has no full-cycle mode and never averages the five
-    training readings. Readings before #5 are used only for progress/guidance;
-    reading #5 is the saved learned load value.
+    The legacy full-cycle method is accepted only as a compatibility alias and
+    is treated as the automatic five-reading method. The five captured readings
+    are never averaged: reading #5 is the learned load value.
     """
 
     method: Method
@@ -43,6 +43,10 @@ class TrainingEngine:
     completed: bool = False
     _last_source_w: float | None = None
 
+    def __post_init__(self) -> None:
+        if self.method == "full_cycle":
+            self.method = "quick"
+
     def add_sample(self, timestamp: float, watts: float, *, fresh: bool | None = None) -> dict:
         if watts != watts or watts < 0:
             return self.result()
@@ -57,7 +61,7 @@ class TrainingEngine:
             is_fresh = fresh
         else:
             # Until the Shelly source timestamp is wired into the sampler,
-            # a changed source value is the only reliable freshness signal.
+            # a changed source value is the freshness signal used by training.
             is_fresh = abs(float(watts) - self._last_source_w) >= self.fresh_change_w
         self._last_source_w = float(watts)
         sample.fresh = is_fresh
@@ -83,23 +87,41 @@ class TrainingEngine:
             return self.result()
 
         if self.method == "manual":
-            return self._manual_step(sample)
+            # Once the fifth fresh point exists, keep that exact point. If the
+            # five-second minimum has not elapsed yet, wait without collecting
+            # a sixth point or replacing #5.
+            if (
+                self.phase == "capturing"
+                and len(self.fresh_samples) == self.target_readings
+                and self.active_started is not None
+                and timestamp - self.active_started >= self.manual_min_active_s
+            ):
+                self.completed = True
+                self.phase = "complete"
+            else:
+                self._manual_step(sample)
+            return self.result()
         return self._quick_step(sample)
 
     def _accept_fresh(self, sample: PowerSample) -> None:
-        if not sample.fresh:
+        if not sample.fresh or len(self.fresh_samples) >= self.target_readings:
             return
         self.fresh_samples.append(sample)
-        if len(self.fresh_samples) > self.target_readings:
-            self.fresh_samples = self.fresh_samples[-self.target_readings :]
 
         if len(self.fresh_samples) == self.target_readings:
             fifth = self.fresh_samples[self.target_readings - 1]
             self.learned_source_w = fifth.watts
             baseline = self.baseline_w if self.baseline_w is not None else 0.0
             self.learned_w = max(0.0, fifth.watts - baseline)
-            self.completed = True
-            self.phase = "complete"
+            if self.method == "quick":
+                self.completed = True
+                self.phase = "complete"
+            elif self.active_started is not None and fifth.timestamp - self.active_started >= self.manual_min_active_s:
+                self.completed = True
+                self.phase = "complete"
+            else:
+                self.completed = False
+                self.phase = "capturing"
 
     def _quick_step(self, sample: PowerSample) -> dict:
         if self.phase == "request_on":
@@ -149,14 +171,6 @@ class TrainingEngine:
         if self.active_started is not None and self.samples:
             duration = max(0.0, self.samples[-1].timestamp - self.active_started)
 
-        # Manual training cannot complete before its five-second minimum.
-        if self.completed and self.method == "manual":
-            if self.active_started is None or duration is None or duration < self.manual_min_active_s:
-                self.completed = False
-                self.phase = "capturing"
-                self.learned_w = None
-                self.learned_source_w = None
-
         instruction = None
         if self.phase == "baseline":
             instruction = "Watching the load and establishing a stable baseline."
@@ -165,8 +179,8 @@ class TrainingEngine:
         elif self.phase == "ready_to_start":
             instruction = "Baseline is stable. Turn the load ON now. EnergyIQ will capture five fresh readings automatically."
         elif self.phase == "capturing":
-            if self.method == "manual" and duration is not None and duration < self.manual_min_active_s and count >= self.target_readings:
-                instruction = f"Five fresh readings captured. Holding until the {self.manual_min_active_s:.0f}-second minimum is reached."
+            if self.method == "manual" and count >= self.target_readings and duration is not None and duration < self.manual_min_active_s:
+                instruction = f"Five fresh readings captured. Holding the fifth reading until the {self.manual_min_active_s:.0f}-second minimum is reached."
             else:
                 instruction = f"Capturing fresh Shelly readings: {count} of {self.target_readings}."
         elif self.phase == "complete":
