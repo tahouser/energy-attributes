@@ -14,7 +14,7 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31820"
+FRONTEND_VERSION = "31830"
 
 
 def _backup_persistent_state(coordinator: EnergyAttributionCoordinator, entry: ConfigEntry) -> None:
@@ -50,7 +50,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-training-v180",
             module_url=f"{URL_BASE}/energyiq-training-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.82",
+            sidebar_title="EnergyIQ • v3.1.83",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
@@ -80,6 +80,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator._persist = persist_with_backup
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await coordinator.async_load_training()
+
+    # v3.1.80 could overwrite the config-entry options with an empty monitoring
+    # map during an upgrade. The training Store was not part of that overwrite,
+    # so use surviving training history as proof that this is an existing
+    # installation and restore the prior all-monitored commissioning state.
+    # Fresh installations have no training history and therefore do not trigger
+    # this recovery path.
+    if (
+        not coordinator.device_classifications
+        and not coordinator.monitored_entities
+        and coordinator.candidate_devices
+        and coordinator.training_state
+        and not entry.options.get("persistence_recovery_v183")
+    ):
+        coordinator.device_classifications = {
+            did: "monitor" for did in coordinator.candidate_devices
+        }
+        coordinator.monitored_entities = [
+            measurement["entity_id"]
+            for candidate in coordinator.candidate_devices.values()
+            for measurement in candidate.get("measurements", [])
+            if measurement.get("entity_id")
+        ]
+        entry_options = {
+            **entry.options,
+            "device_classifications": coordinator.device_classifications,
+            "monitored_entities": coordinator.monitored_entities,
+            "candidate_devices": coordinator.candidate_devices,
+            "persistence_recovery_v183": True,
+        }
+        hass.config_entries.async_update_entry(entry, options=entry_options)
 
     _backup_persistent_state(coordinator, entry)
 
