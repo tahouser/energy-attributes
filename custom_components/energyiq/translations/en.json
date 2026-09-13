@@ -3,17 +3,18 @@
     "step": {
       "user": {
         "title": "Connect EnergyIQ",
-        "description": "EnergyIQ reads the electrical measurement instrument directly. Enter the local IP address of the Shelly Energy Meter.",
+        "description": "EnergyIQ reads the electrical measurement instrument directly. Enter the local IP address of the Shelly Pro 3EM.",
         "data": {
           "host": "Shelly IP address"
         }
       }
     },
     "error": {
-      "cannot_connect": "Unable to connect to the Shelly Energy Meter or read its total active power."
+      "cannot_connect": "Unable to connect to the Shelly Pro 3EM.",
+      "invalid_device": "The device does not expose all three monophase EM1 measurement channels."
     },
     "abort": {
-      "already_configured": "This Shelly Energy Meter is already configured."
+      "already_configured": "This Shelly Pro 3EM is already configured."
     }
   }
 }
