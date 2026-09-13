@@ -23,7 +23,9 @@
         const active = training.status === "active";
         const complete = training.status === "complete";
         const phase = String(training.phase || "");
-        const instruction = training.instruction || this.defaultInstruction(method, phase, device);
+        const instruction = complete
+          ? `Training complete. Saved the fifth fresh Shelly reading as the learned load: ${Number.isFinite(learned) ? learned.toFixed(0) : "—"} W.`
+          : (training.instruction || this.defaultInstruction(method, phase, device));
         const fmt = value => Number.isFinite(value) ? `${value.toFixed(0)} W` : "—";
         const elapsedText = Number.isFinite(elapsed) ? `${elapsed.toFixed(1)} s` : "—";
         const shown = complete ? learned : (Number.isFinite(live) ? live : sourceReading);
@@ -41,7 +43,7 @@
           </select></label></div>
           <div class="instruction-card"><span class="eyebrow">Instructions</span><strong>${this.escape(instruction)}</strong></div>
           <div class="capture-grid"><div><span>Baseline</span><strong>${fmt(baseline)}</strong></div><div class="capture-value ${complete ? "valid" : ""}"><span>${complete ? "Learned load · reading #5" : "Live load delta"}</span><strong>${fmt(shown)}</strong></div><div><span>Fifth source reading</span><strong>${fmt(sourceReading)}</strong></div><div><span>Elapsed</span><strong>${elapsedText}</strong></div></div>
-          <div class="five-readings"><span class="eyebrow">Five fresh Shelly readings · #5 is the saved value</span><div class="reading-slots">${readingSlots}</div></div>
+          <div class="five-readings"><span class="eyebrow">Five fresh Shelly readings · #5 is the saved value</span><div class="reading-slots">${slots}</div></div>
           <div class="capture-state ${complete ? "valid" : ""}"><span class="status-light ${complete ? "green" : active ? "amber" : "red"}"></span><strong>${statusText}</strong></div>
           <div class="training-actions">${this.renderTrainingActions(device, method, active, complete, false)}</div>
           ${complete ? this.renderCompletedResult(device) : ""}
@@ -50,7 +52,6 @@
 
       renderTrainingActions(device, method, active, complete) {
         if (active) {
-          // Manual training has no early-stop control. Completion is automatic.
           if (method === "manual") return `<span class="training-lock">Manual capture cannot be ended early. It ends automatically after the fifth fresh reading and the 5-second minimum.</span>`;
           return `<button data-training-stop>Stop Without Saving</button>`;
         }
@@ -86,6 +87,10 @@
         this.querySelector("[data-training-start]")?.addEventListener("click", () => this.startWorkspaceTraining());
         this.querySelector("[data-training-retrain]")?.addEventListener("click", () => this.startWorkspaceTraining(true));
         this.querySelector("[data-training-stop]")?.addEventListener("click", () => this.stopWorkspaceTraining());
+      }
+
+      styles() {
+        return `${super.styles()} .five-readings{margin-top:12px;padding:10px;border:1px solid var(--divider-color);border-radius:9px}.reading-slots{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.reading-slot{border:1px solid var(--divider-color);border-radius:7px;padding:7px;text-align:center;opacity:.55}.reading-slot.filled{opacity:1}.reading-slot span{display:block;font-size:10px;color:var(--secondary-text-color)}.reading-slot strong{display:block;font-size:15px;margin-top:2px}.training-lock{display:block;padding:10px;border:1px solid var(--divider-color);border-radius:8px;color:var(--secondary-text-color);font-size:12px}@media(max-width:700px){.reading-slots{grid-template-columns:repeat(5,1fr)}.reading-slot{padding:5px 2px}.reading-slot strong{font-size:12px}}`;
       }
     }
 
