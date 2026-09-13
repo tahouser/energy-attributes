@@ -433,13 +433,24 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                             await self._call_power(controls, False)
                             control_state = "off"
                         state["status"] = "complete"
-                        state["instruction"] = ("Training Complete. One manual electrical cycle was captured and saved." if method == "manual" else "Training Complete. Three controlled measurements were captured and saved.")
+                        state["instruction"] = ("Training complete. Saved the fifth fresh Shelly reading as the learned load: %.1f W." % (result.get("learned_w") or 0.0)) if method == "quick" else ("Training complete. Saved the fifth fresh Shelly reading: %.1f W load." % (result.get("learned_w") or 0.0))
                         state["learned"] = True
                         state["completed_at"] = self.hass.loop.time()
                         self.last_training_device_id = device_id
                         state["completed"] = True
-                        await self._response_log("training_complete", device_id, learned_load_w=result.get("peak_delta_w"), measurement_source="shelly_rpc" if self._direct_rpc_available else "ha_entity", shelly_host=self._direct_rpc_host or "")
-                        state["learned_signature"] = {"method": method, "baseline_w": result.get("baseline_w"), "load_w": result.get("peak_delta_w"), "duration_s": result.get("duration_s"), "energy_wh": result.get("energy_wh"), "events_detected": result.get("events_detected", 0), "observations": result.get("observations", [])}
+                        await self._response_log("training_complete", device_id, learned_load_w=result.get("learned_w"), measurement_source="shelly_rpc" if self._direct_rpc_available else "ha_entity", shelly_host=self._direct_rpc_host or "")
+                        state["learned_signature"] = {
+                            "method": method,
+                            "baseline_w": result.get("baseline_w"),
+                            "load_w": result.get("learned_w"),
+                            "source_w": result.get("learned_source_w"),
+                            "fresh_readings": result.get("fresh_readings", []),
+                            "fresh_readings_collected": result.get("fresh_readings_collected", 0),
+                            "duration_s": result.get("duration_s"),
+                            "energy_wh": result.get("energy_wh"),
+                            "events_detected": result.get("events_detected", 0),
+                            "observations": result.get("observations", []),
+                        }
                         await self._persist(force=True)
                         if self._direct_rpc_task and not self._direct_rpc_task.done():
                             self._direct_rpc_task.cancel()
