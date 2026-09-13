@@ -1,8 +1,8 @@
 /* EnergyIQ training UI v2: five fresh readings, #5 is saved. */
 (() => {
-  const TAG = "energyiq-panel-training-v176";
+  const TAG = "energyiq-panel-training-v177";
   const BASE_TAG = "energyiq-panel-v325";
-  const BASE_URL = "/energyiq-static/energyiq-panel.js?v=31760";
+  const BASE_URL = "/energyiq-static/energyiq-panel.js?v=31770";
   const define = () => {
     const Base = customElements.get(BASE_TAG);
     if (!Base || customElements.get(TAG)) return !!Base;
@@ -13,19 +13,76 @@
         const trained = monitored.filter(d => d.training?.status === "complete").length;
         const untrained = monitored.length - trained;
         const home = Number(this.workspace?.whole_home_power);
-        const actualActive = Number(this.workspace?.trained_live_power_w);
-        const activeTrained = monitored.filter(d => d.training?.status === "complete" && this.stateFor(d) === "on");
+
+        // Calculate both values from the device rows first. This keeps the
+        // dashboard correct even when the backend workspace response is from
+        // an older cached integration that does not expose the aggregate.
+        const activeTrained = monitored.filter(d =>
+          d.training?.status === "complete" && this.deviceIsActive(d)
+        );
         const trainedExpected = activeTrained.reduce((sum, d) => {
           const value = Number(d.training?.learned_signature?.load_w);
           return sum + (Number.isFinite(value) ? Math.max(0, value) : 0);
         }, 0);
-        const mystery = Number.isFinite(home) && Number.isFinite(actualActive) ? Math.max(0, home - actualActive) : null;
-        const delta = Number.isFinite(actualActive) ? actualActive - trainedExpected : null;
+
+        const rowActual = activeTrained.reduce((sum, d) => {
+          const value = Number(d.current_power);
+          return sum + (Number.isFinite(value) ? Math.max(0, value) : 0);
+        }, 0);
+        const workspaceActual = Number(this.workspace?.trained_live_power_w);
+        const actualActive = Number.isFinite(workspaceActual) ? workspaceActual : rowActual;
+
+        const mystery = Number.isFinite(home) && Number.isFinite(actualActive)
+          ? Math.max(0, home - actualActive)
+          : null;
+        const delta = Number.isFinite(actualActive)
+          ? actualActive - trainedExpected
+          : null;
         const fmt = value => Number.isFinite(value) ? `${value.toFixed(0)} W` : "—";
         const fmt1 = value => Number.isFinite(value) ? `${value.toFixed(1)} W` : "—";
-        const signed = value => Number.isFinite(value) ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)} W` : "—";
-        return `<div class="summary"><div class="metric"><span>Home Power Now</span><strong>${fmt(home)}</strong></div><div class="metric"><span>Trained Active Watts</span><strong>${fmt(trainedExpected)}</strong><small>Actual Active: ${fmt1(actualActive)} · Δ ${signed(delta)}</small></div><div class="metric mystery"><span>Mystery Watts</span><strong>${fmt(mystery)}</strong></div><div class="metric"><span>Monitored</span><strong>${monitored.length}</strong></div><div class="metric"><span>Trained</span><strong>${trained}</strong></div><div class="metric"><span>Untrained</span><strong>${untrained}</strong></div></div>`;
+        const signed = value => Number.isFinite(value)
+          ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)} W`
+          : "—";
+
+        return `<div class="summary">
+          <div class="metric"><span>Home Power Now</span><strong>${fmt(home)}</strong></div>
+          <div class="metric">
+            <span>Trained Active Watts</span>
+            <strong>${fmt(trainedExpected)}</strong>
+            <small>Actual Active: ${fmt1(actualActive)} · Δ ${signed(delta)}</small>
+          </div>
+          <div class="metric mystery"><span>Mystery Watts</span><strong>${fmt(mystery)}</strong></div>
+          <div class="metric"><span>Monitored</span><strong>${monitored.length}</strong></div>
+          <div class="metric"><span>Trained</span><strong>${trained}</strong></div>
+          <div class="metric"><span>Untrained</span><strong>${untrained}</strong></div>
+        </div>`;
       }
+
+      deviceIsActive(device) {
+        const controls = Array.isArray(device?.controls) ? device.controls : [];
+        if (controls.length) {
+          for (const control of controls) {
+            const id = control?.entity_id;
+            const stateObj = id ? this.hass?.states?.[id] : null;
+            if (!stateObj) continue;
+            const domain = String(control?.domain || id.split(".", 1)[0]).toLowerCase();
+            const value = String(stateObj.state || "").toLowerCase();
+            if (["off", "unavailable", "unknown", "none"].includes(value)) continue;
+            if (domain === "climate") {
+              const action = String(stateObj.attributes?.hvac_action || "").toLowerCase();
+              if (["heating", "cooling", "fan", "drying"].includes(action)) return true;
+              if (action === "idle") continue;
+              if (!(["off", "auto_off"].includes(value))) return true;
+            } else if (["on", "active", "running", "playing", "heating", "cooling"].includes(value)) {
+              return true;
+            }
+          }
+          return false;
+        }
+        const power = Number(device?.current_power);
+        return Number.isFinite(power) && power > 0;
+      }
+
       renderTrainingDetail(device) {
         const training = device?.training || {};
         const method = training.method === "manual" ? "manual" : "quick";
@@ -48,6 +105,7 @@
         const methodText = method === "manual" ? "Manual · guided start" : "Automatic · controlled start";
         return `<div class="training-grid"><div class="training-main"><div class="method-picker"><label>Training method<select id="training-method" ${active ? "disabled" : ""}><option value="quick" ${method === "quick" ? "selected" : ""}>Automatic — 5 fresh readings</option><option value="manual" ${method === "manual" ? "selected" : ""}>Manual — guided 5-reading capture</option></select></label></div><div class="instruction-card"><span class="eyebrow">Instructions</span><strong>${this.escape(instruction)}</strong></div><div class="capture-grid"><div><span>Baseline</span><strong>${fmt(baseline)}</strong></div><div class="capture-value ${complete ? "valid" : ""}"><span>${complete ? "Learned load · reading #5" : "Live load delta"}</span><strong>${fmt(shown)}</strong></div><div><span>Fifth source reading</span><strong>${fmt(sourceReading)}</strong></div><div><span>Elapsed</span><strong>${Number.isFinite(elapsed) ? elapsed.toFixed(1) + " s" : "—"}</strong></div></div><div class="five-readings"><span class="eyebrow">Five fresh Shelly readings · #5 is the saved value</span><div class="reading-slots">${slots}</div></div><div class="capture-state ${complete ? "valid" : ""}"><span class="status-light ${complete ? "green" : active ? "amber" : "red"}"></span><strong>${statusText}</strong></div><div class="training-actions">${this.renderTrainingActions(device, method, active, complete)}</div>${complete ? this.renderCompletedResult(device) : ""}</div><aside class="training-info"><span class="eyebrow">Selected device</span><h3>${this.escape(device.name || device.device_id)}</h3><p>${this.escape(device.area || "No area assigned")}</p><dl><dt>Source</dt><dd>${String(device.source || "").toLowerCase() === "manual" ? "Manual" : "Home Assistant"}</dd><dt>Training</dt><dd>${methodText}</dd><dt>Result</dt><dd>${complete ? fmt(learned) : "Pending #5"}</dd></dl></aside></div>`;
       }
+
       renderTrainingActions(device, method, active, complete) { if (active) { if (method === "manual") return `<span class="training-lock">Manual capture cannot be ended early. It ends automatically after the fifth fresh reading and the 5-second minimum.</span>`; return `<button data-training-stop>Stop Without Saving</button>`; } if (complete) return `<button class="primary" data-training-retrain>Retrain</button>`; return `<button class="primary" data-training-start>Start ${method === "manual" ? "Manual Training" : "Automatic Training"}</button>`; }
       selectedWorkspaceMethod() { return this.querySelector("#training-method")?.value || "quick"; }
       async startWorkspaceTraining(retrain = false) { const device = this.activeTrainingDevice(); if (!device) return; const method = this.selectedWorkspaceMethod(); const message = method === "manual" ? `Manual training for “${device.name}”. Turn the load ON when the baseline is stable. It will capture five fresh Shelly readings, save #5, and end automatically. There is a 5-second minimum. Continue?` : `Automatic training for “${device.name}”. EnergyIQ will establish the baseline, turn the load ON, capture five fresh Shelly readings, save #5 only, then end automatically. Continue?`; if (!window.confirm(message)) return; try { if (retrain && device.training?.status === "complete") await this.ws({ type: "energy_attribution/retry_training", entry_id: this.entryId, device_id: device.device_id }); else await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: device.device_id, method }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to start training", true); } }
