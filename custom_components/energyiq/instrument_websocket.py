@@ -1,10 +1,10 @@
-"""Live websocket API for the EnergyIQ instrument."""
+"""Websocket API for the EnergyIQ instrument display."""
 from __future__ import annotations
 
 from homeassistant.components import websocket_api
 from homeassistant.core import callback
 
-from . import DOMAIN
+from .const import DOMAIN
 
 
 def async_register(hass) -> None:
@@ -13,7 +13,14 @@ def async_register(hass) -> None:
 
 
 def _coordinator(hass):
-    return next((v for v in hass.data.get(DOMAIN, {}).values() if hasattr(v, "data") and hasattr(v, "power_entity")), None)
+    return next(
+        (
+            value
+            for value in hass.data.get(DOMAIN, {}).values()
+            if hasattr(value, "data") and hasattr(value, "host")
+        ),
+        None,
+    )
 
 
 @websocket_api.websocket_command({"type": "energyiq/snapshot"})
@@ -36,7 +43,9 @@ async def ws_subscribe(hass, connection, msg):
 
     @callback
     def forward() -> None:
-        connection.send_message(websocket_api.event_message(msg["id"], coordinator.data or {}))
+        connection.send_message(
+            websocket_api.event_message(msg["id"], coordinator.data or {})
+        )
 
     remove = coordinator.async_add_listener(forward)
     connection.subscriptions[msg["id"]] = remove
