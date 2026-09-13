@@ -195,6 +195,10 @@ async def ws_set_monitoring(hass, connection, msg):
         "device_classifications": coordinator.device_classifications,
         "candidate_devices": coordinator.candidate_devices,
     })
+    # The isolated commissioning Store is the HACS-upgrade persistence layer.
+    # Save immediately whenever monitoring changes instead of waiting for a
+    # training event or shutdown to update it.
+    await coordinator._persist(force=True)
     connection.send_result(msg["id"], {"saved": True})
 
 
@@ -238,6 +242,7 @@ async def ws_add_manual_device(hass, connection, msg):
         "device_classifications": coordinator.device_classifications,
         "monitored_entities": coordinator.monitored_entities,
     })
+    await coordinator._persist(force=True)
     connection.send_result(msg["id"], {"saved": True, "device": candidate})
 
 
@@ -338,6 +343,7 @@ async def ws_add_entity(hass, connection, msg):
         "device_classifications": coordinator.device_classifications,
         "monitored_entities": coordinator.monitored_entities,
     })
+    await coordinator._persist(force=True)
     matches = []
     for candidate_did, existing_candidate in coordinator.candidate_devices.items():
         attached = [*(existing_candidate.get("measurements", []) or []), *(existing_candidate.get("controls", []) or [])]
