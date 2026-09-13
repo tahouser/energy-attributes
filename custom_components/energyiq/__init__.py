@@ -7,27 +7,20 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .coordinator import EnergyAttributionCoordinator
+from .coordinator import InstrumentCoordinator
 from .websocket import async_register as async_register_websocket
-from .long_cycle import async_register as async_register_long_cycle
-from .accounting import async_register as async_register_accounting
-from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31560"
+FRONTEND_VERSION = "31600"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up EnergyIQ services and the single frontend application."""
+    """Set up EnergyIQ as the electrical measurement instrument."""
     data = hass.data.setdefault(DOMAIN, {})
-
     if not data.get("_websocket_registered"):
         async_register_websocket(hass)
-        await async_register_long_cycle(hass)
-        async_register_accounting(hass)
         data["_websocket_registered"] = True
-
     if not data.get("_panel_registered"):
         await hass.http.async_register_static_paths([
             StaticPathConfig(
@@ -39,39 +32,31 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await panel_custom.async_register_panel(
             hass=hass,
             frontend_url_path="energyiq",
-            webcomponent_name="energyiq-panel-v325",
+            webcomponent_name="energyiq-panel-v360",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.56",
+            sidebar_title="EnergyIQ • v3.1.60",
             sidebar_icon="mdi:home-lightning-bolt",
             require_admin=True,
         )
         data["_panel_registered"] = True
-
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Load one EnergyIQ configuration entry."""
-    response_log_path = migrate_response_log(hass)
-    coordinator = EnergyAttributionCoordinator(hass, entry)
-    coordinator._response_log_path = response_log_path
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-
-    await coordinator.async_load_training()
+    """Set up the EnergyIQ measurement source."""
+    coordinator = InstrumentCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload EnergyIQ integration cleanly."""
+    """Unload EnergyIQ cleanly."""
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if coordinator:
-        for device_id in list(coordinator.training_state):
-            if coordinator.training_state[device_id].get("status") == "active":
-                await coordinator.async_stop_training(device_id)
-
+        await coordinator.async_shutdown()
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return ok
