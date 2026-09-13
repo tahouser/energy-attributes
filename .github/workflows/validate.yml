@@ -50,7 +50,7 @@ jobs:
           assert f'sidebar_title="EnergyIQ • v{version}"' in init
           assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
           assert 'URL_BASE = "/energyiq-static"' in init
-          assert panel_id == 'energyiq-panel-training-v138'
+          assert panel_id == 'energyiq-panel-training-v139'
           training = Path('custom_components/energyiq/training.py').read_text(encoding='utf-8')
           assert 'target_readings: int = 5' in training
           assert 'manual_min_active_s: float = 5.0' in training
