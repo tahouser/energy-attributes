@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Connect EnergyIQ",
-        "description": "EnergyIQ reads the electrical measurement instrument directly. Enter the local IP address of the Shelly Pro 3EM.",
+        "description": "EnergyIQ tests the Shelly Pro 3EM through HTTP aggregate, direct EM1 RPC, MQTT, Modbus TCP, and outbound WebSocket paths simultaneously.",
         "data": {
           "host": "Shelly IP address"
         }
@@ -11,10 +11,10 @@
     },
     "error": {
       "cannot_connect": "Unable to connect to the Shelly Pro 3EM.",
-      "invalid_device": "The device does not expose all three monophase EM1 measurement channels."
+      "invalid_device": "The Shelly Pro 3EM did not expose at least two usable EM1 channels."
     },
     "abort": {
-      "already_configured": "This Shelly Pro 3EM is already configured."
+      "already_configured": "This Shelly Energy Meter is already configured."
     }
   }
 }

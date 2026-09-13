@@ -1,6 +1,7 @@
-"""Config flow for the EnergyIQ measurement instrument."""
+"""Config flow for the EnergyIQ multi-path measurement instrument."""
 from __future__ import annotations
 
+import secrets
 from typing import Any
 
 import voluptuous as vol
@@ -30,11 +31,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 sys_status = status.get("sys", {})
                 device_id = sys_status.get("mac") or host
+                try:
+                    device_info = await self._read_device_info(host)
+                except (ClientError, TimeoutError, ValueError):
+                    device_info = {}
+                mqtt_prefix = str(device_info.get("id") or "")
                 await self.async_set_unique_id(str(device_id))
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=f"EnergyIQ · Shelly {host}",
-                    data={"host": host},
+                    data={
+                        "host": host,
+                        "mqtt_topic_prefix": mqtt_prefix,
+                        "ws_token": secrets.token_urlsafe(18),
+                    },
                 )
 
         return self.async_show_form(
@@ -69,3 +79,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if usable_channels < 2:
             raise ValueError("Shelly response did not contain at least two usable EM1 channels")
         return payload
+
+    async def _read_device_info(self, host: str) -> dict[str, Any]:
+        """Read the Shelly device id used by its default MQTT topic prefix."""
+        session = async_get_clientsession(self.hass)
+        async with session.get(
+            f"http://{host}/rpc/Shelly.GetDeviceInfo", timeout=2.0
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json(content_type=None)
+        return payload if isinstance(payload, dict) else {}
