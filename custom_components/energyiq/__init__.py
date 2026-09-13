@@ -1,10 +1,10 @@
 """EnergyIQ Home Assistant integration."""
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry, ConfigEntryChange, SIGNAL_CONFIG_ENTRY_CHANGED
+from homeassistant.config_entries import ConfigEntry, ConfigEntryChange
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, SIGNAL_CONFIG_ENTRY_CHANGED, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import DOMAIN
