@@ -1,6 +1,8 @@
 """EnergyIQ Home Assistant integration."""
 from __future__ import annotations
 
+import asyncio
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
@@ -43,6 +45,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         data["_panel_registered"] = True
     return True
 
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     response_log_path = migrate_response_log(hass)
     coordinator = EnergyAttributionCoordinator(hass, entry)
@@ -58,6 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # never prevent Home Assistant from importing EnergyIQ's config flow.
     from .persistence import async_load as async_load_persistence
     from .persistence import async_save as async_save_persistence
+    from .bulk_training import async_run as async_run_bulk
 
     await async_load_persistence(coordinator)
 
@@ -70,14 +74,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator._persist = persist_with_commissioning_store
 
+    # The websocket command must return immediately instead of holding the
+    # request open for every load in a multi-device training run. The runner
+    # continues in Home Assistant and the frontend polls bulk_training_state.
+    async def start_bulk_training(device_ids: list[str]) -> dict:
+        existing = getattr(coordinator, "_bulk_training_task", None)
+        if existing and not existing.done():
+            raise RuntimeError("Bulk training is already running")
+        task = hass.async_create_task(async_run_bulk(coordinator, device_ids))
+        coordinator._bulk_training_task = task
+        return {
+            "status": "running",
+            "queue": list(device_ids),
+            "current_index": 0,
+            "total": len(device_ids),
+            "current_device_id": device_ids[0] if device_ids else None,
+            "completed": 0,
+            "skipped": [],
+            "failed": [],
+        }
+
+    coordinator.async_bulk_auto_training = start_bulk_training
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if coordinator:
         from .persistence import async_save as async_save_persistence
         await async_save_persistence(coordinator)
+        bulk_task = getattr(coordinator, "_bulk_training_task", None)
+        if bulk_task and not bulk_task.done():
+            bulk_task.cancel()
+            try:
+                await bulk_task
+            except asyncio.CancelledError:
+                pass
         for device_id in list(coordinator.training_state):
             if coordinator.training_state[device_id].get("status") == "active":
                 await coordinator.async_stop_training(device_id)
