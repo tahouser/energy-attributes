@@ -50,7 +50,7 @@
               const action = String(stateObj.attributes?.hvac_action || "").toLowerCase();
               if (["heating", "cooling", "fan", "drying"].includes(action)) return true;
               if (action === "idle") continue;
-              if (!( ["off", "auto_off"].includes(value))) return true;
+              if (!["off", "auto_off"].includes(value)) return true;
             } else if (["on", "active", "running", "playing", "heating", "cooling"].includes(value)) {
               return true;
             }
@@ -65,6 +65,29 @@
         const status = this.trainingStatus(device);
         const labels = { trained: "Trained", active: "Training", error: "Error", untrained: "Not trained" };
         return `<span class="training-dot ${status}" title="${labels[status]}"></span>`;
+      }
+
+      startBulkPolling() {
+        if (this.bulkTimer) return;
+        this.bulkTimer = setInterval(async () => {
+          try {
+            const [bulk, workspace] = await Promise.all([
+              this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId }),
+              this.ws({ type: "energy_attribution/workspace", entry_id: this.entryId }),
+            ]);
+            this.bulk = bulk;
+            this.workspace = workspace;
+            if (bulk?.status === "running" && bulk.current_device_id) {
+              this.activeTrainingId = bulk.current_device_id;
+            } else if (bulk?.status !== "running") {
+              this.activeTrainingId = null;
+              this.stopBulkPolling();
+            }
+            this.updateLiveData();
+          } catch (error) {
+            console.error("EnergyIQ bulk status", error);
+          }
+        }, 1000);
       }
 
       renderTrainingDetail(device) {
@@ -89,9 +112,40 @@
         const methodText = method === "manual" ? "Manual · guided start" : "Automatic · controlled start";
         return `<div class="training-grid"><div class="training-main"><div class="method-picker"><label>Training method<select id="training-method" ${active ? "disabled" : ""}><option value="quick" ${method === "quick" ? "selected" : ""}>Automatic — 5 fresh readings</option><option value="manual" ${method === "manual" ? "selected" : ""}>Manual — guided 5-reading capture</option></select></label></div><div class="instruction-card"><span class="eyebrow">Instructions</span><strong>${this.escape(instruction)}</strong></div><div class="capture-grid"><div><span>Baseline</span><strong>${fmt(baseline)}</strong></div><div class="capture-value ${complete ? "valid" : ""}"><span>${complete ? "Learned load · reading #5" : "Live load delta"}</span><strong>${fmt(shown)}</strong></div><div><span>Fifth source reading</span><strong>${fmt(sourceReading)}</strong></div><div><span>Elapsed</span><strong>${Number.isFinite(elapsed) ? elapsed.toFixed(1) + " s" : "—"}</strong></div></div><div class="five-readings"><span class="eyebrow">Five fresh Shelly readings · #5 is the saved value</span><div class="reading-slots">${slots}</div></div><div class="capture-state ${complete ? "valid" : ""}"><span class="status-light ${complete ? "green" : active ? "amber" : "red"}"></span><strong>${statusText}</strong></div><div class="training-actions">${this.renderTrainingActions(device, method, active, complete)}</div>${complete ? this.renderCompletedResult(device) : ""}</div><aside class="training-info"><span class="eyebrow">Selected device</span><h3>${this.escape(device.name || device.device_id)}</h3><p>${this.escape(device.area || "No area assigned")}</p><dl><dt>Source</dt><dd>${String(device.source || "").toLowerCase() === "manual" ? "Manual" : "Home Assistant"}</dd><dt>Training</dt><dd>${methodText}</dd><dt>Result</dt><dd>${complete ? fmt(learned) : "Pending #5"}</dd></dl></aside></div>`;
       }
+
       renderTrainingActions(device, method, active, complete) { if (active) { if (method === "manual") return `<span class="training-lock">Manual capture cannot be ended early. It ends automatically after the fifth fresh reading and the 5-second minimum.</span>`; return `<button data-training-stop>Stop Without Saving</button>`; } if (complete) return `<button class="primary" data-training-retrain>Retrain</button>`; return `<button class="primary" data-training-start>Start ${method === "manual" ? "Manual Training" : "Automatic Training"}</button>`; }
       selectedWorkspaceMethod() { return this.querySelector("#training-method")?.value || "quick"; }
-      async startWorkspaceTraining(retrain = false) { const device = this.activeTrainingDevice(); if (!device) return; const method = this.selectedWorkspaceMethod(); const message = method === "manual" ? `Manual training for “${device.name}”. Turn the load ON when the baseline is stable. It will capture five fresh Shelly readings, save #5, and end automatically. There is a 5-second minimum. Continue?` : `Automatic training for “${device.name}”. EnergyIQ will establish the baseline, turn the load ON, capture five fresh Shelly readings, save #5 only, then end automatically. Continue?`; if (!window.confirm(message)) return; try { if (retrain && device.training?.status === "complete") await this.ws({ type: "energy_attribution/retry_training", entry_id: this.entryId, device_id: device.device_id }); else await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: device.device_id, method }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to start training", true); } }
+
+      async startWorkspaceTraining(retrain = false) {
+        const device = this.activeTrainingDevice();
+        if (!device) return;
+        const method = this.selectedWorkspaceMethod();
+        const bulkIds = [...new Set(this.trainingQueue)].filter(id => this.getDevice(id) && this.getPersistedIds().has(id));
+        if (!retrain && method === "quick" && bulkIds.length > 1) {
+          const message = `EnergyIQ will automatically train ${bulkIds.length} selected loads sequentially. Each load will use Quick Training, save reading #5, and then move to the next load. Continue?`;
+          if (!window.confirm(message)) return;
+          try {
+            this.bulk = { status: "running", queue: bulkIds, current_index: 0, total: bulkIds.length, current_device_id: bulkIds[0], completed: 0, skipped: [], failed: [] };
+            this.activeTrainingId = bulkIds[0];
+            this.startBulkPolling();
+            this.ws({ type: "energy_attribution/bulk_auto_training", entry_id: this.entryId, device_ids: bulkIds })
+              .then(async () => { await this.refresh(true); })
+              .catch(error => { this.stopBulkPolling(); this.showToast(error?.message || "Bulk training failed", true); });
+          } catch (error) {
+            this.stopBulkPolling();
+            this.showToast(error?.message || "Unable to start bulk training", true);
+          }
+          return;
+        }
+        const message = method === "manual" ? `Manual training for “${device.name}”. Turn the load ON when the baseline is stable. It will capture five fresh Shelly readings, save #5, and end automatically. There is a 5-second minimum. Continue?` : `Automatic training for “${device.name}”. EnergyIQ will establish the baseline, turn the load ON, capture five fresh Shelly readings, save #5 only, then end automatically. Continue?`;
+        if (!window.confirm(message)) return;
+        try {
+          if (retrain && device.training?.status === "complete") await this.ws({ type: "energy_attribution/retry_training", entry_id: this.entryId, device_id: device.device_id });
+          else await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: device.device_id, method });
+          await this.refresh(true);
+        } catch (error) { this.showToast(error?.message || "Unable to start training", true); }
+      }
+
       bindTrainingWorkspace() { this.querySelector("[data-training-close]")?.addEventListener("click", () => this.closeTrainingWorkspace()); this.querySelector("#training-method")?.addEventListener("change", () => this.renderTrainingDetailInPlace()); this.querySelector("[data-training-start]")?.addEventListener("click", () => this.startWorkspaceTraining()); this.querySelector("[data-training-retrain]")?.addEventListener("click", () => this.startWorkspaceTraining(true)); this.querySelector("[data-training-stop]")?.addEventListener("click", () => this.stopWorkspaceTraining()); }
       styles() { return `${super.styles()} .summary{grid-template-columns:repeat(7,minmax(100px,1fr))}.five-readings{margin-top:12px;padding:10px;border:1px solid var(--divider-color);border-radius:9px}.reading-slots{display:grid;grid-template-columns:repeat(5,1fr);gap:7px}.reading-slot{border:1px solid var(--divider-color);border-radius:7px;padding:7px;text-align:center;opacity:.55}.reading-slot.filled{opacity:1}.reading-slot span{display:block;font-size:10px;color:var(--secondary-text-color)}.reading-slot strong{display:block;font-size:15px;margin-top:2px}.training-lock{display:block;padding:10px;border:1px solid var(--divider-color);border-radius:8px;color:var(--secondary-text-color);font-size:12px}.training-dot.trained{background:#9be56f !important}.train:checked{accent-color:#9be56f}@media(max-width:1100px){.summary{grid-template-columns:repeat(3,1fr)}}@media(max-width:700px){.summary{grid-template-columns:repeat(2,1fr)}}`; }
     }
