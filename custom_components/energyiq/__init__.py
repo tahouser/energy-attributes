@@ -1,9 +1,9 @@
 """EnergyIQ Home Assistant integration."""
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
@@ -12,11 +12,11 @@ from .instrument_websocket import async_register as async_register_websocket
 
 PLATFORMS: list[str] = []
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31620"
+FRONTEND_VERSION = "31630"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up EnergyIQ as the electrical measurement instrument."""
+    """Set up EnergyIQ as an electrical measurement instrument."""
     data = hass.data.setdefault(DOMAIN, {})
     if not data.get("_websocket_registered"):
         async_register_websocket(hass)
@@ -32,9 +32,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await panel_custom.async_register_panel(
             hass=hass,
             frontend_url_path="energyiq",
-            webcomponent_name="energyiq-panel-v362",
+            webcomponent_name="energyiq-panel-v363",
             module_url=f"{URL_BASE}/energyiq-instrument-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.62",
+            sidebar_title="EnergyIQ • v3.1.63",
             sidebar_icon="mdi:home-lightning-bolt",
             require_admin=True,
         )
@@ -43,7 +43,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up the EnergyIQ measurement source."""
+    """Start the EnergyIQ measurement engine."""
     coordinator = InstrumentCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -51,9 +51,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload EnergyIQ cleanly."""
-    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    """Stop the EnergyIQ measurement engine."""
+    coordinator = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if coordinator:
         await coordinator.async_shutdown()
-    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return True
