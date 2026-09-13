@@ -13,10 +13,6 @@
         const trained = monitored.filter(d => d.training?.status === "complete").length;
         const untrained = monitored.length - trained;
         const home = Number(this.workspace?.whole_home_power);
-
-        // Calculate both values from the device rows first. This keeps the
-        // dashboard correct even when the backend workspace response is from
-        // an older cached integration that does not expose the aggregate.
         const activeTrained = monitored.filter(d =>
           d.training?.status === "complete" && this.deviceIsActive(d)
         );
@@ -24,26 +20,17 @@
           const value = Number(d.training?.learned_signature?.load_w);
           return sum + (Number.isFinite(value) ? Math.max(0, value) : 0);
         }, 0);
-
-        const rowActual = activeTrained.reduce((sum, d) => {
+        const actualActive = activeTrained.reduce((sum, d) => {
           const value = Number(d.current_power);
           return sum + (Number.isFinite(value) ? Math.max(0, value) : 0);
         }, 0);
-        const workspaceActual = Number(this.workspace?.trained_live_power_w);
-        const actualActive = Number.isFinite(workspaceActual) ? workspaceActual : rowActual;
-
-        const mystery = Number.isFinite(home) && Number.isFinite(actualActive)
-          ? Math.max(0, home - actualActive)
-          : null;
-        const delta = Number.isFinite(actualActive)
-          ? actualActive - trainedExpected
-          : null;
+        const mystery = Number.isFinite(home) ? Math.max(0, home - actualActive) : null;
+        const delta = actualActive - trainedExpected;
         const fmt = value => Number.isFinite(value) ? `${value.toFixed(0)} W` : "—";
         const fmt1 = value => Number.isFinite(value) ? `${value.toFixed(1)} W` : "—";
         const signed = value => Number.isFinite(value)
           ? `${value >= 0 ? "+" : "−"}${Math.abs(value).toFixed(1)} W`
           : "—";
-
         return `<div class="summary">
           <div class="metric"><span>Home Power Now</span><strong>${fmt(home)}</strong></div>
           <div class="metric">
