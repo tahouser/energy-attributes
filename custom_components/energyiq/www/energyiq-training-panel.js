@@ -1,8 +1,8 @@
 /* EnergyIQ training UI v2: five fresh readings, #5 is saved. */
 (() => {
-  const TAG = "energyiq-panel-training-v177";
+  const TAG = "energyiq-panel-training-v178";
   const BASE_TAG = "energyiq-panel-v325";
-  const BASE_URL = "/energyiq-static/energyiq-panel.js?v=31770";
+  const BASE_URL = "/energyiq-static/energyiq-panel.js?v=31780";
   const define = () => {
     const Base = customElements.get(BASE_TAG);
     if (!Base || customElements.get(TAG)) return !!Base;
