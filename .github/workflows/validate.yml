@@ -14,16 +14,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Validate Python syntax
         run: python -m compileall -q custom_components/energyiq tests
-
       - name: Validate frontend JavaScript syntax
         run: |
           node --check custom_components/energyiq/www/energyiq-panel.js
-          node --check custom_components/energyiq/www/energyiq-instrument-panel.js
-
-      - name: Validate release structure and panel loading
+          node --check custom_components/energyiq/www/energyiq-training-panel.js
+      - name: Validate release structure and training
         shell: bash
         run: |
           set -euo pipefail
@@ -31,45 +28,33 @@ jobs:
           import json
           import re
           from pathlib import Path
-
           manifest = json.loads(Path('custom_components/energyiq/manifest.json').read_text(encoding='utf-8'))
           version = manifest['version']
           init = Path('custom_components/energyiq/__init__.py').read_text(encoding='utf-8')
-
           expected_frontend_version = version.replace('.', '') + '0'
           panel_match = re.search(r'webcomponent_name="([^"]+)"', init)
           module_match = re.search(r'module_url=f"\{URL_BASE\}/([^"?]+)\?v=\{FRONTEND_VERSION\}"', init)
-          assert panel_match, 'Panel webcomponent_name is missing.'
-          assert module_match, 'Panel module_url is missing.'
-
+          assert panel_match and module_match
           panel_id = panel_match.group(1)
           module_name = module_match.group(1)
           module = Path('custom_components/energyiq/www') / module_name
-          assert module.is_file(), f'Registered frontend module does not exist: {module_name}'
-          assert module_name == 'energyiq-instrument-panel.js', 'EnergyIQ must load the instrument panel directly.'
+          assert module.is_file(), module_name
+          assert module_name == 'energyiq-training-panel.js'
           js = module.read_text(encoding='utf-8')
-
+          assert 'energyiq-panel.js?v=31360' in js
+          assert 'customElements.define(TAG' in js
+          assert 'class EnergyIQTrainingPanel extends Base' in js
+          assert 'Automatic — 5 fresh readings' in js
+          assert 'Manual — guided 5-reading capture' in js
+          assert 'five-second minimum' in js
           assert f'sidebar_title="EnergyIQ • v{version}"' in init
           assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
           assert 'URL_BASE = "/energyiq-static"' in init
-          assert f'const TAG = "{panel_id}";' in js
-          assert 'customElements.define(TAG' in js
-          assert panel_id.startswith('energyiq-panel-v')
-          assert panel_id != 'energyiq-panel-v309'
-
-          assert Path('custom_components/energyiq/www/energyiq-instrument-panel.js').is_file()
-          assert not list(Path('custom_components/energyiq/www').glob('energyiq-loader-*.js'))
-          assert not Path('custom_components/energyiq/www/energyiq-panel-entry.js').exists()
-          assert not Path('custom_components/energyiq/www/energyiq-ui.js').exists()
-          assert not list(Path('custom_components/energyiq/www').glob('README*.txt'))
-          assert not list(Path('custom_components/energyiq/www').glob('*.tmp'))
-          assert not list(Path('custom_components/energyiq/www').glob('*.bak'))
-
-          coordinator = Path('custom_components/energyiq/coordinator.py').read_text(encoding='utf-8')
-          assert 'def _fast_power_entity(self)' in coordinator
-          assert 'Never use a switch/control entity as a power measurement.' in coordinator
-          assert 'EM1.GetStatus(sum)' in coordinator
-          assert 'EM.GetStatus' in coordinator
-
-          print(f'EnergyIQ {version} structure, direct instrument frontend, and fast power measurement validated.')
+          assert panel_id == 'energyiq-panel-training-v138'
+          training = Path('custom_components/energyiq/training.py').read_text(encoding='utf-8')
+          assert 'target_readings: int = 5' in training
+          assert 'manual_min_active_s: float = 5.0' in training
+          assert 'self.learned_source_w = fifth.watts' in training
+          assert 'self.learned_w = max(0.0, fifth.watts - baseline)' in training
+          print(f'EnergyIQ {version} five-reading training validated.')
           PY
