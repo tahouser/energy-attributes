@@ -14,16 +14,11 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31810"
+FRONTEND_VERSION = "31820"
 
 
 def _backup_persistent_state(coordinator: EnergyAttributionCoordinator, entry: ConfigEntry) -> None:
-    """Keep a config-entry backup of EnergyIQ state.
-
-    The HA Store remains the primary training store, but config-entry options
-    provide a durable second copy so an integration/HACS code replacement does
-    not require users to rebuild their monitored list or retrain every load.
-    """
+    """Keep a config-entry backup of EnergyIQ state."""
     hass = coordinator.hass
     hass.config_entries.async_update_entry(
         entry,
@@ -55,7 +50,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-training-v180",
             module_url=f"{URL_BASE}/energyiq-training-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.81",
+            sidebar_title="EnergyIQ • v3.1.82",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
@@ -75,9 +70,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not coordinator.training_samples and entry.options.get("training_samples"):
         coordinator.training_samples = entry.options["training_samples"]
 
-    # Wrap the coordinator's existing persistence method so every forced save
-    # (training start/complete, bulk completion, etc.) also refreshes the durable
-    # config-entry backup. The existing Store behavior remains unchanged.
     original_persist = coordinator._persist
 
     async def persist_with_backup(force: bool = False):
@@ -89,8 +81,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
     await coordinator.async_load_training()
 
-    # Establish the backup immediately after loading so the current installation
-    # has a durable copy before any future HACS update/reload.
     _backup_persistent_state(coordinator, entry)
 
     await coordinator.async_config_entry_first_refresh()
