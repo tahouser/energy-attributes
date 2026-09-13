@@ -7,10 +7,10 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .coordinator import InstrumentCoordinator
-from .websocket import async_register as async_register_websocket
+from .instrument_coordinator import InstrumentCoordinator
+from .instrument_websocket import async_register as async_register_websocket
 
-PLATFORMS = ["sensor"]
+PLATFORMS: list[str] = []
 URL_BASE = "/energyiq-static"
 FRONTEND_VERSION = "31600"
 
@@ -33,7 +33,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass=hass,
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v360",
-            module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
+            module_url=f"{URL_BASE}/energyiq-instrument-panel.js?v={FRONTEND_VERSION}",
             sidebar_title="EnergyIQ • v3.1.60",
             sidebar_icon="mdi:home-lightning-bolt",
             require_admin=True,
@@ -47,7 +47,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = InstrumentCoordinator(hass, entry)
     await coordinator.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
 
@@ -56,7 +55,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
     if coordinator:
         await coordinator.async_shutdown()
-    ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if ok:
-        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    return ok
+    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    return True
