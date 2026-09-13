@@ -255,11 +255,17 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 c["device_id"]: ("monitor" if c["device_id"] in selected else "ignore")
                 for c in candidates
             }
-            return self.async_create_entry(data={
+            # OptionsFlowWithReload replaces the entry's options with the
+            # dictionary returned here. Preserve every existing EnergyIQ
+            # persistence field so changing the monitored list can never wipe
+            # training history or commissioning state.
+            preserved = dict(self.config_entry.options)
+            preserved.update({
                 CONF_MONITORED_ENTITIES: _monitored_entities(candidates, selected),
                 "device_classifications": classifications,
                 "candidate_devices": {c["device_id"]: c for c in candidates},
             })
+            return self.async_create_entry(data=preserved)
         schema = vol.Schema({
             vol.Required("monitored_devices", default=selected_default): SelectSelector(
                 SelectSelectorConfig(options=_candidate_options(candidates), multiple=True, mode=SelectSelectorMode.LIST)
