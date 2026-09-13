@@ -16,7 +16,7 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31930"
+FRONTEND_VERSION = "31940"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up EnergyIQ services and the training frontend."""
@@ -38,7 +38,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-training-v179",
             module_url=f"{URL_BASE}/energyiq-training-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.93",
+            sidebar_title="EnergyIQ • v3.1.94",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
@@ -74,9 +74,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator._persist = persist_with_commissioning_store
 
-    # The websocket command must return immediately instead of holding the
-    # request open for every load in a multi-device training run. The runner
-    # continues in Home Assistant and the frontend polls bulk_training_state.
+    # Run bulk training in the background so the websocket returns immediately.
+    # The frontend polls bulk_training_state while the worker owns the queue.
     async def start_bulk_training(device_ids: list[str]) -> dict:
         existing = getattr(coordinator, "_bulk_training_task", None)
         if existing and not existing.done():
