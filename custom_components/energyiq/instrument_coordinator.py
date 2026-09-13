@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import statistics
 import time
 from collections import deque
@@ -13,6 +14,8 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import CONF_POWER_ENTITY
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class InstrumentCoordinator(DataUpdateCoordinator[dict]):
@@ -32,7 +35,7 @@ class InstrumentCoordinator(DataUpdateCoordinator[dict]):
         self._live_value: float | None = None
         self._source_updates = 0
         self._duplicate_updates = 0
-        super().__init__(hass, logger=None, name="energyiq_instrument", update_interval=timedelta(seconds=60))
+        super().__init__(hass, logger=_LOGGER, name="energyiq_instrument", update_interval=timedelta(seconds=60))
 
     async def async_config_entry_first_refresh(self) -> None:
         await super().async_config_entry_first_refresh()

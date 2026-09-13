@@ -24,7 +24,7 @@ class EnergyIQInstrumentPanel extends HTMLElement {
         @media(max-width:600px){ .instrument{padding:24px 16px}.stats{grid-template-columns:1fr 1fr}.value{font-size:72px} }
       </style>
       <div class="shell"><main class="instrument">
-        <div class="version">ENERGYIQ • v3.1.60</div>
+        <div class="version">ENERGYIQ • v3.1.61</div>
         <div class="label">Total Electrical Load</div>
         <div class="value">—</div><div class="unit">watts</div>
         <div class="status">Connecting to live measurement…</div>
@@ -66,4 +66,4 @@ class EnergyIQInstrumentPanel extends HTMLElement {
   }
 }
 
-customElements.define("energyiq-panel-v360", EnergyIQInstrumentPanel);
+customElements.define("energyiq-panel-v361", EnergyIQInstrumentPanel);
