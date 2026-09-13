@@ -14,7 +14,7 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31800"
+FRONTEND_VERSION = "31810"
 
 
 def _backup_persistent_state(coordinator: EnergyAttributionCoordinator, entry: ConfigEntry) -> None:
@@ -55,7 +55,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-training-v180",
             module_url=f"{URL_BASE}/energyiq-training-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.80",
+            sidebar_title="EnergyIQ • v3.1.81",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
