@@ -9,13 +9,12 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .coordinator import EnergyAttributionCoordinator
 from .websocket import async_register as async_register_websocket
-from .long_cycle import async_register as async_register_long_cycle
 from .accounting import async_register as async_register_accounting
 from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31360"
+FRONTEND_VERSION = "31370"
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -24,7 +23,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     if not data.get("_websocket_registered"):
         async_register_websocket(hass)
-        await async_register_long_cycle(hass)
         async_register_accounting(hass)
         data["_websocket_registered"] = True
 
@@ -41,7 +39,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v325",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.36",
+            sidebar_title="EnergyIQ • v3.1.37",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
