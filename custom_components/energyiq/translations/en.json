@@ -1,65 +1,19 @@
 {
   "config": {
-    "flow_title": "EnergyIQ",
     "step": {
       "user": {
-        "title": "Choose whole-home meter",
-        "description": "Select the HA power sensor that represents total whole-home consumption. Commissioning is available later from Configure.",
+        "title": "Connect EnergyIQ",
+        "description": "EnergyIQ reads the electrical measurement instrument directly. Enter the local IP address of the Shelly Energy Meter.",
         "data": {
-          "power_entity": "Whole-home power sensor"
+          "host": "Shelly IP address"
         }
       }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the Shelly Energy Meter or read its total active power."
+    },
+    "abort": {
+      "already_configured": "This Shelly Energy Meter is already configured."
     }
-  },
-  "options": {
-    "step": {
-      "init": {
-        "title": "EnergyIQ — Commissioning",
-        "description": "{count} electrical-load candidates are in the private EnergyIQ environment. Select the devices to monitor. Training state is retained so longer-cycle training can continue in the background.",
-        "data": {
-          "monitored_devices": "Devices to monitor",
-          "action": "Training / save action"
-        }
-      },
-      "training_prepare": {
-        "title": "Train {device}",
-        "description": "Category: {category}\nArea: {area}\nEntity: {entities}\n\n{plan}\n\nChoose the training method. For variable/cycle loads, use Full cycle.",
-        "data": {
-          "method": "Training method"
-        }
-      },
-      "training_active": {
-        "title": "Training active",
-        "description": "Training is active for {device} ({category}). Operate the device now. For a short test, turn it on and off as instructed. For a full-cycle appliance, run the complete cycle. The training state is retained while Configure is closed. When finished, check Finish.",
-        "data": {
-          "finish": "Finish training capture"
-        }
-      },
-      "training_review": {
-        "title": "Review — {device}",
-        "description": "Category: {category}\nMethod: {method}\nDetected events: {events}\n{observation}\n\nDoes this captured behavior resemble the selected device? Save it only if the observed load belongs to this device.",
-        "data": {
-          "confirm": "YES — save training"
-        }
-      },
-      "training_start": {
-        "title": "Ready to start — {device}",
-        "description": "{instructions}\n\nThis is the point where active monitoring begins. Nothing is captured until you press START.",
-        "data": {
-          "start": "START TRAINING"
-        }
-      },
-      "training_monitoring": {
-        "title": "Training active — {device}",
-        "description": "{instruction}\n\nTraining remains stored while Configure is closed. When the training activity is complete, return here and finish the capture.",
-        "data": {
-          "finish": "Finish training capture"
-        }
-      }
-    }
-  },
-  "abort": {
-    "no_candidates": "No electrical-load candidates were found after filtering.",
-    "device_not_monitored": "That device is not selected for monitoring."
   }
 }
