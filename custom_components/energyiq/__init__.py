@@ -1,10 +1,10 @@
 """EnergyIQ Home Assistant integration."""
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryChange, SIGNAL_CONFIG_ENTRY_CHANGED
 from homeassistant.components import panel_custom
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .const import DOMAIN
@@ -54,17 +54,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator._response_log_path = response_log_path
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
-    # Preserve the exact v3.1.79 startup order. The legacy training Store is
-    # loaded first, then the coordinator discovers/refreshes its candidates.
+    # Exact v3.1.79 startup path first: load training, discover/refresh
+    # candidates, and only then touch the separate commissioning Store.
     await coordinator.async_load_training()
     await coordinator.async_config_entry_first_refresh()
-
-    # Only after the coordinator is fully populated do we apply commissioning
-    # persistence. Startup never writes an empty commissioning record.
     await async_load_persistence(coordinator)
 
     # Training completion/reset already funnels through _persist(). Mirror
-    # forced persistence writes to the commissioning Store as well.
+    # forced writes into the commissioning Store without changing the 79
+    # training engine or frontend.
     original_persist = coordinator._persist
 
     async def persist_with_commissioning_store(force: bool = False):
@@ -74,21 +72,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator._persist = persist_with_commissioning_store
 
-    # Monitoring changes are made through ConfigEntry option updates by the
-    # existing v3.1.79 websocket/config-flow code. Observe those updates only
-    # after startup loading is complete, so an upgrade cannot save a transient
-    # empty state back over the persistent commissioning record.
-    entry.async_on_unload(
-        async_dispatcher_connect(
-            hass,
-            "config_entry_changed",
-            lambda change, changed_entry: (
+    @callback
+    def _entry_changed(change: ConfigEntryChange, changed_entry: ConfigEntry) -> None:
+        if change is ConfigEntryChange.UPDATED and changed_entry.entry_id == entry.entry_id:
+            current = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+            if current is coordinator:
                 hass.async_create_task(async_save_persistence(coordinator))
-                if getattr(change, "value", change) == "updated"
-                and changed_entry.entry_id == entry.entry_id
-                else None
-            ),
-        )
+
+    entry.async_on_unload(
+        async_dispatcher_connect(hass, SIGNAL_CONFIG_ENTRY_CHANGED, _entry_changed)
     )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
