@@ -16,7 +16,7 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31920"
+FRONTEND_VERSION = "31930"
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up EnergyIQ services and the training frontend."""
@@ -38,7 +38,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-training-v179",
             module_url=f"{URL_BASE}/energyiq-training-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.92",
+            sidebar_title="EnergyIQ • v3.1.93",
             sidebar_icon="mdi:lightning-bolt",
             require_admin=True,
         )
