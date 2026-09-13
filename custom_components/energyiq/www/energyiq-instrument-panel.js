@@ -1,4 +1,4 @@
-const TAG = "energyiq-panel-v368";
+const TAG = "energyiq-panel-v369";
 
 class EnergyIQInstrumentPanel extends HTMLElement {
   set hass(value) {
@@ -27,7 +27,7 @@ class EnergyIQInstrumentPanel extends HTMLElement {
         @media(max-width:650px){ .instrument{padding:25px 18px}.value{margin-top:55px;font-size:48px}.unit{margin-top:45px}.stats{gap:5px}.status{font-size:12px} }
       </style>
       <div class="shell"><main class="instrument">
-        <div class="version">ENERGYIQ • v3.1.68</div>
+        <div class="version">ENERGYIQ • v3.1.69</div>
         <div class="label">TOTAL ELECTRICAL LOAD</div>
         <div class="value">—</div><div class="unit">watts</div>
         <div class="status">Shelly 192.168.1.251 · DIRECT · WAITING</div>
