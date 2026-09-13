@@ -19,7 +19,9 @@ jobs:
         run: python -m compileall -q custom_components/energyiq tests
 
       - name: Validate frontend JavaScript syntax
-        run: node --check custom_components/energyiq/www/energyiq-panel.js
+        run: |
+          node --check custom_components/energyiq/www/energyiq-panel.js
+          node --check custom_components/energyiq/www/energyiq-instrument-panel.js
 
       - name: Validate release structure and panel loading
         shell: bash
@@ -33,7 +35,6 @@ jobs:
           manifest = json.loads(Path('custom_components/energyiq/manifest.json').read_text(encoding='utf-8'))
           version = manifest['version']
           init = Path('custom_components/energyiq/__init__.py').read_text(encoding='utf-8')
-          js = Path('custom_components/energyiq/www/energyiq-panel.js').read_text(encoding='utf-8')
 
           expected_frontend_version = version.replace('.', '') + '0'
           panel_match = re.search(r'webcomponent_name="([^"]+)"', init)
@@ -45,17 +46,18 @@ jobs:
           module_name = module_match.group(1)
           module = Path('custom_components/energyiq/www') / module_name
           assert module.is_file(), f'Registered frontend module does not exist: {module_name}'
-          assert module_name == 'energyiq-panel.js', 'EnergyIQ must load the panel directly; no legacy loader layer is permitted.'
+          assert module_name == 'energyiq-instrument-panel.js', 'EnergyIQ must load the instrument panel directly.'
+          js = module.read_text(encoding='utf-8')
 
           assert f'sidebar_title="EnergyIQ • v{version}"' in init
           assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
           assert 'URL_BASE = "/energyiq-static"' in init
           assert f'const TAG = "{panel_id}";' in js
           assert 'customElements.define(TAG' in js
+          assert panel_id.startswith('energyiq-panel-v')
           assert panel_id != 'energyiq-panel-v309'
-          assert panel_id == 'energyiq-panel-v324'
 
-          assert Path('custom_components/energyiq/www/energyiq-panel.js').is_file()
+          assert Path('custom_components/energyiq/www/energyiq-instrument-panel.js').is_file()
           assert not list(Path('custom_components/energyiq/www').glob('energyiq-loader-*.js'))
           assert not Path('custom_components/energyiq/www/energyiq-panel-entry.js').exists()
           assert not Path('custom_components/energyiq/www/energyiq-ui.js').exists()
@@ -69,5 +71,5 @@ jobs:
           assert 'EM1.GetStatus(sum)' in coordinator
           assert 'EM.GetStatus' in coordinator
 
-          print(f'EnergyIQ {version} structure, direct frontend loading, and fast power measurement validated.')
+          print(f'EnergyIQ {version} structure, direct instrument frontend, and fast power measurement validated.')
           PY
