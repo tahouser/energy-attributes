@@ -22,11 +22,14 @@ class QuickObservation:
 class TrainingEngine:
     method: Method
     baseline_window_s: float = 3.0
+    baseline_to_on_delay_s: float = 1.5
     min_event_w: float = 12.0
     stable_window_s: float = 5.0
     quick_on_measurement_s: float = 5.0
     quick_off_settle_s: float = 1.5
     quick_capture_lead_s: float = 0.25
+    quick_required_readings: int = 5
+    sample_spacing_s: float = 0.8
     return_tolerance_w: float = 25.0
     max_quick_duration_s: float = 120.0
     max_full_cycle_duration_s: float = 8 * 3600.0
@@ -51,12 +54,14 @@ class TrainingEngine:
     _on_samples: list[float] = field(default_factory=list)
     _off_samples: list[float] = field(default_factory=list)
     _on_capture_w: float | None = None
-    cycles_required: int = 3
+    cycles_required: int = 1
     _end_requested: bool = False
     _full_active_samples: list[PowerSample] = field(default_factory=list)
     _full_capture_valid: bool = False
     _full_stable_load_w: float | None = None
     _full_stability_range_w: float | None = None
+    _baseline_locked_at: float | None = None
+    _last_accepted_sample_at: float | None = None
 
     def add_sample(self, timestamp: float, watts: float) -> dict:
         if watts != watts or watts < 0:
@@ -66,6 +71,13 @@ class TrainingEngine:
             if timestamp - self.samples[0].timestamp > limit:
                 self.phase = "timeout"
                 return self.result(failed=True, failure_reason="Training timed out. No reliable signature was captured.")
+        # The Shelly's whole-home power value is effectively a 1 Hz measurement.
+        # The direct RPC sampler polls faster for responsiveness, so ignore
+        # duplicate-in-time samples rather than counting the same Shelly reading
+        # multiple times during Quick training.
+        if self._last_accepted_sample_at is not None and timestamp - self._last_accepted_sample_at < self.sample_spacing_s:
+            return self.result()
+        self._last_accepted_sample_at = timestamp
         s = PowerSample(timestamp, watts)
         self.samples.append(s)
         self.samples = self.samples[-18000:]
@@ -76,7 +88,11 @@ class TrainingEngine:
                 self.baseline_noise_w = pstdev(recent) if len(recent) > 1 else 0.0
                 self.on_threshold_w = max(self.min_event_w, 4 * self.baseline_noise_w, abs(self.baseline_w) * 0.006)
                 self.return_tolerance_w = max(18.0, 6 * self.baseline_noise_w, abs(self.baseline_w) * 0.010)
-                self.phase = "request_on" if self.method == "quick" else "waiting_for_start"
+                # Baseline is now locked. Never issue ON on the same sample.
+                # Give the system a deliberate quiet interval before starting
+                # the five-reading ON measurement.
+                self._baseline_locked_at = timestamp
+                self.phase = "baseline_to_on_wait" if self.method == "quick" else "waiting_for_start"
             return self.result()
         if self.method == "quick":
             return self._quick_step(s)
@@ -85,13 +101,19 @@ class TrainingEngine:
         return self._full_step(s)
 
     def _quick_step(self, s: PowerSample) -> dict:
+        if self.phase == "baseline_to_on_wait":
+            if self._baseline_locked_at is not None and s.timestamp - self._baseline_locked_at >= self.baseline_to_on_delay_s:
+                self.phase = "request_on"
+                return self.result(action="turn_on")
+            return self.result()
         if self.phase == "request_on":
             return self.result(action="turn_on")
         if self.phase == "waiting_for_on":
             self._on_samples.append(s.watts)
-            if self.active_started is not None and self._on_capture_w is None and s.timestamp - self.active_started >= max(0.0, self.quick_on_measurement_s - self.quick_capture_lead_s):
-                self._on_capture_w = s.watts
-            if self.active_started is not None and s.timestamp - self.active_started >= self.quick_on_measurement_s:
+            # Five distinct accepted Shelly readings are the Quick measurement.
+            # Reading #5 is the value saved; readings #1-#4 are not averaged.
+            if len(self._on_samples) >= self.quick_required_readings:
+                self._on_capture_w = self._on_samples[-1]
                 self.phase = "request_off"
         elif self.phase == "request_off":
             return self.result(action="turn_off")
@@ -103,18 +125,12 @@ class TrainingEngine:
                 delta = max(0.0, on_w - off_w)
                 duration = max(0.0, s.timestamp - (self.cycle_started or s.timestamp))
                 self.observations.append(QuickObservation(delta, on_w, off_w, duration))
-                if len(self.observations) >= self.cycles_required:
-                    self.completed = self._quick_valid()
-                    self.phase = "complete" if self.completed else "error"
-                    if not self.completed:
-                        return self.result(failed=True, failure_reason="The three ON/OFF measurements were not consistent enough to save a signature.")
-                else:
-                    self.phase = "cooldown"
-                    self._cooldown_until = s.timestamp + 0.5
+                self.completed = self._quick_valid()
+                self.phase = "complete" if self.completed else "error"
+                if not self.completed:
+                    return self.result(failed=True, failure_reason="The five Shelly ON readings did not produce a valid positive load signature.")
                 self._on_hits = 0; self._off_hits = 0; self.active_started = None; self.cycle_started = None; self.active_peak_w = None
                 self._on_samples.clear(); self._off_samples.clear(); self._on_capture_w = None
-        elif self.phase == "cooldown" and s.timestamp >= (self._cooldown_until or s.timestamp):
-            self.phase = "request_on"
         return self.result()
 
     def control_action_consumed(self, action: str, timestamp: float) -> None:
@@ -128,7 +144,7 @@ class TrainingEngine:
 
     def _quick_valid(self) -> bool:
         values = [o.delta_w for o in self.observations]
-        return len(values) == self.cycles_required and any(value > 0.0 for value in values)
+        return len(values) == 1 and any(value > 0.0 for value in values)
 
     def _manual_step(self, s: PowerSample) -> dict:
         if self.phase == "waiting_for_start":
@@ -184,9 +200,6 @@ class TrainingEngine:
         if self.method != "full_cycle" or self.phase not in {"awaiting_confirmation", "waiting_for_start"}:
             return self.result(failed=True, failure_reason="Long-cycle training is not waiting to start or confirm an event.")
         if accepted:
-            # Explicit user action starts the measurement.  The baseline is
-            # already fixed, so the target may be ON at this point without
-            # contaminating the baseline.
             self.phase = "capturing"
             self._end_requested = False
             self.cycle_started = timestamp
@@ -223,7 +236,7 @@ class TrainingEngine:
     def result(self, *, action: str | None = None, failed: bool = False, failure_reason: str | None = None, **extra) -> dict:
         peak_delta = None; duration = None
         if self.method == "quick" and self.observations:
-            peak_delta = median(o.delta_w for o in self.observations)
+            peak_delta = self.observations[-1].delta_w
         elif self.baseline_w is not None and self.method == "full_cycle" and self.phase in {"capturing", "complete"}:
             if self._full_stable_load_w is not None:
                 peak_delta = self._full_stable_load_w
