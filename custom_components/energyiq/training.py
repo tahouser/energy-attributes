@@ -71,13 +71,13 @@ class TrainingEngine:
             if timestamp - self.samples[0].timestamp > limit:
                 self.phase = "timeout"
                 return self.result(failed=True, failure_reason="Training timed out. No reliable signature was captured.")
-        # The Shelly's whole-home power value is effectively a 1 Hz measurement.
-        # The direct RPC sampler polls faster for responsiveness, so ignore
-        # duplicate-in-time samples rather than counting the same Shelly reading
-        # multiple times during Quick training.
-        if self._last_accepted_sample_at is not None and timestamp - self._last_accepted_sample_at < self.sample_spacing_s:
+        # The direct Shelly sampler polls faster than the Shelly's useful
+        # measurement cadence. During Quick training, do not count the same
+        # underlying ~1 Hz Shelly reading more than once.
+        if self.method == "quick" and self._last_accepted_sample_at is not None and timestamp - self._last_accepted_sample_at < self.sample_spacing_s:
             return self.result()
-        self._last_accepted_sample_at = timestamp
+        if self.method == "quick":
+            self._last_accepted_sample_at = timestamp
         s = PowerSample(timestamp, watts)
         self.samples.append(s)
         self.samples = self.samples[-18000:]
