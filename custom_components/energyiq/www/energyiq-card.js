@@ -2,6 +2,39 @@ const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
     constructor() { super(); this._hass=null; this._cfg={}; this._data=null; this._entryId=null; this._view=0; this._timer=null; this._busy=false; this._click=this._next.bind(this); }
+    static getConfigForm() {
+      return {
+        schema: [
+          {
+            name: "cost_entity",
+            selector: { entity: { domain: "sensor" } },
+          },
+          {
+            name: "peak_cost_entity",
+            selector: { entity: { domain: "sensor" } },
+          },
+          {
+            name: "off_peak_cost_entity",
+            selector: { entity: { domain: "sensor" } },
+          },
+        ],
+        computeLabel: (name) => ({
+          cost_entity: "Total energy cost sensor",
+          peak_cost_entity: "Peak energy cost sensor",
+          off_peak_cost_entity: "Off-peak energy cost sensor",
+        }[name] || name),
+        computeHelper: (name) => ({
+          cost_entity: "Optional. Used by the COST view.",
+          peak_cost_entity: "Optional. Used for the Peak breakdown.",
+          off_peak_cost_entity: "Optional. Used for the Off-peak breakdown.",
+        }[name] || ""),
+      };
+    }
+
+    static getStubConfig() {
+      return {};
+    }
+
     setConfig(c){ this._cfg=c||{}; if(this.isConnected)this._start(); }
     set hass(h){ this._hass=h; if(!this._busy&&!this._data)this._start(); else if(this._data)this._render(); }
     connectedCallback(){ this.addEventListener("click",this._click); this._loading(); if(this._hass)this._start(); }
@@ -48,5 +81,5 @@ if (!customElements.get(TAG)) {
     }
     _css(){return ':host{display:block;width:100%;min-width:0;max-width:100%;box-sizing:border-box}.pad{padding:15px 16px 10px;color:var(--primary-text-color);min-width:0;width:100%;box-sizing:border-box;overflow:hidden}ha-card{display:block;width:100%;max-width:100%;box-sizing:border-box}.head{display:flex;justify-content:space-between;align-items:flex-start}.eyebrow{font-size:.72rem;letter-spacing:.12em;font-weight:700;color:var(--secondary-text-color)}.title{font-size:1.2rem;font-weight:700}.sub{font-size:.78rem;color:var(--secondary-text-color)}button{width:40px;height:40px;border:0;border-radius:50%;background:var(--primary-color,#03a9f4);color:#fff;font-size:1.5rem;cursor:pointer}.body{min-height:190px;display:flex;align-items:center;min-width:0;width:100%;overflow:hidden}.dots{display:flex;justify-content:center;gap:6px}.dots i{width:6px;height:6px;border-radius:50%;background:var(--divider-color)}.dots i.on{background:var(--primary-color)}.chart{width:100%;min-width:0;overflow:hidden}.summary{display:flex;gap:7px;align-items:baseline;margin:4px}.summary b,.big{font-size:2.1rem}.summary span,.sub{color:var(--secondary-text-color);font-size:.76rem}svg{display:block;width:100%;max-width:100%;height:175px;overflow:hidden}.axis{stroke:var(--divider-color)}.line{fill:none;stroke:var(--primary-color);stroke-width:3;stroke-linecap:round}.dotline{fill:var(--primary-color);stroke:var(--ha-card-background,#1c1c1c);stroke-width:2}.v{fill:var(--primary-text-color);font-size:11px;font-weight:700}.x{fill:var(--secondary-text-color);font-size:11px}.c0{fill:#2196f3}.c1{fill:#42a5f5}.c2{fill:#26a69a}.c3{fill:#ffb300}.c4{fill:#ef5350}.myst,.cost{width:100%;padding:8px 4px}.big{font-weight:700;line-height:1}.big span{font-size:1rem;color:var(--secondary-text-color)}.status{display:flex;justify-content:space-between;margin-top:8px;font-size:.8rem;color:var(--secondary-text-color)}.stack{display:flex;height:32px;border-radius:9px;overflow:hidden;background:var(--divider-color);margin-top:9px}.known{background:#42a5f5}.unknown{background:#ef5350}.legend{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-top:10px;font-size:.78rem}.legend span{display:flex;align-items:center;gap:6px}.legend i{width:9px;height:9px;border-radius:50%}.kd{background:#42a5f5}.ud{background:#ef5350}.total{display:flex;justify-content:space-between;border-top:1px solid var(--divider-color);padding-top:9px;margin-top:12px;font-size:.8rem;color:var(--secondary-text-color)}.total b{color:var(--primary-text-color)}.track{height:31px;border-radius:9px;overflow:hidden;margin-top:20px;background:linear-gradient(90deg,#43a047,#fdd835 45%,#fb8c00 70%,#e53935)}.mask{height:100%;background:rgba(20,20,20,.58);margin-left:auto}.scale{display:flex;justify-content:space-between;color:var(--secondary-text-color);font-size:.7rem;margin-top:4px}.break{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:15px}.break div{display:flex;justify-content:space-between;border-top:1px solid var(--divider-color);padding-top:8px;font-size:.82rem}.break span{color:var(--secondary-text-color)}.empty{width:100%;text-align:center;color:var(--secondary-text-color);font-size:.9rem}.err{margin-top:10px;color:var(--error-color)}@media(max-width:500px){.pad{padding:13px}.body{min-height:185px}svg{height:165px}.x,.v{font-size:10px}}';}
   }
-  customElements.define(TAG,EnergyIQCard); window.customCards=window.customCards||[]; window.customCards.push({type:TAG,name:"EnergyIQ",description:"EnergyIQ consumption, Mystery Watts, and cost in one card.",preview:false,documentationURL:"https://github.com/tahouser/energy-attributes"});
+  customElements.define(TAG,EnergyIQCard); window.customCards=window.customCards||[]; window.customCards.push({type:TAG,name:"EnergyIQ",description:"EnergyIQ consumption, Mystery Watts, and cost in one card.",preview:false,documentationURL:"https://github.com/tahouser/energy-attributes",configurable:true});
 }
