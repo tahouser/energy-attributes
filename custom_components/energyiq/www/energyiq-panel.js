@@ -6,9 +6,9 @@
  * backend.
  */
 (() => {
-  const TAG = "energyiq-panel-v338";
-  const VERSION = "31407";
-  const UI_VERSION = "3.1.126";
+  const TAG = "energyiq-panel-v339";
+  const VERSION = "31408";
+  const UI_VERSION = "3.1.127";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon.png?v=31407";
+      this.brandUrl = "/energyiq-brand/icon.png?v=31408";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -216,7 +216,7 @@
 
     showActiveConsumers() {
       const devices = this.getDevices()
-        .filter(d => this.getIncludedIds().has(d.device_id) && Number(this.livePower(d) || d.current_power) > 5)
+        .filter(d => this.getIncludedIds().has(d.device_id) && d.training?.status === "complete" && Number(this.livePower(d) || d.current_power) > 5)
         .sort((a,b) => Number(this.livePower(b) || b.current_power || 0) - Number(this.livePower(a) || a.current_power || 0));
       const fmt = d => { const w = this.livePower(d); return Number.isFinite(w) ? `${w.toFixed(0)} W` : "—"; };
       const rows = devices.length
