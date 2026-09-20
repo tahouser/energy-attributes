@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v329";
-  const VERSION = "31396";
-  const UI_VERSION = "3.1.115";
+  const VERSION = "31397";
+  const UI_VERSION = "3.1.116";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon.png?v=31396";
+      this.brandUrl = "/energyiq-brand/icon.png?v=31397";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -316,7 +316,7 @@
         this.activeTrainingId = remaining[0];
         return true;
       }
-      this.selectedIds.delete(this.activeTrainingId);
+      this.selectedIds.clear();
       this.trainingWorkspaceOpen = false;
       this.trainingQueue = [];
       this.activeTrainingId = null;
@@ -396,7 +396,7 @@
         const completedId = device.device_id;
         const remainingQueue = this.trainingQueue.filter(id => id !== completedId && !this.trainingComplete(id));
         if (this.trainingComplete(completedId) && remainingQueue.length === 0) {
-          this.selectedIds.delete(completedId);
+          this.selectedIds.clear();
           this.trainingWorkspaceOpen = false;
           this.trainingQueue = [];
           this.activeTrainingId = null;
