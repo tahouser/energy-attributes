@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.components import panel_custom, frontend
+from homeassistant.components import panel_custom
+from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant
 
@@ -15,8 +16,32 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31409"
+FRONTEND_VERSION = "31410"
 CARD_URL = f"{URL_BASE}/energyiq-card.js?v={FRONTEND_VERSION}"
+
+
+async def _async_register_card_resource(hass: HomeAssistant) -> None:
+    """Register the EnergyIQ Lovelace card as a dashboard module resource."""
+    lovelace_data = hass.data.get(LOVELACE_DATA)
+    resources = getattr(lovelace_data, "resources", None) if lovelace_data else None
+
+    if resources is not None and hasattr(resources, "async_create_item"):
+        try:
+            await resources.async_get_info()
+            if any(item.get("url") == CARD_URL for item in resources.async_items()):
+                return
+            await resources.async_create_item({
+                "url": CARD_URL,
+                "res_type": "module",
+            })
+            return
+        except Exception:
+            # Fall through to the legacy extra-JS loader for YAML-mode/older HA.
+            pass
+
+    # Fallback for YAML-mode Lovelace or older Home Assistant releases.
+    from homeassistant.components import frontend
+    frontend.add_extra_js_url(hass, CARD_URL)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -42,13 +67,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 cache_headers=False,
             )
         ])
-        frontend.add_extra_js_url(hass, CARD_URL)
+        await _async_register_card_resource(hass)
         await panel_custom.async_register_panel(
             hass=hass,
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v339",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.128",
+            sidebar_title="EnergyIQ • v3.1.129",
             sidebar_icon="mdi:home-lightning-bolt-outline",
             require_admin=False,
         )
