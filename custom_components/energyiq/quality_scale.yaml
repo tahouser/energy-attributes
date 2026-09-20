@@ -1,0 +1,206 @@
+rules:
+
+# Bronze
+
+action-setup:
+  status: exempt
+  comment: EnergyIQ does not register Home Assistant service actions; its user actions are exposed through the panel and WebSocket API.
+
+appropriate-polling:
+  status: todo
+  comment: Review the 2-second DataUpdateCoordinator interval and the temporary 250 ms Shelly training sampler against the current polling guidance.
+
+brands: done
+
+common-modules:
+  status: todo
+  comment: Audit shared patterns and module boundaries against current Home Assistant conventions.
+
+config-flow-test-coverage:
+  status: todo
+  comment: No dedicated config-flow test module is present yet; add complete user/options flow coverage including duplicate-entry and error/recovery paths.
+
+config-flow:
+  status: todo
+  comment: UI setup exists, but the current user step needs data_description and a formal ConfigEntry data/options audit.
+
+dependency-transparency: done
+
+docs-actions:
+  status: exempt
+  comment: EnergyIQ does not expose Home Assistant service actions.
+
+docs-triggers:
+  status: exempt
+  comment: EnergyIQ does not provide Home Assistant triggers.
+
+docs-conditions:
+  status: exempt
+  comment: EnergyIQ does not provide Home Assistant conditions.
+
+docs-high-level-description:
+  status: todo
+  comment: README has a product description, but needs to be brought into a complete Home Assistant end-user documentation package.
+
+docs-installation-instructions:
+  status: todo
+  comment: Add step-by-step HACS/manual installation and prerequisite instructions.
+
+docs-removal-instructions:
+  status: todo
+  comment: Add documented removal steps that preserve or explain persisted EnergyIQ data.
+
+entity-event-setup:
+  status: done
+
+entity-unique-id:
+  status: done
+
+has-entity-name:
+  status: todo
+  comment: Sensor entities currently set names directly and need migration to the current has_entity_name pattern.
+
+runtime-data:
+  status: todo
+  comment: Runtime coordinator is currently stored in hass.data; migrate to ConfigEntry.runtime_data without changing persisted training data.
+
+test-before-configure:
+  status: exempt
+  comment: Initial setup selects an existing Home Assistant power entity rather than establishing a separate external connection.
+
+test-before-setup:
+  status: todo
+  comment: Add explicit setup validation/error handling for the configured whole-home power source.
+
+unique-config-entry:
+  status: todo
+  comment: Config flow currently creates an entry without an explicit unique-entry guard; determine and test the intended single EnergyIQ configuration model.
+
+# Silver
+
+action-exceptions:
+  status: exempt
+  comment: EnergyIQ does not expose Home Assistant service actions.
+
+config-entry-unloading: done
+
+docs-configuration-parameters:
+  status: todo
+  comment: Document the configured whole-home power entity and commissioning options.
+
+docs-installation-parameters:
+  status: todo
+  comment: Document installation prerequisites and frontend resource behavior.
+
+entity-unavailable:
+  status: todo
+  comment: Review entity availability behavior for the coordinator sensors.
+
+integration-owner:
+  status: todo
+  comment: Add the repository maintainer as manifest codeowner when the project is ready to claim ownership.
+
+log-when-unavailable:
+  status: todo
+  comment: Review coordinator/Shelly connection logging and recovery behavior.
+
+parallel-updates:
+  status: todo
+  comment: Declare the appropriate parallel update behavior for the sensor platform.
+
+reauthentication-flow:
+  status: exempt
+  comment: EnergyIQ uses a local Home Assistant entity and does not have its own authentication service.
+
+test-coverage:
+  status: todo
+  comment: Existing tests cover training logic but do not yet demonstrate the required above-95-percent coverage for all integration modules.
+
+# Gold
+
+devices:
+  status: done
+
+diagnostics:
+  status: todo
+  comment: Not part of the Bronze effort.
+
+discovery-update-info:
+  status: exempt
+  comment: No device discovery/network-update workflow is currently implemented.
+
+discovery:
+  status: exempt
+  comment: EnergyIQ is configured from an existing Home Assistant power entity rather than discovering an external device.
+
+docs-data-update:
+  status: todo
+  comment: Not part of the Bronze effort.
+
+docs-examples:
+  status: todo
+  comment: Not part of the Bronze effort.
+
+docs-known-limitations:
+  status: todo
+  comment: Not part of the Bronze effort.
+
+docs-supported-devices:
+  status: todo
+  comment: Not part of the Bronze effort.
+
+docs-supported-functions:
+  status: todo
+  comment: Not part of the Bronze effort.
+
+dynamic-devices:
+  status: done
+
+entity-category:
+  status: todo
+  comment: Review entity categories.
+
+entity-device-class:
+  status: done
+
+entity-disabled-by-default:
+  status: todo
+  comment: Review whether any EnergyIQ entities should be disabled by default.
+
+entity-translations:
+  status: todo
+  comment: Review entity naming/translations.
+
+exception-translations:
+  status: todo
+  comment: Review user-facing exceptions.
+
+icon-translations:
+  status: todo
+  comment: Review entity icon translation support.
+
+reconfiguration-flow:
+  status: exempt
+  comment: The current integration exposes commissioning/settings through the options flow; no connection parameters require reconfiguration.
+
+repair-issues:
+  status: todo
+  comment: Not part of the Bronze effort.
+
+stale-devices:
+  status: todo
+  comment: Not part of the Bronze effort.
+
+# Platinum
+
+async-dependency:
+  status: done
+  comment: EnergyIQ uses async Home Assistant APIs and aiohttp for its direct Shelly sampler.
+
+inject-websession:
+  status: done
+  comment: Direct Shelly polling uses Home Assistant's injected aiohttp client session.
+
+strict-typing:
+  status: todo
+  comment: Not part of the Bronze effort.
