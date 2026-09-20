@@ -73,7 +73,13 @@
         this.workspace = await this.ws({ type: "energy_attribution/workspace", entry_id: this.entryId });
         this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
         if (this.bulk?.status === "running") this.startBulkPolling(); else this.stopBulkPolling();
-        if (!hadWorkspace || forceRender) this.render(); else this.updateLiveData();
+        const trainingViewChanged = this.handleTrainingCompletion();
+        const trainedChanged = hadWorkspace && this.view === "trained" && (
+          this.getDevices().filter(d => d.training?.status === "complete").length !==
+          this._lastTrainedCount
+        );
+        this._lastTrainedCount = this.getDevices().filter(d => d.training?.status === "complete").length;
+        if (!hadWorkspace || forceRender || trainingViewChanged || trainedChanged) this.render(); else this.updateLiveData();
       } catch (error) {
         console.error("EnergyIQ refresh failed", error);
         if (!this.workspace) this.renderError(error);
@@ -211,6 +217,21 @@
     trainingQueueSlots() { const ids = this.trainingQueue.slice(0, 3); return [ids[0] || null, ids[1] || null, ids[2] || null]; }
     activeTrainingDevice() { return this.activeTrainingId ? this.getDevice(this.activeTrainingId) : null; }
     trainingComplete(deviceId) { return this.getDevice(deviceId)?.training?.status === "complete"; }
+    handleTrainingCompletion() {
+      if (!this.trainingWorkspaceOpen || !this.activeTrainingId || !this.trainingComplete(this.activeTrainingId)) return false;
+      const remaining = this.trainingQueue.filter(id => id !== this.activeTrainingId && !this.trainingComplete(id));
+      if (remaining.length) {
+        this.trainingQueue = remaining;
+        this.activeTrainingId = remaining[0];
+        return true;
+      }
+      this.trainSelected.delete(this.activeTrainingId);
+      this.trainingWorkspaceOpen = false;
+      this.trainingQueue = [];
+      this.activeTrainingId = null;
+      this.view = "trained";
+      return true;
+    }
     advanceQueueIfComplete() { if (!this.activeTrainingId || !this.trainingComplete(this.activeTrainingId)) return; if (this.trainingQueue[0] === this.activeTrainingId) this.trainingQueue.shift(); else this.trainingQueue = this.trainingQueue.filter(id => id !== this.activeTrainingId); this.activeTrainingId = this.trainingQueue[0] || null; }
 
     renderTrainingWorkspace() {
