@@ -128,7 +128,7 @@ class TrainingEngine:
                 self.completed = self._quick_valid()
                 self.phase = "complete" if self.completed else "error"
                 if not self.completed:
-                    return self.result(failed=True, failure_reason="The five Shelly ON readings did not produce a valid positive load signature.")
+                    return self.result(failed=True, failure_reason="The measured ON-to-OFF change did not produce a positive load signature. Check that the device actually changed state, then try again.")
                 self._on_hits = 0; self._off_hits = 0; self.active_started = None; self.cycle_started = None; self.active_peak_w = None
                 self._on_samples.clear(); self._off_samples.clear(); self._on_capture_w = None
         return self.result()
