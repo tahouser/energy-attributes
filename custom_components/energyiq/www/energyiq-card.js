@@ -45,7 +45,16 @@ if (!customElements.get(TAG)) {
     disconnectedCallback(){ if(this._timer)clearInterval(this._timer); if(this._ro)this._ro.disconnect(); this.removeEventListener("click",this._click); }
     getCardSize(){return 4;}
     getGridOptions(){return {rows:4,columns:6,min_rows:3,max_rows:10,min_columns:3,max_columns:12};}
-    async _ws(m){return this._hass.connection.sendMessagePromise(m);}\n    _observeSize(){\n      if(typeof ResizeObserver==="undefined"||this._ro)return;\n      this._ro=new ResizeObserver(entries=>{\n        const r=entries[0]&&entries[0].contentRect; if(!r)return;\n        const w=r.width,h=r.height;\n        this.dataset.size=w<360||h<230?"compact":w>700&&h>300?"large":"standard";\n      });\n      this._ro.observe(this);\n    }
+    async _ws(m){return this._hass.connection.sendMessagePromise(m);}
+    _observeSize(){
+      if(typeof ResizeObserver==="undefined"||this._ro)return;
+      this._ro=new ResizeObserver(entries=>{
+        const r=entries[0]&&entries[0].contentRect; if(!r)return;
+        const w=r.width,h=r.height;
+        this.dataset.size=w<360||h<230?"compact":w>700&&h>300?"large":"standard";
+      });
+      this._ro.observe(this);
+    }
     async _start(){
       if(this._busy||!this._hass)return; this._busy=true;
       try{ let id=this._cfg.entry_id; if(!id){let r=await this._ws({type:"energy_attribution/list_entries"});id=r.entries&&r.entries[0]&&r.entries[0].entry_id;}
