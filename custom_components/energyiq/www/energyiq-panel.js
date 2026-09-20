@@ -32,6 +32,7 @@
       this.loading = false;
       this.refreshTimer = null;
       this.bulkTimer = null;
+      this.bulkStarting = false;
     }
 
     setConfig() {}
@@ -89,7 +90,7 @@
         const hadWorkspace = !!this.workspace;
         this.workspace = await this.ws({ type: "energy_attribution/workspace", entry_id: this.entryId });
         this.bulk = await this.ws({ type: "energy_attribution/bulk_training_state", entry_id: this.entryId });
-        if (this.bulk?.status === "running") this.startBulkPolling(); else this.stopBulkPolling();
+        if (this.bulk?.status === "running") { this.bulkStarting = true; this.startBulkPolling(); } else { this.bulkStarting = false; this.stopBulkPolling(); }
         const trainingViewChanged = this.handleTrainingCompletion();
         const trainedChanged = hadWorkspace && this.view === "trained" && (
           this.getDevices().filter(d => d.training?.status === "complete").length !==
@@ -139,6 +140,7 @@
       }).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
     }
     selectedCanTrain() {
+      if (this.bulkStarting || this.bulk?.status === "running") return false;
       if (!this.selectedIds.size || this.hasPendingChanges()) return false;
       const included=this.getPersistedIds();
       return [...this.selectedIds].every(id=>included.has(id)&&this.getDevice(id));
@@ -273,7 +275,27 @@
       for(const id of this.selectedIds){if(action==="include")this.pendingIncluded.add(id);else this.pendingIncluded.delete(id);}
       this.page=1;this.render();
     }
-    async beginSelectedTraining(){if(!this.selectedCanTrain())return;this.openTrainingWorkspace([...this.selectedIds]);}
+    async beginSelectedTraining() {
+      if (!this.selectedCanTrain()) return;
+      const deviceIds = [...this.selectedIds];
+      this.bulkStarting = true;
+      this.openTrainingWorkspace(deviceIds);
+      this.startBulkPolling();
+      try {
+        await this.ws({
+          type: "energy_attribution/bulk_auto_training",
+          entry_id: this.entryId,
+          device_ids: deviceIds,
+        });
+        await this.refresh(true);
+      } catch (error) {
+        this.bulkStarting = false;
+        this.showToast(error?.message || "Unable to start automatic training", true);
+        await this.refresh(true);
+      } finally {
+        if (this.bulk?.status !== "running") this.bulkStarting = false;
+      }
+    }
 
     openTrainingWorkspace(deviceIds) {
       const valid = deviceIds.filter(id => this.getDevice(id) && this.getPersistedIds().has(id));
