@@ -22,7 +22,7 @@ config-flow-test-coverage:
 
 config-flow:
   status: todo
-  comment: UI setup exists, but the current user step needs data_description and a formal ConfigEntry data/options audit.
+  comment: UI setup exists and field-level data_description is now present; complete the formal ConfigEntry data/options audit.
 
 dependency-transparency: done
 
@@ -72,9 +72,7 @@ test-before-setup:
   status: todo
   comment: Add explicit setup validation/error handling for the configured whole-home power source.
 
-unique-config-entry:
-  status: todo
-  comment: Config flow currently creates an entry without an explicit unique-entry guard; determine and test the intended single EnergyIQ configuration model.
+unique-config-entry: done
 
 # Silver
 
