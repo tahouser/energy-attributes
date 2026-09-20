@@ -203,7 +203,7 @@
       this.querySelector("#add")?.addEventListener("click", () => this.openAddDialog());
       this.querySelector("#trained")?.addEventListener("click", () => { this.trainSelected.clear(); this.view = "trained"; this.render(); });
       this.querySelector("#all")?.addEventListener("click", () => { this.trainSelected.clear(); this.view = "all"; this.render(); });
-      this.querySelector("#ignored")?.addEventListener("click", () => { this.trainSelected.clear(); this.view = "excluded"; this.render(); });
+      this.querySelector("#excluded")?.addEventListener("click", () => { this.trainSelected.clear(); this.view = "excluded"; this.render(); });
       this.querySelector("#train-header")?.addEventListener("click", () => { if (this.trainSelected.size) this.openTrainingWorkspace([...this.trainSelected]); });
       this.querySelectorAll("[data-train]").forEach(box => box.addEventListener("change", event => { const id = event.currentTarget.dataset.train; if (event.currentTarget.checked) this.trainSelected.add(id); else this.trainSelected.delete(id); this.updateTrainHeader(); }));
       this.querySelectorAll("[data-monitor]").forEach(box => box.addEventListener("change", event => { const selected = this.getSelectedIds(), id = event.currentTarget.dataset.monitor; if (event.currentTarget.checked) selected.add(id); else selected.delete(id); this.pending = selected; const row = event.currentTarget.closest("tr"), trainBox = row?.querySelector("[data-train]"); if (trainBox) trainBox.disabled = !event.currentTarget.checked; }));
