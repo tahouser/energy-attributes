@@ -1,6 +1,6 @@
 (() => {
-  const TARGET = "energyiq-panel-v327";
-  const SOURCE = "/energyiq-static/energyiq-panel.js?v=31388";
+  const TARGET = "energyiq-panel-v328";
+  const SOURCE = "/energyiq-static/energyiq-panel.js?v=31389";
   const CARD_SOURCE = "/energyiq-static/energyiq-card.js?v=31387";
 
   const loadCard = () => {
@@ -14,7 +14,7 @@
 
   const defineAlias = () => {
     if (customElements.get(TARGET)) return true;
-    const Base = customElements.get("energyiq-panel-v327");
+    const Base = customElements.get("energyiq-panel-v328");
     if (!Base) return false;
     class EnergyIQPanelV327 extends Base {}
     customElements.define(TARGET, EnergyIQPanelV327);
