@@ -6,9 +6,9 @@
  * backend.
  */
 (() => {
-  const TAG = "energyiq-panel-v327";
-  const VERSION = "31388";
-  const UI_VERSION = "3.1.107";
+  const TAG = "energyiq-panel-v328";
+  const VERSION = "31389";
+  const UI_VERSION = "3.1.108";
 
   if (customElements.get(TAG)) return;
 
@@ -19,10 +19,13 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon.png?v=31388";
-      this.view = "trained";
-      this.pending = null;
-      this.trainSelected = new Set();
+      this.brandUrl = "/energyiq-brand/icon.png?v=31389";
+      this.view = "all";
+      this.pendingIncluded = null;
+      this.selectedIds = new Set();
+      this.searchTerm = "";
+      this.page = 1;
+      this.pageSize = 25;
       this.trainingQueue = [];
       this.trainingWorkspaceOpen = false;
       this.activeTrainingId = null;
@@ -103,7 +106,35 @@
     getDevices() { return Array.isArray(this.workspace?.devices) ? this.workspace.devices : []; }
     getDevice(deviceId) { return this.getDevices().find(d => d.device_id === deviceId); }
     getPersistedIds() { return new Set(this.getDevices().filter(d => d.classification === "monitor").map(d => d.device_id)); }
-    getSelectedIds() { return this.pending ? new Set(this.pending) : this.getPersistedIds(); }
+    getIncludedIds() { return this.pendingIncluded ? new Set(this.pendingIncluded) : this.getPersistedIds(); }
+    getSelectedIds() { return new Set(this.selectedIds); }
+    hasPendingChanges() {
+      const current = this.getPersistedIds(), pending = this.getIncludedIds();
+      if (current.size !== pending.size) return true;
+      for (const id of current) if (!pending.has(id)) return true;
+      return false;
+    }
+    filteredDevices() {
+      const term = this.searchTerm.trim().toLowerCase(), included = this.getIncludedIds();
+      return this.getDevices().filter(d => {
+        const isIncluded = included.has(d.device_id);
+        if (this.view === "trained" && !(isIncluded && d.training?.status === "complete")) return false;
+        if (this.view === "excluded" && isIncluded) return false;
+        if (!term) return true;
+        const haystack = [d.name,d.device_id,d.area,d.source,d.category,d.model,...(d.controls||[]).map(x=>x?.entity_id),...(d.measurements||[]).map(x=>x?.entity_id)].join(" ").toLowerCase();
+        return haystack.includes(term);
+      }).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    }
+    pageDevices() {
+      const all=this.filteredDevices(), pages=Math.max(1,Math.ceil(all.length/this.pageSize));
+      this.page=Math.min(Math.max(1,this.page),pages);
+      return {all,pages,rows:all.slice((this.page-1)*this.pageSize,this.page*this.pageSize)};
+    }
+    selectedCanTrain() {
+      if (!this.selectedIds.size || this.hasPendingChanges()) return false;
+      const included=this.getPersistedIds();
+      return [...this.selectedIds].every(id=>included.has(id)&&this.getDevice(id));
+    }
 
     stateFor(device) {
       const candidates = [...(device.controls || []), ...(device.measurements || [])];
@@ -152,62 +183,72 @@
     renderError(error) { this.innerHTML = `<ha-card class="error"><h2>EnergyIQ</h2><p>${this.escape(error?.message || error)}</p></ha-card>`; }
 
     renderSummary() {
-      const devices = this.getDevices(), monitored = devices.filter(d => this.getPersistedIds().has(d.device_id));
-      const trained = monitored.filter(d => d.training?.status === "complete").length;
-      const untrained = monitored.length - trained;
-      const home = Number(this.workspace?.whole_home_power), trainedWatts = Number(this.workspace?.trained_live_power_w || 0);
-      const mystery = Number.isFinite(home) ? Math.max(0, home - trainedWatts) : null;
-      const fmt = value => Number.isFinite(value) ? `${value.toFixed(0)} W` : "—";
-      return `<div class="summary"><div class="metric"><span>Home Power Now</span><strong>${fmt(home)}</strong></div><div class="metric"><span>Trained Active Watts</span><strong>${fmt(trainedWatts)}</strong></div><div class="metric mystery"><span>Mystery Watts</span><strong>${fmt(mystery)}</strong></div><div class="metric"><span>Monitored</span><strong>${monitored.length}</strong></div><div class="metric"><span>Trained</span><strong>${trained}</strong></div><div class="metric"><span>Untrained</span><strong>${untrained}</strong></div></div>`;
+      const devices=this.getDevices(), included=this.getIncludedIds();
+      const trained=devices.filter(d=>included.has(d.device_id)&&d.training?.status==="complete").length;
+      const active=devices.filter(d=>included.has(d.device_id)&&Number(d.current_power)>5).length;
+      const home=Number(this.workspace?.whole_home_power), trainedWatts=Number(this.workspace?.trained_live_power_w||0);
+      const mystery=Number.isFinite(home)?Math.max(0,home-trainedWatts):null;
+      const fmt=v=>Number.isFinite(v)?`${v.toFixed(0)} W`:"—", progress=included.size?`${trained} / ${included.size}`:"0 / 0";
+      return `<div class="summary">
+        <div class="metric"><span>Total Power</span><strong>${fmt(home)}</strong><small>Whole home</small></div>
+        <div class="metric"><span>Active Devices</span><strong>${active}</strong><small>Included loads</small></div>
+        <div class="metric mystery"><span>Mystery Watts</span><strong>${fmt(mystery)}</strong><small>Not yet attributed</small></div>
+        <div class="metric"><span>Trained Power</span><strong>${fmt(trainedWatts)}</strong><small>Currently attributed</small></div>
+        <div class="metric"><span>Training Progress</span><strong>${progress}</strong><small>Completed / included</small></div>
+      </div>`;
     }
 
     render() {
       if (!this.workspace) return;
-      const devices = this.getDevices(), persisted = this.getPersistedIds();
-      const trainedCount = devices.filter(d => d.training?.status === "complete").length;
-      const excludedCount = devices.filter(d => d.classification !== "monitor").length;
-      const visible = devices.filter(d => {
-        if (this.view === "all") return true;
-        if (this.view === "excluded") return d.classification !== "monitor";
-        return d.training?.status === "complete";
-      }).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-      this.innerHTML = `<style>${this.styles()}</style><div class="shell"><header><div class="title-block"><div class="title-row"><button id="back" class="back-button" title="Back to Home Assistant" aria-label="Back to Home Assistant">← Back</button><img class="brand-logo" src="${this.brandUrl}" alt="EnergyIQ"><div class="brand-copy"><div class="brand-name-row"><h1>EnergyIQ</h1><span class="tagline">Know your power</span></div><p>Whole-home electrical intelligence · v${UI_VERSION}</p></div></div></div></header><div id="summary-area">${this.renderSummary()}</div>${this.trainingWorkspaceOpen ? `<div id="training-area">${this.renderTrainingWorkspace()}</div>` : ""}<div class="toolbar"><div class="views"><button id="trained" class="${this.view === "trained" ? "selected" : ""}">Trained (${trainedCount})</button><button id="all" class="${this.view === "all" ? "selected" : ""}">All (${devices.length})</button><button id="excluded" class="${this.view === "excluded" ? "selected" : ""}">Excluded (${excludedCount})</button></div><div class="toolbar-actions"><button id="add">＋ Add Device / Entity</button><button id="save" class="primary">Save Monitoring</button></div></div><div class="table-scroll"><table><thead><tr><th>Monitor</th><th class="train-header ${this.trainSelected.size ? "has-selection" : ""}" id="train-header" title="${this.trainSelected.size ? "Open Training for selected devices" : "Select devices, then open Training"}">Train${this.trainSelected.size ? ` (${this.trainSelected.size})` : ""}</th><th>Device</th><th>Area</th><th>Source</th><th>Power</th><th>State</th><th>Training</th><th>Method</th></tr></thead><tbody>${visible.length ? visible.map(d => this.row(d)).join("") : `<tr><td colspan="9" class="empty">No loads in this view.</td></tr>`}</tbody></table></div></div>`;
+      const devices=this.getDevices(), included=this.getIncludedIds();
+      const trainedCount=devices.filter(d=>included.has(d.device_id)&&d.training?.status==="complete").length;
+      const excludedCount=devices.filter(d=>!included.has(d.device_id)).length;
+      const {all,pages,rows}=this.pageDevices(), selected=this.selectedIds.size, dirty=this.hasPendingChanges(), canTrain=this.selectedCanTrain();
+      const pageStart=all.length?((this.page-1)*this.pageSize)+1:0, pageEnd=Math.min(this.page*this.pageSize,all.length);
+      this.innerHTML=`<style>${this.styles()}</style><div class="shell">
+        <header><div class="title-block"><div class="title-row"><button id="back" class="back-button" title="Back to Home Assistant" aria-label="Back to Home Assistant">←</button><img class="brand-logo" src="${this.brandUrl}" alt="EnergyIQ"><div class="brand-copy"><div class="brand-name-row"><h1>EnergyIQ</h1><span class="tagline">Know your power</span></div><p>Whole-home electrical intelligence · v${UI_VERSION}</p></div></div></div></header>
+        <div id="summary-area">${this.renderSummary()}</div>${this.trainingWorkspaceOpen?`<div id="training-area">${this.renderTrainingWorkspace()}</div>`:""}
+        <div class="toolbar"><div class="views"><button id="all" class="${this.view==="all"?"selected":""}">All <span>${devices.length}</span></button><button id="trained" class="${this.view==="trained"?"selected":""}">Trained <span>${trainedCount}</span></button><button id="excluded" class="${this.view==="excluded"?"selected":""}">Excluded <span>${excludedCount}</span></button></div><div class="toolbar-actions"><button id="add">＋ Add Device / Entity</button><button id="save" class="primary" ${dirty?"":"disabled"}>Save Changes</button></div></div>
+        <div class="list-tools"><label class="search-box"><span>⌕</span><input id="device-search" type="search" value="${this.escape(this.searchTerm)}" placeholder="Search devices, areas, entities…" autocomplete="off"></label><span class="result-count">${all.length?`${pageStart}–${pageEnd} of ${all.length}`:"0 devices"}</span></div>
+        <div class="selection-bar"><div class="selection-count"><span class="selection-box">☐</span><strong>${selected}</strong> selected</div><div class="selection-actions"><button id="begin-training" class="action-training" ${canTrain?"":"disabled"}>Begin Training</button><button id="include" class="action-include" ${selected?"":"disabled"}>Include</button><button id="exclude" class="action-exclude" ${selected?"":"disabled"}>Exclude</button><button id="clear-selection" ${selected?"":"disabled"}>Clear Selection</button></div></div>
+        <div class="table-scroll"><table><thead><tr><th class="select-col">☐</th><th>Device</th><th>Area</th><th>Source</th><th>Power</th><th>State</th><th>Training</th><th>Method</th></tr></thead><tbody>${rows.length?rows.map(d=>this.row(d)).join(""):`<tr><td colspan="8" class="empty">No devices match this view.</td></tr>`}</tbody></table></div>
+        <div class="pagination"><button id="prev-page" ${this.page>1?"":"disabled"}>← Previous</button><span>Page ${this.page} of ${pages}</span><button id="next-page" ${this.page<pages?"":"disabled"}>Next →</button></div>
+      </div>`;
       this.bind();
     }
 
     row(device) {
-      const persisted = this.getPersistedIds().has(device.device_id), training = device.training || {};
-      const trainChecked = this.trainSelected.has(device.device_id), name = this.escape(device.name || device.device_id);
-      const canTrainByName = this.view === "all" && persisted && training.status !== "active";
-      const canSelectForTraining = this.view === "all" && persisted;
-      return `<tr data-device-id="${this.attr(device.device_id)}"><td><input class="monitor" type="checkbox" data-monitor="${this.attr(device.device_id)}" ${persisted ? "checked" : ""}></td><td><input class="train" type="checkbox" data-train="${this.attr(device.device_id)}" ${trainChecked ? "checked" : ""} ${canSelectForTraining ? "" : "disabled"}></td><td class="device-name-cell">${canTrainByName ? `<button class="device-link" data-device-train="${this.attr(device.device_id)}" title="Open Training">${name}</button>` : `<strong>${name}</strong>`}<small>${this.escape(device.category || device.model || "")}</small></td><td>${this.escape(device.area || "")}</td><td>${String(device.source || "").toLowerCase() === "manual" ? "Manual" : "HA"}</td><td class="power-cell">${Number.isFinite(Number(device.current_power)) ? `${Number(device.current_power).toFixed(0)} W` : "—"}</td><td class="state-cell">${this.renderState(device)}</td><td class="training-status">${this.renderTrainingStatus(device)}</td><td class="method-cell">${this.escape(training.method || "—")}</td></tr>`;
+      const selected=this.selectedIds.has(device.device_id), training=device.training||{}, name=this.escape(device.name||device.device_id);
+      return `<tr data-device-id="${this.attr(device.device_id)}"><td class="select-col"><input class="select-device" type="checkbox" data-select="${this.attr(device.device_id)}" ${selected?"checked":""} aria-label="Select ${name}"></td><td class="device-name-cell"><strong>${name}</strong><small>${this.escape(device.category||device.model||"")}</small></td><td>${this.escape(device.area||"")}</td><td>${String(device.source||"").toLowerCase()==="manual"?"Manual":"HA"}</td><td class="power-cell">${Number.isFinite(Number(device.current_power))?`${Number(device.current_power).toFixed(0)} W`:"—"}</td><td class="state-cell">${this.renderState(device)}</td><td class="training-status">${this.renderTrainingStatus(device)}</td><td class="method-cell">${this.escape(training.method||"—")}</td></tr>`;
     }
 
     renderState(device) { const state = this.stateFor(device), label = state === "on" ? "ON" : state === "off" ? "OFF" : "—"; return `<span class="state-box ${state || "unknown"}">${label}</span>`; }
     renderTrainingStatus(device) { const status = this.trainingStatus(device), labels = { trained: "Trained", active: "Training", error: "Error", untrained: "Not trained" }; return `<span class="training-dot ${status}" title="${labels[status]}"></span>`; }
 
     bind() {
-      this.querySelector("#back")?.addEventListener("click", () => {
-        if (window.history.length > 1) window.history.back();
-        else window.location.href = "/";
-      });
-      this.querySelector("#save")?.addEventListener("click", () => this.saveMonitoring());
-      this.querySelector("#add")?.addEventListener("click", () => this.openAddDialog());
-      this.querySelector("#trained")?.addEventListener("click", () => { this.trainSelected.clear(); this.view = "trained"; this.render(); });
-      this.querySelector("#all")?.addEventListener("click", () => { this.trainSelected.clear(); this.view = "all"; this.render(); });
-      this.querySelector("#excluded")?.addEventListener("click", () => { this.trainSelected.clear(); this.view = "excluded"; this.render(); });
-      this.querySelector("#train-header")?.addEventListener("click", () => { if (this.trainSelected.size) this.openTrainingWorkspace([...this.trainSelected]); });
-      this.querySelectorAll("[data-train]").forEach(box => box.addEventListener("change", event => { const id = event.currentTarget.dataset.train; if (event.currentTarget.checked) this.trainSelected.add(id); else this.trainSelected.delete(id); this.updateTrainHeader(); }));
-      this.querySelectorAll("[data-monitor]").forEach(box => box.addEventListener("change", event => { const selected = this.getSelectedIds(), id = event.currentTarget.dataset.monitor; if (event.currentTarget.checked) selected.add(id); else selected.delete(id); this.pending = selected; const row = event.currentTarget.closest("tr"), trainBox = row?.querySelector("[data-train]"); if (trainBox) trainBox.disabled = !event.currentTarget.checked; }));
-      this.querySelectorAll("[data-device-train]").forEach(button => button.addEventListener("click", () => this.openTrainingWorkspace([button.dataset.deviceTrain])));
+      this.querySelector("#back")?.addEventListener("click",()=>{if(window.history.length>1)window.history.back();else window.location.href="/";});
+      this.querySelector("#save")?.addEventListener("click",()=>this.saveMonitoring());
+      this.querySelector("#add")?.addEventListener("click",()=>this.openAddDialog());
+      this.querySelector("#all")?.addEventListener("click",()=>{this.view="all";this.page=1;this.render();});
+      this.querySelector("#trained")?.addEventListener("click",()=>{this.view="trained";this.page=1;this.render();});
+      this.querySelector("#excluded")?.addEventListener("click",()=>{this.view="excluded";this.page=1;this.render();});
+      this.querySelector("#device-search")?.addEventListener("input",event=>{this.searchTerm=event.currentTarget.value;this.page=1;this.render();requestAnimationFrame(()=>{const el=this.querySelector("#device-search");if(el){el.focus();el.setSelectionRange(this.searchTerm.length,this.searchTerm.length);}});});
+      this.querySelector("#prev-page")?.addEventListener("click",()=>{this.page=Math.max(1,this.page-1);this.render();});
+      this.querySelector("#next-page")?.addEventListener("click",()=>{this.page+=1;this.render();});
+      this.querySelectorAll("[data-select]").forEach(box=>box.addEventListener("change",event=>{const id=event.currentTarget.dataset.select;if(event.currentTarget.checked)this.selectedIds.add(id);else this.selectedIds.delete(id);this.render();}));
+      this.querySelector("#include")?.addEventListener("click",()=>this.applyClassification("include"));
+      this.querySelector("#exclude")?.addEventListener("click",()=>this.applyClassification("exclude"));
+      this.querySelector("#clear-selection")?.addEventListener("click",()=>{this.selectedIds.clear();this.render();});
+      this.querySelector("#begin-training")?.addEventListener("click",()=>this.beginSelectedTraining());
       this.bindTrainingWorkspace();
     }
-
-    updateTrainHeader() {
-      const header = this.querySelector("#train-header"); if (!header) return;
-      header.textContent = this.trainSelected.size ? `Train (${this.trainSelected.size})` : "Train";
-      header.classList.toggle("has-selection", this.trainSelected.size > 0);
+    applyClassification(action) {
+      if(!this.selectedIds.size)return;
+      if(!this.pendingIncluded)this.pendingIncluded=this.getPersistedIds();
+      for(const id of this.selectedIds){if(action==="include")this.pendingIncluded.add(id);else this.pendingIncluded.delete(id);}
+      this.page=1;this.render();
     }
+    async beginSelectedTraining(){if(!this.selectedCanTrain())return;this.openTrainingWorkspace([...this.selectedIds]);}
 
     openTrainingWorkspace(deviceIds) {
       const valid = deviceIds.filter(id => this.getDevice(id) && this.getPersistedIds().has(id));
@@ -228,7 +269,7 @@
         this.activeTrainingId = remaining[0];
         return true;
       }
-      this.trainSelected.delete(this.activeTrainingId);
+      this.selectedIds.delete(this.activeTrainingId);
       this.trainingWorkspaceOpen = false;
       this.trainingQueue = [];
       this.activeTrainingId = null;
@@ -308,7 +349,7 @@
         const completedId = device.device_id;
         const remainingQueue = this.trainingQueue.filter(id => id !== completedId && !this.trainingComplete(id));
         if (this.trainingComplete(completedId) && remainingQueue.length === 0) {
-          this.trainSelected.delete(completedId);
+          this.selectedIds.delete(completedId);
           this.trainingWorkspaceOpen = false;
           this.trainingQueue = [];
           this.activeTrainingId = null;
@@ -319,7 +360,11 @@
     }
     async stopWorkspaceTraining() { const device = this.activeTrainingDevice(); if (!device) return; try { await this.ws({ type: "energy_attribution/stop_training", entry_id: this.entryId, device_id: device.device_id }); await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to stop training", true); } }
 
-    async saveMonitoring() { try { await this.ws({ type: "energy_attribution/set_monitoring", entry_id: this.entryId, device_ids: [...this.getSelectedIds()] }); this.pending = null; await this.refresh(true); } catch (error) { this.showToast(error?.message || "Unable to save monitoring selections", true); } }
+    async saveMonitoring() {
+      if(!this.hasPendingChanges())return;
+      try{await this.ws({type:"energy_attribution/set_monitoring",entry_id:this.entryId,device_ids:[...this.getIncludedIds()]});this.pendingIncluded=null;this.selectedIds.clear();await this.refresh(true);this.showToast("Changes saved.");}
+      catch(error){this.showToast(error?.message||"Unable to save changes",true);}
+    }
 
     async openAddDialog() { try { const result = await this.ws({ type: "energy_attribution/list_available_entities", entry_id: this.entryId }); this.showAddDialog(result.entities || []); } catch (error) { this.showToast(error?.message || "Unable to load Home Assistant entities", true); } }
     showAddDialog(entities) {
@@ -337,7 +382,21 @@
     showToast(message, error = false) { const old = this.querySelector(".toast"); if (old) old.remove(); const toast = document.createElement("div"); toast.className = `toast ${error ? "error-toast" : ""}`; toast.textContent = message; this.appendChild(toast); setTimeout(() => toast.remove(), 4500); }
     attr(value) { return this.escape(value); }
     escape(value) { return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;" }[ch])); }
-    styles() { return `:host{display:block;height:100%;min-height:100vh;color:var(--primary-text-color)}.shell{padding:18px 20px;max-width:1600px;margin:auto;min-height:100vh;height:100vh;box-sizing:border-box;display:flex;flex-direction:column}.title-row{display:flex;align-items:center;gap:14px}.back-button{flex:none;padding:7px 11px;font-size:14px}.brand-logo{width:58px;height:58px;object-fit:contain;flex:none}.brand-copy{min-width:0}.brand-name-row{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap}.tagline{font-size:20px;font-weight:600;font-style:italic;color:var(--primary-color);white-space:nowrap}.title-block{min-width:0}header{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}h1{margin:0 0 4px;font-size:30px}h2{margin:0 0 5px}h3{margin:5px 0}p{margin:0;color:var(--secondary-text-color)}button{border:1px solid var(--divider-color);border-radius:7px;background:var(--card-background-color);color:var(--primary-text-color);padding:8px 12px;cursor:pointer;font:inherit}button:hover{background:var(--secondary-background-color)}button:disabled{opacity:.45;cursor:not-allowed}button.primary,.views button.selected{background:var(--primary-color);color:var(--text-primary-color,#fff);border-color:var(--primary-color)}.summary{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:10px;margin:12px 0 16px}.metric{padding:11px;border:1px solid var(--divider-color);border-radius:10px;background:var(--card-background-color);display:flex;flex-direction:column;gap:5px}.metric span{font-size:11px;color:var(--secondary-text-color)}.metric strong{font-size:19px}.metric.mystery strong{font-size:21px}.toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.views,.toolbar-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.table-scroll{overflow:auto;flex:1;min-height:180px;max-height:none;border:1px solid var(--divider-color);border-radius:10px}table{border-collapse:collapse;width:100%;min-width:900px;background:var(--card-background-color)}th,td{padding:9px 10px;border-bottom:1px solid var(--divider-color);text-align:left;vertical-align:middle}th{position:sticky;top:0;background:var(--card-background-color);z-index:1;font-size:12px;color:var(--secondary-text-color);white-space:nowrap}td small{display:block;color:var(--secondary-text-color);font-size:11px;margin-top:2px}.monitor,.train{width:22px;height:22px;margin:0}.state-cell{text-align:center;width:74px}.power-cell{white-space:nowrap;font-variant-numeric:tabular-nums}.method-cell{text-transform:capitalize;color:var(--secondary-text-color)}.train-header.has-selection{color:var(--primary-color);font-weight:800;cursor:pointer}.device-name-cell{min-width:170px}.device-link{border:0;background:none;padding:0;text-align:left;color:var(--primary-color);font-weight:700;cursor:pointer}.device-link:hover{text-decoration:underline}.state-box{display:inline-flex;align-items:center;justify-content:center;width:44px;height:22px;border-radius:4px;font-size:12px;font-weight:700;color:#fff}.state-box.on{background:#2e7d32}.state-box.off{background:#c62828}.state-box.unknown{background:var(--secondary-text-color)}.training-dot{display:inline-block;width:16px;height:16px;border-radius:50%;vertical-align:middle;border:2px solid var(--divider-color);box-sizing:border-box}.training-dot.trained{background:#2e7d32;border-color:#2e7d32}.training-dot.active{background:#f9a825;border-color:#f9a825}.training-dot.error{background:#c62828;border-color:#c62828}.training-dot.untrained{background:#c62828;border-color:#c62828}.empty{text-align:center;padding:30px;color:var(--secondary-text-color)}.loading,.error{display:block;padding:24px}.error{color:var(--error-color)}.training-workspace{border:2px solid var(--primary-color);border-radius:14px;padding:16px;margin:0 0 16px;background:var(--card-background-color);scroll-margin-top:12px}.training-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.eyebrow{display:block;text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:800;color:var(--secondary-text-color);margin-bottom:4px}.queue-strip{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:8px;margin:14px 0}.queue-slot,.queue-more{border:1px solid var(--divider-color);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:3px;min-height:58px}.queue-slot span,.queue-more span{font-size:10px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em}.queue-slot small{color:var(--secondary-text-color)}.active-slot{border-color:var(--primary-color);box-shadow:0 0 0 1px var(--primary-color) inset}.empty-slot{opacity:.55}.queue-more{justify-content:center;min-width:170px}.training-grid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px}.training-main{min-width:0}.training-info{border:1px solid var(--divider-color);border-radius:10px;padding:13px;background:var(--secondary-background-color)}.training-info dl{display:grid;grid-template-columns:auto 1fr;gap:7px;margin-top:14px}.training-info dt{color:var(--secondary-text-color)}.training-info dd{margin:0;text-align:right;font-weight:600}.method-picker{margin-bottom:4px}.method-label{display:block;font-size:12px;color:var(--secondary-text-color);margin-bottom:6px}.method-options{display:flex;gap:18px;align-items:center;flex-wrap:wrap}.method-options label{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--primary-text-color);cursor:pointer}.method-options input{width:20px;height:20px;margin:0}.method-options input:disabled{cursor:not-allowed}.legacy-method-note{font-size:12px;margin-top:7px}.instruction-card{margin-top:12px;padding:12px;border-radius:10px;background:var(--secondary-background-color);border-left:4px solid var(--primary-color)}.instruction-card strong{display:block}.capture-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.capture-grid>div{border:1px solid var(--divider-color);border-radius:9px;padding:10px}.capture-grid span{display:block;font-size:10px;color:var(--secondary-text-color)}.capture-grid strong{display:block;font-size:18px;margin-top:3px}.capture-value.valid{border-color:#2e7d32;background:rgba(46,125,50,.12)}.capture-state{display:flex;align-items:center;gap:8px;margin-top:10px;padding:10px;border-radius:9px;background:var(--secondary-background-color)}.capture-state.valid{border:1px solid #2e7d32}.status-light{width:11px;height:11px;border-radius:50%;background:#c62828;flex:none}.status-light.green{background:#2e7d32}.status-light.amber{background:#f9a825}.training-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.completed-card{margin-top:12px;padding:12px;border:1px solid #2e7d32;border-radius:10px}.completed-card>strong{font-size:22px;display:block}.completed-card p{font-size:12px;margin-top:3px}.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;z-index:10000;padding:16px}.modal{width:min(760px,100%);max-height:90vh;overflow:auto;background:var(--card-background-color);border-radius:14px;padding:20px;box-shadow:var(--ha-card-box-shadow);color:var(--primary-text-color)}.modal.small{width:min(520px,100%)}.modal-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}.modal-head>button{font-size:22px;line-height:1;padding:4px 9px}.search-row{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:8px;margin-bottom:8px}.modal input,.modal select{box-sizing:border-box;width:100%;padding:9px;border:1px solid var(--divider-color);border-radius:6px;background:var(--primary-background-color);color:var(--primary-text-color);font:inherit}.modal>label{display:block;margin:12px 0}.modal>label input{display:block;margin-top:5px}.modal #choices{height:310px}.ownership{min-height:52px;margin-top:10px;padding:10px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color);font-size:13px}.modal-actions{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;margin-top:14px}.toast{position:fixed;right:22px;bottom:22px;z-index:11000;padding:12px 16px;border-radius:8px;background:var(--primary-color);color:var(--text-primary-color,#fff);box-shadow:var(--ha-card-box-shadow);max-width:440px}.toast.error-toast{background:var(--error-color)}@media(max-width:1100px){.summary{grid-template-columns:repeat(3,1fr)}.queue-strip{grid-template-columns:repeat(3,1fr)}.queue-more{grid-column:1/-1}.training-grid{grid-template-columns:1fr}}@media(max-width:700px){.shell{padding:12px;height:auto;min-height:100vh}.brand-logo{width:46px;height:46px}.tagline{font-size:16px}.brand-name-row{gap:10px}.summary{grid-template-columns:repeat(2,1fr);gap:7px}.metric{padding:9px}.metric strong{font-size:16px}.toolbar{align-items:stretch}.views,.toolbar-actions{width:100%}.views button,.toolbar-actions button{flex:1}.queue-strip{grid-template-columns:1fr}.training-workspace{padding:12px}.capture-grid{grid-template-columns:repeat(2,1fr)}.training-head{align-items:center}.training-head h2{font-size:20px}.table-scroll{max-height:none}}
+    styles() { return `
+      :host{display:block;min-height:100vh;color:var(--primary-text-color)}.shell{min-height:100vh;box-sizing:border-box;padding:0 24px 22px;max-width:1680px;margin:auto}
+      header{margin:0 -24px 18px;padding:22px 28px 20px;background:linear-gradient(120deg,rgba(18,28,42,.98),rgba(9,18,31,.98) 60%,rgba(9,35,44,.98));border-bottom:1px solid rgba(42,194,255,.22);box-shadow:0 8px 30px rgba(0,0,0,.18)}.title-row{display:flex;align-items:center;gap:15px;max-width:1624px;margin:auto}.back-button{width:38px;height:38px;border:0;border-radius:50%;padding:0;background:rgba(255,255,255,.07);color:var(--primary-text-color);font-size:23px;line-height:1;cursor:pointer}.back-button:hover{background:rgba(255,255,255,.14)}
+      .brand-logo{width:60px;height:60px;object-fit:contain;flex:none}.brand-copy{min-width:0}.brand-name-row{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap}.tagline{font-size:20px;font-weight:600;font-style:italic;color:#36c8ff;white-space:nowrap}h1{margin:0 0 4px;font-size:31px;letter-spacing:.01em}p{margin:0;color:var(--secondary-text-color)}
+      .summary{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px;margin:0 0 16px}.metric{padding:13px 14px;border:1px solid var(--divider-color);border-radius:12px;background:linear-gradient(145deg,var(--card-background-color),rgba(20,31,44,.65));display:flex;flex-direction:column;gap:3px;min-width:0}.metric span{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--secondary-text-color)}.metric strong{font-size:22px;font-variant-numeric:tabular-nums}.metric small{font-size:10px;color:var(--secondary-text-color)}.metric.mystery{border-color:rgba(54,200,255,.35)}
+      button{border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);color:var(--primary-text-color);padding:8px 12px;cursor:pointer;font:inherit;transition:.15s ease}button:hover{background:var(--secondary-background-color);transform:translateY(-1px)}button:disabled{opacity:.38;cursor:not-allowed;transform:none}button.primary{background:#26b8f0;color:#07131d;border-color:#26b8f0;font-weight:800}button.primary:disabled{background:var(--card-background-color);color:var(--secondary-text-color);border-color:var(--divider-color)}
+      .toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.views,.toolbar-actions,.selection-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.views button{border-radius:9px;padding:8px 13px}.views button.selected{background:rgba(38,184,240,.16);border-color:#26b8f0;color:#5dd5ff}.views button span{opacity:.7;margin-left:3px}
+      .list-tools{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:4px 0 8px}.search-box{display:flex;align-items:center;gap:8px;flex:1;max-width:520px;border:1px solid var(--divider-color);border-radius:9px;background:var(--card-background-color);padding:0 11px}.search-box span{font-size:21px;color:var(--secondary-text-color)}.search-box input{width:100%;border:0;outline:0;background:transparent;color:var(--primary-text-color);padding:10px 0;font:inherit}.result-count{font-size:12px;color:var(--secondary-text-color)}
+      .selection-bar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:9px 11px;margin-bottom:10px;border:1px solid var(--divider-color);border-radius:10px;background:rgba(18,28,42,.55)}.selection-count{font-size:13px;white-space:nowrap}.selection-count strong{font-size:15px;margin-right:4px}.selection-box{color:#36c8ff;margin-right:5px}.action-training{border-color:#36c8ff;color:#63d7ff}.action-include{background:#35b85a;border-color:#35b85a;color:#07140b;font-weight:800}.action-exclude{border-color:#ff4d5f;color:#ff6574}.action-exclude:hover{background:rgba(255,77,95,.12)}
+      .table-scroll{overflow:auto;min-height:180px;max-height:calc(100vh - 385px);border:1px solid var(--divider-color);border-radius:11px}table{border-collapse:collapse;width:100%;min-width:900px;background:var(--card-background-color)}th,td{padding:10px 11px;border-bottom:1px solid var(--divider-color);text-align:left;vertical-align:middle}th{position:sticky;top:0;background:var(--card-background-color);z-index:1;font-size:11px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}.select-col{width:44px;text-align:center}td small{display:block;color:var(--secondary-text-color);font-size:11px;margin-top:2px}.select-device{width:21px;height:21px;margin:0;accent-color:#36c8ff}.device-name-cell{min-width:190px}.power-cell{white-space:nowrap;font-variant-numeric:tabular-nums}.method-cell{text-transform:capitalize;color:var(--secondary-text-color)}.state-cell{text-align:center;width:70px}.state-box{display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:23px;padding:0 8px;border-radius:12px;font-size:11px;font-weight:800}.state-box.on{background:#35b85a;color:#07140b}.state-box.off{background:rgba(255,255,255,.08);color:var(--secondary-text-color);border:1px solid var(--divider-color)}.state-box.unknown{background:rgba(255,77,95,.12);color:#ff6574}.training-dot{display:inline-block;width:15px;height:15px;border-radius:50%;vertical-align:middle}.training-dot.trained{background:#35b85a;box-shadow:0 0 0 3px rgba(53,184,90,.12)}.training-dot.active,.training-dot.error,.training-dot.untrained{background:#ff4d5f;box-shadow:0 0 0 3px rgba(255,77,95,.12)}
+      .empty{text-align:center;padding:36px;color:var(--secondary-text-color)}.pagination{display:flex;justify-content:center;align-items:center;gap:12px;padding:10px 0 0;color:var(--secondary-text-color);font-size:12px}.training-workspace{border:1px solid #36c8ff;border-radius:14px;padding:16px;margin:0 0 16px;background:var(--card-background-color);scroll-margin-top:12px}.training-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.eyebrow{display:block;text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:800;color:var(--secondary-text-color);margin-bottom:4px}h2{margin:0 0 5px}h3{margin:5px 0}
+      .queue-strip{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:8px;margin:14px 0}.queue-slot,.queue-more{border:1px solid var(--divider-color);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:3px;min-height:58px}.queue-slot span,.queue-more span{font-size:10px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em}.queue-slot small{color:var(--secondary-text-color)}.active-slot{border-color:#36c8ff;box-shadow:0 0 0 1px #36c8ff inset}.empty-slot{opacity:.55}.queue-more{justify-content:center;min-width:170px}.training-grid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px}.training-main{min-width:0}.training-info{border:1px solid var(--divider-color);border-radius:10px;padding:13px;background:var(--secondary-background-color)}.training-info dl{display:grid;grid-template-columns:auto 1fr;gap:7px;margin-top:14px}.training-info dt{color:var(--secondary-text-color)}.training-info dd{margin:0;text-align:right;font-weight:600}.method-picker{margin-bottom:4px}.method-label{display:block;font-size:12px;color:var(--secondary-text-color);margin-bottom:6px}.method-options{display:flex;gap:18px;align-items:center;flex-wrap:wrap}.method-options label{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--primary-text-color);cursor:pointer}.method-options input{width:20px;height:20px;margin:0}.instruction-card{margin-top:12px;padding:12px;border-radius:10px;background:var(--secondary-background-color);border-left:4px solid #36c8ff}.instruction-card strong{display:block}.capture-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.capture-grid>div{border:1px solid var(--divider-color);border-radius:9px;padding:10px}.capture-grid span{display:block;font-size:10px;color:var(--secondary-text-color)}.capture-grid strong{display:block;font-size:18px;margin-top:3px}.capture-value.valid{border-color:#35b85a;background:rgba(53,184,90,.12)}.capture-state{display:flex;align-items:center;gap:8px;margin-top:10px;padding:10px;border-radius:9px;background:var(--secondary-background-color)}.capture-state.valid{border:1px solid #35b85a}.status-light{width:11px;height:11px;border-radius:50%;background:#ff4d5f;flex:none}.status-light.green{background:#35b85a}.status-light.amber{background:#ff4d5f}.training-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.completed-card{margin-top:12px;padding:12px;border:1px solid #35b85a;border-radius:10px}.completed-card>strong{font-size:22px;display:block}.completed-card p{font-size:12px;margin-top:3px}
+      .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center;z-index:10000;padding:16px}.modal{width:min(760px,100%);max-height:90vh;overflow:auto;background:var(--card-background-color);border-radius:14px;padding:20px;box-shadow:var(--ha-card-box-shadow);color:var(--primary-text-color)}.modal.small{width:min(520px,100%)}.modal-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}.modal-head>button{font-size:22px;line-height:1;padding:4px 9px}.search-row{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:8px;margin-bottom:8px}.modal input,.modal select{box-sizing:border-box;width:100%;padding:9px;border:1px solid var(--divider-color);border-radius:6px;background:var(--primary-background-color);color:var(--primary-text-color);font:inherit}.modal>label{display:block;margin:12px 0}.modal>label input{display:block;margin-top:5px}.modal #choices{height:310px}.ownership{min-height:52px;margin-top:10px;padding:10px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color);font-size:13px}.modal-actions{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;margin-top:14px}.toast{position:fixed;right:22px;bottom:22px;z-index:11000;padding:12px 16px;border-radius:8px;background:#26b8f0;color:#07131d;box-shadow:var(--ha-card-box-shadow);max-width:440px;font-weight:700}.toast.error-toast{background:#ff4d5f;color:#fff}
+      @media(max-width:1100px){.summary{grid-template-columns:repeat(3,1fr)}.table-scroll{max-height:none}.queue-strip{grid-template-columns:repeat(3,1fr)}.queue-more{grid-column:1/-1}.training-grid{grid-template-columns:1fr}}@media(max-width:700px){.shell{padding:0 12px 16px}header{margin:0 -12px 12px;padding:15px 14px}.title-row{gap:10px}.back-button{width:34px;height:34px;font-size:20px}.brand-logo{width:46px;height:46px}.brand-name-row{gap:9px}.tagline{font-size:16px}h1{font-size:25px}.summary{grid-template-columns:repeat(2,1fr);gap:7px}.metric{padding:10px}.metric strong{font-size:17px}.toolbar{align-items:stretch}.views,.toolbar-actions{width:100%}.views button,.toolbar-actions button{flex:1}.list-tools{align-items:stretch}.search-box{max-width:none}.result-count{display:none}.selection-bar{align-items:stretch}.selection-actions{width:100%}.selection-actions button{flex:1}.table-scroll{max-height:none}.queue-strip{grid-template-columns:1fr}.training-workspace{padding:12px}.capture-grid{grid-template-columns:repeat(2,1fr)}.training-head{align-items:center}.training-head h2{font-size:20px}.modal-actions{grid-template-columns:1fr 1fr}.modal-actions span{display:none}}
+    `; }
     `; }
   }
   customElements.define(TAG, EnergyIQPanel);
