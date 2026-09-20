@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v329";
-  const VERSION = "31394";
-  const UI_VERSION = "3.1.113";
+  const VERSION = "31396";
+  const UI_VERSION = "3.1.115";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon.png?v=31394";
+      this.brandUrl = "/energyiq-brand/icon.png?v=31396";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -262,7 +262,7 @@
       this.querySelector("#trained")?.addEventListener("click",()=>{this.view="trained";this.page=1;this.render();});
       this.querySelector("#excluded")?.addEventListener("click",()=>{this.view="excluded";this.page=1;this.render();});
       this.querySelector("#device-search")?.addEventListener("input",event=>{this.searchTerm=event.currentTarget.value;this.page=1;this.render();requestAnimationFrame(()=>{const el=this.querySelector("#device-search");if(el){el.focus();el.setSelectionRange(this.searchTerm.length,this.searchTerm.length);}});});
-      this.querySelectorAll("[data-select]").forEach(box=>box.addEventListener("change",event=>{const id=event.currentTarget.dataset.select;if(event.currentTarget.checked)this.selectedIds.add(id);else this.selectedIds.delete(id);this.render();}));
+      this.querySelectorAll("[data-select]").forEach(box=>box.addEventListener("change",event=>{const list=this.querySelector(".table-scroll"),top=list?.scrollTop||0,left=list?.scrollLeft||0,id=event.currentTarget.dataset.select;if(event.currentTarget.checked)this.selectedIds.add(id);else this.selectedIds.delete(id);this.render();requestAnimationFrame(()=>{const next=this.querySelector(".table-scroll");if(next){next.scrollTop=top;next.scrollLeft=left;}});}));
       this.querySelector("#include")?.addEventListener("click",()=>this.applyClassification("include"));
       this.querySelector("#exclude")?.addEventListener("click",()=>this.applyClassification("exclude"));
       this.querySelector("#clear-selection")?.addEventListener("click",()=>{this.selectedIds.clear();this.render();});
