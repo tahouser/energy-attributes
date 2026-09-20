@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v327";
-  const VERSION = "31387";
-  const UI_VERSION = "3.1.106";
+  const VERSION = "31388";
+  const UI_VERSION = "3.1.107";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "";
+      this.brandUrl = "/energyiq-brand/icon.png?v=31388";
       this.view = "trained";
       this.pending = null;
       this.trainSelected = new Set();
@@ -59,15 +59,6 @@
       if (this.loading) return;
       this.loading = true;
       try {
-        try {
-          const brand = await this.ws({ type: "brands/access_token" });
-          const token = brand?.access_token || brand?.token;
-          this.brandUrl = token
-            ? "/api/brands/integration/energyiq/icon.png?token=" + encodeURIComponent(token) + "&v=31387"
-            : "/api/brands/integration/energyiq/icon.png?placeholder=no";
-        } catch (_) {
-          this.brandUrl = "/api/brands/integration/energyiq/icon.png?placeholder=no";
-        }
         const result = await this.ws({ type: "energy_attribution/list_entries" });
         if (!result.entries?.length) throw new Error("EnergyIQ is not configured.");
         this.entryId = result.entries[0].entry_id;
