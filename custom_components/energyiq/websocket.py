@@ -96,6 +96,105 @@ def _trained_live_power(hass: HomeAssistant, candidates: dict, training_state: d
     return total, live_count
 
 
+def _meter_summary(hass: HomeAssistant, coordinator) -> list[dict]:
+    """Discover live power/energy/voltage/current meters attached to the configured source device."""
+    registry = er.async_get(hass)
+    source_entry = registry.async_get(coordinator.power_entity)
+    if source_entry is None or not source_entry.device_id:
+        return []
+
+    device_id = source_entry.device_id
+    entities = []
+    for entry in registry.entities.values():
+        if entry.device_id != device_id or entry.domain != "sensor" or entry.disabled_by is not None:
+            continue
+        state = hass.states.get(entry.entity_id)
+        if state is None:
+            continue
+        attrs = state.attributes
+        unit = str(attrs.get("unit_of_measurement") or "").casefold()
+        device_class = str(attrs.get("device_class") or "").casefold()
+        name = str(attrs.get("friendly_name") or entry.name or entry.entity_id)
+        entities.append((entry, state, unit, device_class, name))
+
+    def number(item):
+        try:
+            return float(item[1].state)
+        except (TypeError, ValueError):
+            return None
+
+    def meter_key(name: str):
+        text = name.casefold()
+        match = __import__("re").search(r"(?:meter|phase|leg)[ _-]*(\d+)", text)
+        if match:
+            return f"meter-{match.group(1)}"
+        for token in ("l1", "l2", "l3"):
+            if token in text:
+                return token
+        return None
+
+    power = []
+    for item in entities:
+        entry, state, unit, device_class, name = item
+        if device_class == "power" or unit in {"w", "kw"}:
+            if entry.entity_id == coordinator.power_entity:
+                continue
+            value = number(item)
+            if value is None:
+                continue
+            if unit == "kw":
+                value *= 1000
+            power.append((item, value))
+
+    energy = [item for item in entities if str(item[3]).casefold() == "energy" or item[2] in {"kwh", "wh"}]
+    voltage = [item for item in entities if item[2] in {"v", "volt", "volts"} or item[3] == "voltage"]
+    current = [item for item in entities if item[2] in {"a", "amp", "amps"} or item[3] == "current"]
+
+    def best_match(power_item, pool):
+        pkey = meter_key(power_item[4])
+        if pkey:
+            keyed = [item for item in pool if meter_key(item[4]) == pkey]
+            if keyed:
+                return keyed[0]
+        p_tokens = {x for x in __import__("re").split(r"[^a-z0-9]+", power_item[4].casefold()) if x and x not in {"power", "energy", "voltage", "current", "meter"}}
+        scored = []
+        for item in pool:
+            tokens = {x for x in __import__("re").split(r"[^a-z0-9]+", item[4].casefold()) if x and x not in {"power", "energy", "voltage", "current", "meter"}}
+            score = len(p_tokens & tokens)
+            if score:
+                scored.append((score, item))
+        return max(scored, key=lambda x: x[0])[1] if scored else None
+
+    result = []
+    for item, watts in power:
+        entry, state, unit, device_class, name = item
+        energy_item = best_match(item, energy)
+        voltage_item = best_match(item, voltage)
+        current_item = best_match(item, current)
+        label_key = meter_key(name)
+        if label_key and label_key.startswith("meter-"):
+            label = f"Meter {label_key.split('-', 1)[1]}"
+        elif label_key:
+            label = label_key.upper()
+        else:
+            label = name
+        result.append({
+            "label": label,
+            "name": name,
+            "source": entry.entity_id,
+            "power": watts,
+            "energy": number(energy_item) if energy_item else None,
+            "voltage": number(voltage_item) if voltage_item else None,
+            "current": number(current_item) if current_item else None,
+        })
+
+    result.sort(key=lambda item: (
+        0 if __import__("re").match(r"Meter \d+$", item["label"]) else 1,
+        item["label"].casefold(),
+    ))
+    return result
+
+
 def _monitored_entity_ids(coordinator) -> list[str]:
     """Return HA entities belonging to currently monitored EnergyIQ loads."""
     result: list[str] = []
@@ -170,6 +269,7 @@ async def ws_workspace(hass, connection, msg):
         "whole_home_power": state.state if state else None,
         "trained_live_power_w": trained_live_w,
         "trained_live_count": trained_live_count,
+        "meters": _meter_summary(hass, coordinator),
         "devices": rows,
         "last_training_device_id": getattr(coordinator, "last_training_device_id", None),
     })
