@@ -18,16 +18,16 @@ if (!customElements.get(TAG)) {
             selector: { entity: { domain: "sensor" } },
           },
         ],
-        computeLabel: (name) => ({
+        computeLabel: (schema) => ({
           cost_entity: "Total energy cost sensor",
           peak_cost_entity: "Peak energy cost sensor",
           off_peak_cost_entity: "Off-peak energy cost sensor",
-        }[name] || name),
-        computeHelper: (name) => ({
+        }[schema?.name]),
+        computeHelper: (schema) => ({
           cost_entity: "Optional. Used by the COST view.",
           peak_cost_entity: "Optional. Used for the Peak breakdown.",
           off_peak_cost_entity: "Optional. Used for the Off-peak breakdown.",
-        }[name] || ""),
+        }[schema?.name]),
       };
     }
 
