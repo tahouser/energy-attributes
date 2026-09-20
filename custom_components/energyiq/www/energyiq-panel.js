@@ -6,7 +6,7 @@
  * backend.
  */
 (() => {
-  const TAG = "energyiq-panel-v325";
+  const TAG = "energyiq-panel-v327";
   const VERSION = "31360";
 
   if (customElements.get(TAG)) return;
