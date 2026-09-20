@@ -1,6 +1,6 @@
 (() => {
-  const TARGET = "energyiq-panel-v326";
-  const SOURCE = "/energyiq-static/energyiq-panel.js?v=31385";
+  const TARGET = "energyiq-panel-v327";
+  const SOURCE = "/energyiq-static/energyiq-panel.js?v=31386";
   const CARD_SOURCE = "/energyiq-static/energyiq-card.js?v=31385";
 
   const loadCard = () => {
@@ -14,10 +14,10 @@
 
   const defineAlias = () => {
     if (customElements.get(TARGET)) return true;
-    const Base = customElements.get("energyiq-panel-v325");
+    const Base = customElements.get("energyiq-panel-v327");
     if (!Base) return false;
-    class EnergyIQPanelV326 extends Base {}
-    customElements.define(TARGET, EnergyIQPanelV326);
+    class EnergyIQPanelV327 extends Base {}
+    customElements.define(TARGET, EnergyIQPanelV327);
     return true;
   };
 
@@ -29,7 +29,7 @@
   const script = document.createElement("script");
   script.src = SOURCE;
   script.onload = () => {
-    if (!defineAlias()) console.error("EnergyIQ: v325 panel did not register.");
+    if (!defineAlias()) console.error("EnergyIQ: v327 panel did not register.");
     loadCard();
   };
   script.onerror = () => console.error("EnergyIQ: failed to load panel source.");
