@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_USERNAME, CONF_PASSWORD
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -113,7 +114,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         """
         device_registry = dr.async_get(self.hass)
         entity_registry = er.async_get(self.hass)
-        area_registry = __import__("homeassistant.helpers.area_registry", fromlist=["async_get"]).async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
         changed = False
 
         entities_by_device: dict[str, list[Any]] = {}
@@ -143,7 +144,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 if entity.domain == "sensor":
                     device_class = entity.device_class or attrs.get("device_class")
                     unit = entity.unit_of_measurement or attrs.get("unit_of_measurement")
-                    state_class = entity.state_class or attrs.get("state_class")
+                    state_class = attrs.get("state_class")
                     if device_class == "power" and str(unit or "").casefold() in {"w", "kw"} and state_class in (None, "measurement"):
                         measurements.append({"entity_id": entity.entity_id, "name": self._entity_friendly_name(entity), "kind": "power", "unit": unit or ""})
                     elif device_class == "energy" and str(unit or "").casefold() in {"wh", "kwh", "mwh", "gwh"} and state_class in (None, "total", "total_increasing"):
