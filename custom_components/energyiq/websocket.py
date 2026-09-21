@@ -242,6 +242,7 @@ async def ws_list_entries(hass, connection, msg):
 @websocket_api.async_response
 async def ws_workspace(hass, connection, msg):
     coordinator = _coordinator(hass, msg["entry_id"])
+    coordinator.refresh_ha_metadata()
     rows = []
     for candidate in coordinator.candidate_devices.values():
         did = candidate["device_id"]
