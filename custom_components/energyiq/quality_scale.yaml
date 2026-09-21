@@ -1,0 +1,230 @@
+# EnergyIQ Home Assistant Integration Quality Scale roadmap.
+#
+# This is a living checklist. "todo" means work remains.
+# It does not claim that the custom integration currently meets that tier.
+
+rules:
+
+# Bronze
+
+action-setup:
+  status: todo
+  comment: Review whether EnergyIQ should expose service actions and ensure any existing actions follow the current HA pattern.
+
+appropriate-polling:
+  status: todo
+  comment: Review coordinator polling and direct Shelly sampling against current HA guidance.
+
+brands:
+  status: done
+  comment: Branding assets are present in custom_components/energyiq/brand/.
+
+common-modules:
+  status: todo
+  comment: Review shared patterns and module boundaries during the architecture cleanup.
+
+config-flow-test-coverage:
+  status: todo
+  comment: No complete HA config-flow test suite exists yet.
+
+config-flow:
+  status: todo
+  comment: Config flow exists, but ConfigEntry data/options boundaries and data_description need review.
+
+dependency-transparency:
+  status: todo
+  comment: Review manifest and imports against current HA dependency guidance.
+
+docs-actions:
+  status: todo
+  comment: Review after action/service architecture is finalized.
+
+docs-conditions:
+  status: exempt
+  comment: EnergyIQ currently provides no Home Assistant condition platform.
+
+docs-high-level-description:
+  status: done
+  comment: README provides a high-level description of EnergyIQ.
+
+docs-installation-instructions:
+  status: todo
+  comment: Expand README with complete HACS and manual installation instructions.
+
+docs-removal-instructions:
+  status: todo
+  comment: Add explicit removal instructions.
+
+docs-triggers:
+  status: exempt
+  comment: EnergyIQ currently provides no Home Assistant trigger platform.
+
+entity-event-setup:
+  status: exempt
+  comment: No dedicated Home Assistant entity event subscriptions are currently exposed as entity lifecycle subscriptions.
+
+entity-unique-id:
+  status: done
+  comment: EnergyIQ sensor entities define unique IDs.
+
+has-entity-name:
+  status: todo
+  comment: EnergyIQ entities currently need migration to the modern has_entity_name pattern.
+
+runtime-data:
+  status: todo
+  comment: Coordinator is currently stored in hass.data; migrate to ConfigEntry.runtime_data.
+
+test-before-configure:
+  status: exempt
+  comment: EnergyIQ is a local Home Assistant analysis integration and does not establish a remote connection during initial configuration.
+
+test-before-setup:
+  status: todo
+  comment: Review setup validation and failure handling as part of the runtime architecture work.
+
+unique-config-entry:
+  status: todo
+  comment: Review whether EnergyIQ should explicitly enforce a single configuration entry.
+
+# Silver
+
+action-exceptions:
+  status: todo
+  comment: Review WebSocket/API actions and error translation.
+
+config-entry-unloading:
+  status: done
+  comment: async_unload_entry and platform unloading are implemented; verify with automated tests.
+
+docs-configuration-parameters:
+  status: todo
+  comment: Document configurable parameters.
+
+docs-installation-parameters:
+  status: todo
+  comment: Document installation/setup parameters.
+
+entity-unavailable:
+  status: todo
+  comment: Review entity availability behavior.
+
+integration-owner:
+  status: done
+  comment: Repository owner @tahouser is the intended integration code owner.
+
+log-when-unavailable:
+  status: todo
+  comment: Review unavailable-device/entity logging behavior.
+
+parallel-updates:
+  status: todo
+  comment: Review coordinator and training concurrency against HA guidance.
+
+reauthentication-flow:
+  status: exempt
+  comment: EnergyIQ currently has no remote authentication flow.
+
+test-coverage:
+  status: todo
+  comment: Build an automated HA test suite before claiming coverage.
+
+# Gold
+
+devices:
+  status: todo
+  comment: Review device registry ownership and stable device identity.
+
+diagnostics:
+  status: todo
+  comment: Consider HA diagnostics support after runtime architecture is stable.
+
+discovery-update-info:
+  status: todo
+  comment: Review whether candidate discovery needs HA-native update information.
+
+discovery:
+  status: todo
+  comment: Review EnergyIQ candidate discovery/reconciliation architecture.
+
+docs-data-update:
+  status: todo
+  comment: Document data/update behavior after the architecture is stabilized.
+
+docs-examples:
+  status: todo
+  comment: Add representative EnergyIQ examples.
+
+docs-known-limitations:
+  status: todo
+  comment: Document known limitations, including candidate discovery boundaries.
+
+docs-supported-devices:
+  status: exempt
+  comment: EnergyIQ analyzes Home Assistant entities rather than directly supporting a fixed device catalog.
+
+docs-supported-functions:
+  status: todo
+  comment: Document supported EnergyIQ functions.
+
+docs-troubleshooting:
+  status: todo
+  comment: Add structured troubleshooting documentation.
+
+docs-use-cases:
+  status: todo
+  comment: Document supported use cases.
+
+dynamic-devices:
+  status: todo
+  comment: Review how EnergyIQ handles devices/entities appearing or disappearing in HA.
+
+entity-category:
+  status: todo
+  comment: Review entity categories.
+
+entity-device-class:
+  status: done
+  comment: Existing EnergyIQ sensors use appropriate power device classification where applicable; verify during entity migration.
+
+entity-disabled-by-default:
+  status: todo
+  comment: Review whether any EnergyIQ entities should be disabled by default.
+
+entity-translations:
+  status: todo
+  comment: Review entity naming and translations during entity architecture work.
+
+exception-translations:
+  status: todo
+  comment: Review user-facing exceptions and translations.
+
+icon-translations:
+  status: todo
+  comment: Review icon handling against current HA standards.
+
+reconfiguration-flow:
+  status: todo
+  comment: Review current options flow versus the dedicated reconfiguration-flow requirement.
+
+repair-issues:
+  status: todo
+  comment: Consider repairs only where they provide meaningful recovery guidance.
+
+stale-devices:
+  status: todo
+  comment: Define reconciliation/removal behavior for stale HA devices and entities.
+
+# Platinum
+
+async-dependency:
+  status: todo
+  comment: Review all dependencies for asynchronous behavior.
+
+inject-websession:
+  status: exempt
+  comment: EnergyIQ does not use a remote web API as its primary integration interface.
+
+strict-typing:
+  status: todo
+  comment: Increase typing coverage after the architecture and runtime boundaries are stabilized.
