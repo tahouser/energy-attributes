@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_USERNAME, CONF_PASSWORD
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -103,6 +104,68 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                     "monitored_entities": self.monitored_entities,
                 },
             )
+
+    def refresh_ha_metadata(self) -> bool:
+        """Refresh HA-owned metadata for existing Home Assistant candidates.
+
+        EnergyIQ retains classifications and training state separately. This
+        method refreshes the current HA device name, area, manufacturer/model,
+        and friendly names for entities already attached to EnergyIQ.
+        """
+        device_registry = dr.async_get(self.hass)
+        entity_registry = er.async_get(self.hass)
+        area_registry = ar.async_get(self.hass)
+        changed = False
+
+        for candidate_id, candidate in self.candidate_devices.items():
+            if str(candidate.get("source", "ha")).casefold() == "manual":
+                continue
+            ha_device_id = candidate.get("ha_device_id") or candidate_id
+            device = device_registry.async_get(ha_device_id)
+            if device is None:
+                continue
+
+            area = area_registry.async_get_area(device.area_id) if device.area_id else None
+            new_values = {
+                "ha_device_id": device.id,
+                "name": device.name_by_user or device.name or candidate.get("name") or "Unnamed device",
+                "area": area.name if area else "",
+                "manufacturer": device.manufacturer or "",
+                "model": device.model or "",
+                "area_id": device.area_id or "",
+                "parent_device_id": getattr(device, "parent_device_id", None),
+            }
+            for key, value in new_values.items():
+                if candidate.get(key) != value:
+                    candidate[key] = value
+                    changed = True
+
+            for key in ("measurements", "controls"):
+                for item in candidate.get(key, []):
+                    entity_id = item.get("entity_id")
+                    entity = entity_registry.async_get(entity_id) if entity_id else None
+                    if entity is None:
+                        continue
+                    name = self._entity_friendly_name(entity)
+                    if item.get("name") != name:
+                        item["name"] = name
+                        changed = True
+
+        if changed:
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                options={
+                    **self.entry.options,
+                    "candidate_devices": self.candidate_devices,
+                },
+            )
+        return changed
+
+    def _entity_friendly_name(self, entity) -> str:
+        state = self.hass.states.get(entity.entity_id)
+        if state is not None and state.attributes.get("friendly_name"):
+            return state.attributes["friendly_name"]
+        return entity.name or entity.original_name or entity.entity_id
 
     async def async_load_training(self):
         saved=await self._store.async_load()

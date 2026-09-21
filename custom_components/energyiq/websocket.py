@@ -242,6 +242,7 @@ async def ws_list_entries(hass, connection, msg):
 @websocket_api.async_response
 async def ws_workspace(hass, connection, msg):
     coordinator = _coordinator(hass, msg["entry_id"])
+    coordinator.refresh_ha_metadata()
     rows = []
     for candidate in coordinator.candidate_devices.values():
         did = candidate["device_id"]
@@ -413,7 +414,7 @@ async def ws_add_entity(hass, connection, msg):
             n += 1
     candidate = coordinator.candidate_devices.get(did)
     if candidate is None:
-        candidate = {"device_id": did, "name": name or entry.name or entry.original_name or entity_id, "area": "", "manufacturer": "", "model": "", "evidence": "", "controls": [], "measurements": [], "source": "ha", "category": "", "manual_added": True}
+        candidate = {"device_id": did, "name": name or entry.name or entry.original_name or entity_id, "area": "", "manufacturer": "", "model": "", "evidence": "", "controls": [], "measurements": [], "source": "ha", "category": "", "manual_added": True, "ha_device_id": entry.device_id or ""}
         if entry.device_id:
             dev = dr.async_get(hass).async_get(entry.device_id)
             if dev:
