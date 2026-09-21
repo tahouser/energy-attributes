@@ -72,8 +72,8 @@ has-entity-name:
   comment: EnergyIQ entities currently need migration to the modern has_entity_name pattern.
 
 runtime-data:
-  status: todo
-  comment: Coordinator is currently stored in hass.data; migrate to ConfigEntry.runtime_data.
+  status: done
+  comment: Coordinator runtime state is stored in ConfigEntry.runtime_data.
 
 test-before-configure:
   status: exempt

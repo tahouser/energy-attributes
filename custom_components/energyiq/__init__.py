@@ -73,7 +73,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v339",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.131",
+            sidebar_title="EnergyIQ • v3.1.132",
             sidebar_icon="mdi:home-lightning-bolt-outline",
             require_admin=False,
         )
@@ -87,7 +87,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     response_log_path = migrate_response_log(hass)
     coordinator = EnergyAttributionCoordinator(hass, entry)
     coordinator._response_log_path = response_log_path
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
 
     await coordinator.async_load_training()
     await coordinator.async_config_entry_first_refresh()
@@ -97,13 +97,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload EnergyIQ integration cleanly."""
-    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coordinator = entry.runtime_data
     if coordinator:
         for device_id in list(coordinator.training_state):
             if coordinator.training_state[device_id].get("status") == "active":
                 await coordinator.async_stop_training(device_id)
 
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
     return ok

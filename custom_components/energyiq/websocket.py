@@ -215,7 +215,7 @@ def _coordinator(hass: HomeAssistant, entry_id: str):
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         raise LookupError("Energy Attribution config entry not found")
-    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    coordinator = entry.runtime_data
     if coordinator is None or not hasattr(coordinator, "entry"):
         raise LookupError("Energy Attribution config entry is not loaded")
     return coordinator
@@ -226,12 +226,11 @@ def _coordinator(hass: HomeAssistant, entry_id: str):
 @websocket_api.async_response
 async def ws_list_entries(hass, connection, msg):
     entries = []
-    for entry_id, coordinator in hass.data.get(DOMAIN, {}).items():
-        if not isinstance(entry_id, str) or entry_id.startswith("_"):
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        coordinator = entry.runtime_data
+        if coordinator is None or not hasattr(coordinator, "entry"):
             continue
-        if not hasattr(coordinator, "entry"):
-            continue
-        entries.append({"entry_id": entry_id, "title": coordinator.entry.title})
+        entries.append({"entry_id": entry.entry_id, "title": entry.title})
     connection.send_result(msg["id"], {"entries": entries})
 
 
