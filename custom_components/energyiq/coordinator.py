@@ -104,6 +104,112 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 },
             )
 
+    def refresh_ha_metadata(self) -> bool:
+        """Refresh HA-owned metadata for existing Home Assistant candidates.
+
+        EnergyIQ retains classifications and training state separately; this
+        method only refreshes names, areas, device metadata, and attached
+        entity IDs from the current Home Assistant registries.
+        """
+        device_registry = dr.async_get(self.hass)
+        entity_registry = er.async_get(self.hass)
+        area_registry = __import__("homeassistant.helpers.area_registry", fromlist=["async_get"]).async_get(self.hass)
+        changed = False
+
+        entities_by_device: dict[str, list[Any]] = {}
+        for entity in entity_registry.entities.values():
+            if entity.device_id:
+                entities_by_device.setdefault(entity.device_id, []).append(entity)
+
+        for candidate_id, candidate in self.candidate_devices.items():
+            if str(candidate.get("source", "ha")).casefold() == "manual":
+                continue
+            ha_device_id = candidate.get("ha_device_id") or candidate_id
+            device = device_registry.async_get(ha_device_id)
+            if device is None:
+                continue
+
+            current_entities = entities_by_device.get(device.id, [])
+            measurements = []
+            controls = []
+            battery = False
+            for entity in current_entities:
+                if entity.disabled_by is not None:
+                    continue
+                state = self.hass.states.get(entity.entity_id)
+                attrs = state.attributes if state is not None else {}
+                if entity.device_class == "battery" or attrs.get("device_class") == "battery":
+                    battery = True
+                if entity.domain == "sensor":
+                    device_class = entity.device_class or attrs.get("device_class")
+                    unit = entity.unit_of_measurement or attrs.get("unit_of_measurement")
+                    state_class = entity.state_class or attrs.get("state_class")
+                    if device_class == "power" and str(unit or "").casefold() in {"w", "kw"} and state_class in (None, "measurement"):
+                        measurements.append({"entity_id": entity.entity_id, "name": self._entity_friendly_name(entity), "kind": "power", "unit": unit or ""})
+                    elif device_class == "energy" and str(unit or "").casefold() in {"wh", "kwh", "mwh", "gwh"} and state_class in (None, "total", "total_increasing"):
+                        measurements.append({"entity_id": entity.entity_id, "name": self._entity_friendly_name(entity), "kind": "energy", "unit": unit or ""})
+                elif entity.domain in {"light", "switch", "fan", "climate", "humidifier", "water_heater", "media_player", "vacuum", "cover"}:
+                    controls.append({"entity_id": entity.entity_id, "name": self._entity_friendly_name(entity), "domain": entity.domain})
+
+            area = area_registry.async_get_area(device.area_id) if device.area_id else None
+            new_candidate = dict(candidate)
+            new_candidate.update({
+                "device_id": candidate_id,
+                "ha_device_id": device.id,
+                "name": device.name_by_user or device.name or candidate.get("name") or "Unnamed device",
+                "area": area.name if area else "",
+                "manufacturer": device.manufacturer or "",
+                "model": device.model or "",
+                "area_id": device.area_id or "",
+                "parent_device_id": getattr(device, "parent_device_id", None),
+                "measurements": measurements,
+                "controls": controls,
+                "battery": battery,
+                "power_count": sum(m["kind"] == "power" for m in measurements),
+                "energy_count": sum(m["kind"] == "energy" for m in measurements),
+                "evidence": self._candidate_evidence(measurements, controls),
+            })
+            if new_candidate != candidate:
+                self.candidate_devices[candidate_id] = new_candidate
+                changed = True
+
+        if changed:
+            self.monitored_entities = [
+                item.get("entity_id")
+                for candidate in self.candidate_devices.values()
+                if str(candidate.get("source", "ha")).casefold() != "manual"
+                for item in candidate.get("measurements", [])
+                if item.get("entity_id")
+            ]
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                options={
+                    **self.entry.options,
+                    "candidate_devices": self.candidate_devices,
+                    "monitored_entities": self.monitored_entities,
+                },
+            )
+        return changed
+
+    def _entity_friendly_name(self, entity) -> str:
+        state = self.hass.states.get(entity.entity_id)
+        if state is not None and state.attributes.get("friendly_name"):
+            return state.attributes["friendly_name"]
+        return entity.name or entity.original_name or entity.entity_id
+
+    @staticmethod
+    def _candidate_evidence(measurements: list[dict[str, Any]], controls: list[dict[str, Any]]) -> str:
+        evidence = []
+        power_count = sum(item.get("kind") == "power" for item in measurements)
+        energy_count = sum(item.get("kind") == "energy" for item in measurements)
+        if power_count:
+            evidence.append(f"{power_count} power")
+        if energy_count:
+            evidence.append(f"{energy_count} energy")
+        if controls:
+            evidence.append("control: " + ", ".join(sorted({item.get("domain", "") for item in controls})))
+        return "; ".join(evidence)
+
     async def async_load_training(self):
         saved=await self._store.async_load()
         if isinstance(saved, dict):
