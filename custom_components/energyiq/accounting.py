@@ -11,7 +11,7 @@ def _coordinator(hass, entry_id):
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         raise LookupError("Energy Attribution config entry not found")
-    coordinator = hass.data.get(DOMAIN, {}).get(entry_id)
+    coordinator = entry.runtime_data
     if coordinator is None:
         raise LookupError("Energy Attribution config entry is not loaded")
     return coordinator

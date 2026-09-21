@@ -16,7 +16,7 @@ async def async_setup_entry(
     hass: HomeAssistant, entry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up EnergyIQ sensors."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     async_add_entities([WholeHomePowerSensor(coordinator, entry.entry_id), TrainingStatusSensor(coordinator)])
 
 

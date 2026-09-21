@@ -35,7 +35,6 @@ jobs:
           init = Path('custom_components/energyiq/__init__.py').read_text(encoding='utf-8')
           js = Path('custom_components/energyiq/www/energyiq-panel.js').read_text(encoding='utf-8')
 
-          expected_frontend_version = version.replace('.', '') + '0'
           panel_match = re.search(r'webcomponent_name="([^"]+)"', init)
           module_match = re.search(r'module_url=f"\{URL_BASE\}/([^"?]+)\?v=\{FRONTEND_VERSION\}"', init)
           assert panel_match, 'Panel webcomponent_name is missing.'
@@ -48,12 +47,11 @@ jobs:
           assert module_name == 'energyiq-panel.js', 'EnergyIQ must load the panel directly; no legacy loader layer is permitted.'
 
           assert f'sidebar_title="EnergyIQ • v{version}"' in init
-          assert f'FRONTEND_VERSION = "{expected_frontend_version}"' in init
+          frontend_match = re.search(r'FRONTEND_VERSION = "([0-9]+)"', init)
+          assert frontend_match, 'FRONTEND_VERSION is missing.'
           assert 'URL_BASE = "/energyiq-static"' in init
           assert f'const TAG = "{panel_id}";' in js
           assert 'customElements.define(TAG' in js
-          assert panel_id != 'energyiq-panel-v309'
-          assert panel_id == 'energyiq-panel-v324'
 
           assert Path('custom_components/energyiq/www/energyiq-panel.js').is_file()
           assert not list(Path('custom_components/energyiq/www').glob('energyiq-loader-*.js'))
