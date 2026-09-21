@@ -26,6 +26,7 @@ class WholeHomePowerSensor(CoordinatorEntity[EnergyAttributionCoordinator], Sens
     _attr_device_class = SensorDeviceClass.POWER
     _attr_native_unit_of_measurement = UnitOfPower.WATT
     _attr_icon = "mdi:flash"
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator, entry_id: str) -> None:
         super().__init__(coordinator)
@@ -43,6 +44,7 @@ class TrainingStatusSensor(SensorEntity):
 
     _attr_name = "EnergyIQ Training"
     _attr_icon = "mdi:school"
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator):
         self.coordinator = coordinator

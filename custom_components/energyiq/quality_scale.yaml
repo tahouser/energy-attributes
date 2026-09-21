@@ -68,8 +68,8 @@ entity-unique-id:
   comment: EnergyIQ sensor entities define unique IDs.
 
 has-entity-name:
-  status: todo
-  comment: EnergyIQ entities currently need migration to the modern has_entity_name pattern.
+  status: done
+  comment: EnergyIQ sensor entities use has_entity_name with stable existing entity names.
 
 runtime-data:
   status: done
