@@ -8,7 +8,7 @@
 (() => {
   const TAG = "energyiq-panel-v339";
   const VERSION = "31422";
-  const UI_VERSION = "3.1.147";
+  const UI_VERSION = "3.1.148";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon.png?v=31422";
+      this.brandUrl = "/energyiq-brand/icon.png?v=31423";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
