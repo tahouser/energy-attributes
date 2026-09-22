@@ -19,7 +19,9 @@ jobs:
         run: python -m compileall -q custom_components/energyiq tests
 
       - name: Validate frontend JavaScript syntax
-        run: node --check custom_components/energyiq/www/energyiq-panel.js
+        run: |
+          node --check custom_components/energyiq/www/energyiq-panel.js
+          node --check custom_components/energyiq/www/energyiq-card.js
 
       - name: Validate release structure and panel loading
         shell: bash
