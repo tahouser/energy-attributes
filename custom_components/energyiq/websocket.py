@@ -309,6 +309,47 @@ async def ws_set_monitoring(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/remove_devices",
+    vol.Required("entry_id"): str,
+    vol.Required("device_ids"): [str],
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_remove_devices(hass, connection, msg):
+    """Remove excluded candidates from the EnergyIQ inventory."""
+    coordinator = _coordinator(hass, msg["entry_id"])
+    requested = set(msg["device_ids"])
+    removed = []
+    rejected = []
+
+    for did in requested:
+        if did not in coordinator.candidate_devices:
+            continue
+        if coordinator.device_classifications.get(did, "ignore") == "monitor":
+            rejected.append(did)
+            continue
+        coordinator.candidate_devices.pop(did, None)
+        coordinator.device_classifications.pop(did, None)
+        coordinator.training_state.pop(did, None)
+        if getattr(coordinator, "last_training_device_id", None) == did:
+            coordinator.last_training_device_id = None
+        removed.append(did)
+
+    coordinator.monitored_entities = _monitored_entity_ids(coordinator)
+    _save_options(
+        coordinator,
+        candidate_devices=coordinator.candidate_devices,
+        device_classifications=coordinator.device_classifications,
+        monitored_entities=coordinator.monitored_entities,
+    )
+    connection.send_result(msg["id"], {
+        "saved": True,
+        "removed": removed,
+        "rejected": rejected,
+    })
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "energy_attribution/add_manual_device",
     vol.Required("entry_id"): str,
     vol.Required("name"): str,
@@ -593,5 +634,5 @@ async def ws_stop_training(hass, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_stop_training):
+    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_remove_devices, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_stop_training):
         websocket_api.async_register_command(hass, handler)
