@@ -45,7 +45,7 @@ if (!customElements.get(TAG)) {
     connectedCallback(){ this.addEventListener("click",this._click); this._loading(); this._observeSize(); if(this._hass)this._start(); }
     disconnectedCallback(){ if(this._timer)clearInterval(this._timer); if(this._ro)this._ro.disconnect(); this.removeEventListener("click",this._click); }
     getCardSize(){return 4;}
-    getGridOptions(){return {columns:"full",rows:"auto"};}
+    getGridOptions(){return {columns:"full",rows:4,min_rows:4};}
     async _ws(m){return this._hass.connection.sendMessagePromise(m);}
     _observeSize(){
       if(typeof ResizeObserver==="undefined"||this._ro)return;
