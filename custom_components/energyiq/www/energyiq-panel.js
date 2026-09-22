@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v339";
-  const VERSION = "31415";
-  const UI_VERSION = "3.1.140";
+  const VERSION = "31416";
+  const UI_VERSION = "3.1.141";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon.png?v=31415";
+      this.brandUrl = "/energyiq-brand/icon.png?v=31416";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -301,9 +301,9 @@
           ${this.renderMeters()}
         </div>
         ${this.trainingWorkspaceOpen?`<div id="training-area">${this.renderTrainingWorkspace()}</div>`:""}
-        <div class="toolbar"><div class="views"><button id="all" class="${this.view==="all"?"selected":""}">All <span>${devices.length}</span></button><button id="trained" class="${this.view==="trained"?"selected":""}">Trained <span>${trainedCount}</span></button><button id="excluded" class="${this.view==="excluded"?"selected":""}">Excluded <span>${excludedCount}</span></button></div><div class="toolbar-actions"><button id="add">＋ Add Device / Entity</button><button id="save" class="primary" ${dirty?"":"disabled"}>Save Changes</button></div></div>
+        <div class="toolbar"><div class="views"><button id="all" class="${this.view==="all"?"selected":""}">All <span>${devices.length}</span></button><button id="trained" class="${this.view==="trained"?"selected":""}">Trained <span>${trainedCount}</span></button><button id="excluded" class="${this.view==="excluded"?"selected":""}">Excluded <span>${excludedCount}</span></button></div><div class="toolbar-actions">${this.view === "excluded" ? `<button id="empty-excluded" class="action-exclude" ${excludedCount ? "" : "disabled"}>Empty Excluded</button>` : ""}<button id="add">＋ Add Device / Entity</button><button id="save" class="primary" ${dirty?"":"disabled"}>Save Changes</button></div></div>
         <div class="list-tools"><label class="search-box"><span>⌕</span><input id="device-search" type="search" value="${this.escape(this.searchTerm)}" placeholder="Search devices, areas, entities…" autocomplete="off"></label></div>
-        <div class="selection-bar"><div class="selection-count"><span class="selection-box">☐</span><strong>${selected}</strong> selected</div><div class="selection-actions"><button id="begin-training" class="action-training" ${canTrain?"":"disabled"}>Begin Training</button><button id="include" class="action-include" ${selected?"":"disabled"}>Include</button><button id="exclude" class="action-exclude" ${selected?"":"disabled"}>Exclude</button><button id="clear-selection" ${selected?"":"disabled"}>Clear Selection</button></div></div>
+        <div class="selection-bar"><div class="selection-count"><span class="selection-box">☐</span><strong>${selected}</strong> selected</div><div class="selection-actions"><button id="begin-training" class="action-training" ${canTrain?"":"disabled"}>Begin Training</button><button id="include" class="action-include" ${selected?"":"disabled"}>Include</button>${this.view === "excluded" ? `<button id="remove-excluded" class="action-exclude" ${selected?"":"disabled"}>Remove Selected</button>` : `<button id="exclude" class="action-exclude" ${selected?"":"disabled"}>Exclude</button>`}<button id="clear-selection" ${selected?"":"disabled"}>Clear Selection</button></div></div>
         <div class="table-scroll"><table><thead><tr><th class="select-col">☐</th><th>Device</th><th>Area</th><th>Source</th><th>Live Watts</th><th>Trained Watts</th><th>State</th><th>Training</th><th>Method</th></tr></thead><tbody>${rows.length?rows.map(d=>this.row(d)).join(""):`<tr><td colspan="9" class="empty">No devices match this view.</td></tr>`}</tbody></table></div>
       </div>`;
       this.bind();
@@ -334,6 +334,8 @@
       this.querySelectorAll("[data-select]").forEach(box=>box.addEventListener("change",event=>{const list=this.querySelector(".table-scroll"),top=list?.scrollTop||0,left=list?.scrollLeft||0,id=event.currentTarget.dataset.select;if(event.currentTarget.checked)this.selectedIds.add(id);else this.selectedIds.delete(id);this.render();requestAnimationFrame(()=>{const next=this.querySelector(".table-scroll");if(next){next.scrollTop=top;next.scrollLeft=left;}});}));
       this.querySelector("#include")?.addEventListener("click",()=>this.applyClassification("include"));
       this.querySelector("#exclude")?.addEventListener("click",()=>this.applyClassification("exclude"));
+      this.querySelector("#remove-excluded")?.addEventListener("click",()=>this.removeExcluded(this.selectedIds));
+      this.querySelector("#empty-excluded")?.addEventListener("click",()=>this.removeExcluded(this.getDevices().filter(d=>!this.getIncludedIds().has(d.device_id)).map(d=>d.device_id), true));
       this.querySelector("#clear-selection")?.addEventListener("click",()=>{this.selectedIds.clear();this.render();});
       this.querySelector("#begin-training")?.addEventListener("click",()=>this.beginSelectedTraining());
       this.bindTrainingWorkspace();
@@ -344,6 +346,35 @@
       for(const id of this.selectedIds){if(action==="include")this.pendingIncluded.add(id);else this.pendingIncluded.delete(id);}
       this.page=1;this.render();
     }
+    async removeExcluded(ids, empty = false) {
+      const candidates = [...new Set(ids)].filter(id => {
+        const device = this.getDevice(id);
+        return device && !this.getIncludedIds().has(id);
+      });
+      if (!candidates.length) return;
+      const message = empty
+        ? "Remove all excluded devices from EnergyIQ? They will no longer be in the EnergyIQ inventory and can be added again later from Add Device / Entity."
+        : candidates.length === 1
+          ? "Remove this excluded device from EnergyIQ? It will no longer be in the EnergyIQ inventory and can be added again later."
+          : `Remove ${candidates.length} excluded devices from EnergyIQ? They will no longer be in the EnergyIQ inventory and can be added again later.`;
+      if (!window.confirm(message)) return;
+      try {
+        await this.ws({
+          type: "energy_attribution/remove_devices",
+          entry_id: this.entryId,
+          device_ids: candidates,
+        });
+        this.pendingIncluded = null;
+        this.selectedIds.clear();
+        this.view = "excluded";
+        this.page = 1;
+        await this.refresh(true);
+        this.showToast(empty ? "Excluded list emptied." : "Selected excluded devices removed.");
+      } catch (error) {
+        this.showToast(error?.message || "Unable to remove excluded devices", true);
+      }
+    }
+
     async beginSelectedTraining() {
       if (!this.selectedCanTrain()) return;
       const deviceIds = [...this.selectedIds];
