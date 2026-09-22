@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.150 */
+/* EnergyIQ dashboard card — 3.1.151 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -45,6 +45,7 @@ if (!customElements.get(TAG)) {
     connectedCallback(){ this.addEventListener("click",this._click); this._loading(); this._observeSize(); if(this._hass)this._start(); }
     disconnectedCallback(){ if(this._timer)clearInterval(this._timer); if(this._ro)this._ro.disconnect(); this.removeEventListener("click",this._click); }
     getCardSize(){return 4;}
+    getGridOptions(){return {columns:"full",rows:"auto"};}
     async _ws(m){return this._hass.connection.sendMessagePromise(m);}
     _observeSize(){
       if(typeof ResizeObserver==="undefined"||this._ro)return;
