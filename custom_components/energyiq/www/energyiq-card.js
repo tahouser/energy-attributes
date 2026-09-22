@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.163 */
+/* EnergyIQ dashboard card — 3.1.164 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -128,11 +128,15 @@ if (!customElements.get(TAG)) {
       const clean=(samples||[]).filter(Number.isFinite);
       if(!clean.length||!Number.isFinite(value))return {pct:value>0?50:0,percentile:null,sampleCount:clean.length};
       const sorted=[...clean].sort((a,b)=>a-b);
-      const p10=sorted[Math.max(0,Math.floor((sorted.length-1)*0.10))];
       const p90=sorted[Math.max(0,Math.floor((sorted.length-1)*0.90))];
-      const span=Math.max(0.01,p90-p10);
-      const scaled=Math.max(0,Math.min(100,(value-p10)/span*100));
-      return {pct:Math.max(3,Math.min(100,scaled)),percentile:this._percentile(clean,value),sampleCount:clean.length};
+      const heavyUseThreshold=Math.max(0.01,p90);
+      const scaled=value/heavyUseThreshold*100;
+      return {
+        pct:Math.max(3,Math.min(100,scaled)),
+        percentile:this._percentile(clean,value),
+        sampleCount:clean.length,
+        heavyUseThreshold
+      };
     }
     async _loadCostHistory(){
       if(!this._hass||!this._cfg.cost_entity&&!this._cfg.peak_cost_entity&&!this._cfg.off_peak_cost_entity)return;
@@ -267,8 +271,9 @@ if (!customElements.get(TAG)) {
         const percentile=info&&Number.isFinite(info.percentile)?Math.round(info.percentile):null;
         const sampleCount=info&&Number.isFinite(info.sampleCount)?info.sampleCount:0;
         const label=percentile==null?"Historical range unavailable":percentile+"th percentile of recent history";
-        const gradient=type==="peak"?"linear-gradient(90deg,rgba(54,200,255,.72) 0%,rgba(38,198,218,.82) 38%,rgba(255,193,7,.9) 70%,rgba(239,83,80,.95) 100%)":"linear-gradient(90deg,rgba(255,179,0,.42) 0%,rgba(255,193,7,.62) 38%,rgba(255,112,67,.82) 70%,rgba(239,83,80,.95) 100%)";
-        return '<div class="cost-bar-row"><div class="cost-bar-label"><span>'+(type==="peak"?"Peak":"Off-Peak")+'</span><b>'+money(value)+'</b></div><div class="cost-track" title="'+label+'"><div class="cost-fill '+type+'" style="width:'+pct+'%;background:'+gradient+'"></div></div><div class="cost-bar-meta">'+(percentile==null?"Learning history…":percentile+"th percentile")+(sampleCount?" · "+sampleCount+" samples":"")+'</div></div>';
+        const gradient="linear-gradient(90deg,var(--success-color) 0%,var(--success-color) 58%,var(--warning-color) 78%,var(--error-color) 100%)";
+        const severity=percentile==null?"on-track":percentile>=90?"heavy":percentile>=75?"elevated":"on-track";
+        return '<div class="cost-bar-row"><div class="cost-bar-label"><span>'+(type==="peak"?"Peak":"Off-Peak")+'</span><b>'+money(value)+'</b></div><div class="cost-track" title="'+label+'"><div class="cost-fill '+type+'" style="width:'+pct+'%;background:'+gradient+'"></div></div><div class="cost-bar-meta">'+(percentile==null?"Learning history…":percentile+"th percentile · "+severity)+(sampleCount?" · "+sampleCount+" samples":"")+'</div></div>';
       };
       return '<div class="cost-swipe" role="group" aria-label="Cost period '+periodLabel+'. Swipe left or right to change period."><div class="cost-period-nav"><button type="button" data-cost-period="prev" aria-label="Previous cost period">‹</button><strong>'+periodLabel+'</strong><button type="button" data-cost-period="next" aria-label="Next cost period">›</button></div><div class="cost-bars">'+bar(peakValue,learned&&learned.peak,"peak")+bar(offValue,learned&&learned.off,"off")+'</div><div class="cost-swipe-hint">'+periodLabel+' · SWIPE</div><div class="cost-dots">'+periods.map(function(p){return '<i class="'+(p===this._costPeriod?"on":"")+'"></i>';},this).join("")+'</div></div>';
     }
