@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v339";
-  const VERSION = "31414";
-  const UI_VERSION = "3.1.139";
+  const VERSION = "31415";
+  const UI_VERSION = "3.1.140";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon.png?v=31414";
+      this.brandUrl = "/energyiq-brand/icon.png?v=31415";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -226,10 +226,14 @@
     renderLoading() { this.innerHTML = `<ha-card class="loading"><h2>EnergyIQ</h2><p>Loading workspace…</p></ha-card>`; }
     renderError(error) { this.innerHTML = `<ha-card class="error"><h2>EnergyIQ</h2><p>${this.escape(error?.message || error)}</p></ha-card>`; }
 
+    getActiveConsumerDevices() {
+      return this.getDevices()
+        .filter(d => this.getIncludedIds().has(d.device_id) && d.training?.status === "complete" && Number(this.livePower(d)) > 5)
+        .sort((a,b) => Number(this.livePower(b)) - Number(this.livePower(a)));
+    }
+
     showActiveConsumers() {
-      const devices = this.getDevices()
-        .filter(d => this.getIncludedIds().has(d.device_id) && d.training?.status === "complete" && Number(this.livePower(d) || d.current_power) > 5)
-        .sort((a,b) => Number(this.livePower(b) || b.current_power || 0) - Number(this.livePower(a) || a.current_power || 0));
+      const devices = this.getActiveConsumerDevices();
       const fmt = d => { const w = this.livePower(d); return Number.isFinite(w) ? `${w.toFixed(0)} W` : "—"; };
       const rows = devices.length
         ? devices.map(d => `<div class="active-consumer-row"><span>${this.escape(d.name || d.device_id)}</span><strong>${fmt(d)}</strong></div>`).join("")
@@ -244,7 +248,7 @@
     renderSummary() {
       const devices=this.getDevices(), included=this.getIncludedIds();
       const trained=devices.filter(d=>included.has(d.device_id)&&d.training?.status==="complete").length;
-      const active=devices.filter(d=>included.has(d.device_id)&&Number(d.current_power)>5).length;
+      const active=this.getActiveConsumerDevices().length;
       const home=Number(this.workspace?.whole_home_power), trainedWatts=Number(this.workspace?.trained_live_power_w||0);
       const mystery=Number.isFinite(home)?Math.max(0,home-trainedWatts):null;
       const fmt=v=>Number.isFinite(v)?`${v.toFixed(0)} W`:"—", progress=included.size?`${trained} / ${included.size}`:"0 / 0";
