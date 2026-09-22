@@ -252,6 +252,38 @@ def _build_candidates(hass, whole_home_entity: str | None = None) -> list[dict[s
     return candidates
 
 
+def _reconcile_candidates(
+    existing: dict[str, dict[str, Any]],
+    discovered: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Reconcile HA discovery with the persistent EnergyIQ candidate inventory.
+
+    HA-owned metadata and attached entities come from the current discovery
+    snapshot. EnergyIQ-owned fields on existing candidates are preserved.
+    Existing candidates that are no longer discovered are retained so that an
+    HA outage or temporary removal cannot silently discard EnergyIQ state.
+    """
+    discovered_by_id = {candidate["device_id"]: candidate for candidate in discovered}
+    merged: dict[str, dict[str, Any]] = {}
+
+    for device_id, candidate in existing.items():
+        fresh = discovered_by_id.pop(device_id, None)
+        if fresh is None:
+            merged[device_id] = dict(candidate)
+            continue
+        preserved = dict(candidate)
+        preserved.update(fresh)
+        for key in ("category", "classification", "manual_added", "source"):
+            if key in candidate:
+                preserved[key] = candidate[key]
+        merged[device_id] = preserved
+
+    for device_id, candidate in discovered_by_id.items():
+        merged[device_id] = dict(candidate)
+
+    return merged
+
+
 def _candidate_options(candidates: list[dict[str, Any]]) -> list[SelectOptionDict]:
     """Create readable bulk-selection options."""
     options: list[SelectOptionDict] = []
@@ -337,9 +369,15 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
     """Persistent commissioning workspace."""
 
     async def async_step_init(self, user_input=None):
-        candidates = _build_candidates(
+        discovered = _build_candidates(
             self.hass, self.config_entry.data.get(CONF_POWER_ENTITY)
         )
+        existing = dict(self.config_entry.options.get(
+            "candidate_devices",
+            self.config_entry.data.get("candidate_devices", {}),
+        ))
+        candidates_map = _reconcile_candidates(existing, discovered)
+        candidates = list(candidates_map.values())
         if not candidates:
             return self.async_abort(reason="no_candidates")
 
@@ -358,11 +396,26 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 c["device_id"]: ("monitor" if c["device_id"] in selected else "ignore")
                 for c in candidates
             }
-            return self.async_create_entry(data={
-                CONF_MONITORED_ENTITIES: _monitored_entities(candidates, selected),
+            monitored = _monitored_entities(candidates, selected)
+            options = dict(self.config_entry.options)
+            options.update({
+                CONF_MONITORED_ENTITIES: monitored,
                 "device_classifications": classifications,
-                "candidate_devices": {c["device_id"]: c for c in candidates},
+                "candidate_devices": candidates_map,
+                "commissioned_devices": dict(options.get(
+                    "commissioned_devices",
+                    self.config_entry.data.get("commissioned_devices", {}),
+                )),
+                "training_state": dict(options.get(
+                    "training_state",
+                    self.config_entry.data.get("training_state", {}),
+                )),
+                "training_samples": dict(options.get(
+                    "training_samples",
+                    self.config_entry.data.get("training_samples", {}),
+                )),
             })
+            return self.async_create_entry(data=options)
 
         schema = vol.Schema({
             vol.Required("monitored_devices", default=selected_default): SelectSelector(
