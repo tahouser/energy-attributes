@@ -1,3 +1,4 @@
+/* EnergyIQ dashboard card — 3.1.147 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -43,8 +44,8 @@ if (!customElements.get(TAG)) {
     set hass(h){ this._hass=h; if(!this._busy&&!this._data)this._start(); else if(this._data)this._render(); }
     connectedCallback(){ this.addEventListener("click",this._click); this._loading(); this._observeSize(); if(this._hass)this._start(); }
     disconnectedCallback(){ if(this._timer)clearInterval(this._timer); if(this._ro)this._ro.disconnect(); this.removeEventListener("click",this._click); }
-    getCardSize(){return 7;}
-    getGridOptions(){return {rows:6,columns:6,min_rows:5,max_rows:8,min_columns:3,max_columns:12};}
+    getCardSize(){return 6;}
+    getGridOptions(){return {rows:6,columns:6,min_rows:5,max_rows:10,min_columns:3,max_columns:12};}
     async _ws(m){return this._hass.connection.sendMessagePromise(m);}
     _observeSize(){
       if(typeof ResizeObserver==="undefined"||this._ro)return;
@@ -140,5 +141,5 @@ if (!customElements.get(TAG)) {
   if (!customElements.get("energyiq-card-editor")) {
     customElements.define("energyiq-card-editor", EnergyIQCardEditor);
   }
-  customElements.define(TAG,EnergyIQCard); window.customCards=window.customCards||[]; window.customCards.push({type:TAG,name:"EnergyIQ",description:"EnergyIQ consumption, Mystery Watts, and cost in one card.",preview:false,documentationURL:"https://github.com/tahouser/energy-attributes",configurable:true});
+  customElements.define(TAG,EnergyIQCard); window.customCards=window.customCards||[]; window.customCards.push({type:TAG,name:"EnergyIQ",description:"EnergyIQ dashboard card for whole-home power attribution, Mystery Watts, and cost.",preview:true,documentationURL:"https://github.com/tahouser/energy-attributes",configurable:true});
 }
