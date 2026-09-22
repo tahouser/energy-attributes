@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.157 */
+/* EnergyIQ dashboard card — 3.1.159 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -74,21 +74,27 @@ if (!customElements.get(TAG)) {
     }
     async _loadCostHistory(){
       if(!this._hass||!this._cfg.cost_entity&&!this._cfg.peak_cost_entity&&!this._cfg.off_peak_cost_entity)return;
-      const ids=[this._cfg.peak_cost_entity||"sensor.dte_peak_energy_cost",this._cfg.off_peak_cost_entity||"sensor.dte_off_peak_energy_cost"];
+      const peakCostId=this._cfg.peak_cost_entity||"sensor.dte_peak_energy_cost";
+      const offPeakCostId=this._cfg.off_peak_cost_entity||"sensor.dte_off_peak_energy_cost";
+      const peakEnergyId="sensor.dte_house_energy_peak";
+      const peakRateId="input_number.dte_peak_base_rate";
+      const ids=[peakCostId,offPeakCostId,peakEnergyId];
       try{
         const {start,end}=this._periodBounds(this._costPeriod);
         const history=await this._ws({type:"history/history_during_period",start_time:start.toISOString(),end_time:end.toISOString(),entity_ids:ids,include_start_time_state:true,significant_changes_only:true,minimal_response:true,no_attributes:true});
-        const values={};
-        ids.forEach(id=>{
+        const delta=id=>{
           const states=(history&&history[id])||[];
           const nums=states.map(x=>Number(x.s??x.state)).filter(Number.isFinite);
           const current=this._state(id);
           const first=nums.length?nums[0]:null;
           const last=nums.length?nums[nums.length-1]:current;
-          values[id]=first==null||last==null?null:Math.max(0,last-first);
-        });
-        const peak=values[ids[0]],off=values[ids[1]];
-        this._costHistory={peak:peak==null?null:peak,off:off==null?null:off,total:peak==null&&off==null?null:(peak||0)+(off||0)};
+          return first==null||last==null?null:Math.max(0,last-first);
+        };
+        const off=delta(offPeakCostId);
+        const peakEnergy=delta(peakEnergyId);
+        const peakRate=this._state(peakRateId);
+        const peak=peakEnergy==null||peakRate==null?null:Math.max(0,peakEnergy*peakRate);
+        this._costHistory={peak,off,total:peak==null&&off==null?null:(peak||0)+(off||0)};
         this._costHistoryAt=Date.now();
       }catch(e){console.error("EnergyIQ cost history",e);this._costHistory={peak:null,off:null,total:null};this._costHistoryAt=Date.now();}
       this._render();
