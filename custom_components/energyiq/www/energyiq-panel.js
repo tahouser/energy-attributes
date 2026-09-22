@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v339";
-  const VERSION = "31416";
-  const UI_VERSION = "3.1.141";
+  const VERSION = "31417";
+  const UI_VERSION = "3.1.142";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon.png?v=31416";
+      this.brandUrl = "/energyiq-brand/icon.png?v=31417";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -34,7 +34,8 @@
       this.bulkTimer = null;
       this.bulkStarting = false;
       this.trainingSessionStarted = new Set();
-      this.upperSectionsCollapsed = this.loadUpperSectionsCollapsed();
+      this.upperSectionsCollapsed = this.loadUpperSectionsCollapsed();      this.sortColumn = "name";
+      this.sortDirection = "asc";
     }
 
     setConfig() {}
@@ -133,7 +134,41 @@
     getPersistedIds() { return new Set(this.getDevices().filter(d => d.classification === "monitor").map(d => d.device_id)); }
     getIncludedIds() { return this.pendingIncluded ? new Set(this.pendingIncluded) : this.getPersistedIds(); }
     getSelectedIds() { return new Set(this.selectedIds); }
-    hasPendingChanges() {
+        setSort(column) {
+      if (this.sortColumn === column) this.sortDirection = this.sortDirection === "asc" ? "desc" : "asc";
+      else { this.sortColumn = column; this.sortDirection = "asc"; }
+      this.page = 1;
+      this.render();
+    }
+    sortValue(device, column) {
+      if (column === "name") return String(device?.name || device?.device_id || "");
+      if (column === "area") return String(device?.area || "");
+      if (column === "source") return String(device?.source || "").toLowerCase() === "manual" ? "Manual" : "HA";
+      if (column === "live") return this.livePower(device);
+      if (column === "trained") return Number(device?.training?.learned_signature?.load_w);
+      if (column === "state") return this.stateFor(device) || "";
+      if (column === "training") return this.trainingStatus(device);
+      if (column === "method") return String(device?.training?.method || "");
+      return "";
+    }
+    sortDevices(devices) {
+      const column = this.sortColumn || "name";
+      const direction = this.sortDirection === "desc" ? -1 : 1;
+      return devices.map((device,index)=>({device,index,value:this.sortValue(device,column)})).sort((a,b)=>{
+        const av=a.value,bv=b.value;
+        const an=typeof av==="number"&&Number.isFinite(av),bn=typeof bv==="number"&&Number.isFinite(bv);
+        let result=0;
+        if(an||bn){if(!an&&!bn)result=0;else if(!an)result=1;else if(!bn)result=-1;else result=av-bv;}
+        else result=String(av).localeCompare(String(bv),undefined,{numeric:true,sensitivity:"base"});
+        return result===0 ? a.index-b.index : result*direction;
+      }).map(item=>item.device);
+    }
+    sortHeader(column,label) {
+      const active=this.sortColumn===column;
+      const arrow=active ? (this.sortDirection==="asc" ? " ↑" : " ↓") : "";
+      return '<th class="sortable-header '+(active?"sort-active":"")+'" data-sort="'+column+'" aria-sort="'+(active?(this.sortDirection==="asc"?"ascending":"descending"):"none")+'" title="Sort by '+label+'">'+label+arrow+'</th>';
+    }
+hasPendingChanges() {
       const current = this.getPersistedIds(), pending = this.getIncludedIds();
       if (current.size !== pending.size) return true;
       for (const id of current) if (!pending.has(id)) return true;
@@ -149,7 +184,8 @@
         if (!term) return true;
         const haystack = [d.name,d.device_id,d.area,d.source,d.category,d.model,...(d.controls||[]).map(x=>x?.entity_id),...(d.measurements||[]).map(x=>x?.entity_id)].join(" ").toLowerCase();
         return haystack.includes(term);
-      }).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+      });
+      return this.sortDevices(devices);
     }
     selectedCanTrain() {
       if (this.bulkStarting || this.bulk?.status === "running") return false;
@@ -304,7 +340,7 @@
         <div class="toolbar"><div class="views"><button id="all" class="${this.view==="all"?"selected":""}">All <span>${devices.length}</span></button><button id="trained" class="${this.view==="trained"?"selected":""}">Trained <span>${trainedCount}</span></button><button id="excluded" class="${this.view==="excluded"?"selected":""}">Excluded <span>${excludedCount}</span></button></div><div class="toolbar-actions">${this.view === "excluded" ? `<button id="empty-excluded" class="action-exclude" ${excludedCount ? "" : "disabled"}>Empty Excluded</button>` : ""}<button id="add">＋ Add Device / Entity</button><button id="save" class="primary" ${dirty?"":"disabled"}>Save Changes</button></div></div>
         <div class="list-tools"><label class="search-box"><span>⌕</span><input id="device-search" type="search" value="${this.escape(this.searchTerm)}" placeholder="Search devices, areas, entities…" autocomplete="off"></label></div>
         <div class="selection-bar"><div class="selection-count"><span class="selection-box">☐</span><strong>${selected}</strong> selected</div><div class="selection-actions"><button id="begin-training" class="action-training" ${canTrain?"":"disabled"}>Begin Training</button><button id="include" class="action-include" ${selected?"":"disabled"}>Include</button>${this.view === "excluded" ? `<button id="remove-excluded" class="action-exclude" ${selected?"":"disabled"}>Remove Selected</button>` : `<button id="exclude" class="action-exclude" ${selected?"":"disabled"}>Exclude</button>`}<button id="clear-selection" ${selected?"":"disabled"}>Clear Selection</button></div></div>
-        <div class="table-scroll"><table><thead><tr><th class="select-col">☐</th><th>Device</th><th>Area</th><th>Source</th><th>Live Watts</th><th>Trained Watts</th><th>State</th><th>Training</th><th>Method</th></tr></thead><tbody>${rows.length?rows.map(d=>this.row(d)).join(""):`<tr><td colspan="9" class="empty">No devices match this view.</td></tr>`}</tbody></table></div>
+        <div class="table-scroll"><table><thead><tr><th class="select-col">☐</th>${this.sortHeader("name","Device")}${this.sortHeader("area","Area")}${this.sortHeader("source","Source")}${this.sortHeader("live","Live Watts")}${this.sortHeader("trained","Trained Watts")}${this.sortHeader("state","State")}${this.sortHeader("training","Training")}${this.sortHeader("method","Method")}</tr></thead><tbody>${rows.length?rows.map(d=>this.row(d)).join(""):`<tr><td colspan="9" class="empty">No devices match this view.</td></tr>`}</tbody></table></div>
       </div>`;
       this.bind();
     }
@@ -337,7 +373,8 @@
       this.querySelector("#remove-excluded")?.addEventListener("click",()=>this.removeExcluded(this.selectedIds));
       this.querySelector("#empty-excluded")?.addEventListener("click",()=>this.removeExcluded(this.getDevices().filter(d=>!this.getIncludedIds().has(d.device_id)).map(d=>d.device_id), true));
       this.querySelector("#clear-selection")?.addEventListener("click",()=>{this.selectedIds.clear();this.render();});
-      this.querySelector("#begin-training")?.addEventListener("click",()=>this.beginSelectedTraining());
+            this.querySelectorAll("[data-sort]").forEach(header=>header.addEventListener("click",()=>this.setSort(header.dataset.sort)));
+this.querySelector("#begin-training")?.addEventListener("click",()=>this.beginSelectedTraining());
       this.bindTrainingWorkspace();
     }
     applyClassification(action) {
@@ -535,7 +572,7 @@
       .toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px}.views,.toolbar-actions,.selection-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap}.views button{border-radius:9px;padding:8px 13px}.views button.selected{background:rgba(38,184,240,.16);border-color:#26b8f0;color:#5dd5ff}.views button span{opacity:.7;margin-left:3px}
       .list-tools{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:4px 0 8px}.search-box{display:flex;align-items:center;gap:8px;flex:1;max-width:520px;border:1px solid var(--divider-color);border-radius:9px;background:var(--card-background-color);padding:0 11px}.search-box span{font-size:21px;color:var(--secondary-text-color)}.search-box input{width:100%;border:0;outline:0;background:transparent;color:var(--primary-text-color);padding:10px 0;font:inherit}.result-count{font-size:12px;color:var(--secondary-text-color)}
       .selection-bar{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:9px 11px;margin-bottom:10px;border:1px solid var(--divider-color);border-radius:10px;background:rgba(18,28,42,.55)}.selection-count{font-size:13px;white-space:nowrap}.selection-count strong{font-size:15px;margin-right:4px}.selection-box{color:#36c8ff;margin-right:5px}.action-training{border-color:#36c8ff;color:#63d7ff}.action-include{background:#35b85a;border-color:#35b85a;color:#07140b;font-weight:800}.action-exclude{border-color:#ff4d5f;color:#ff6574}.action-exclude:hover{background:rgba(255,77,95,.12)}
-      .table-scroll{overflow:auto;min-height:0;flex:1;border:1px solid var(--divider-color);border-radius:11px}table{border-collapse:collapse;width:100%;min-width:900px;background:var(--card-background-color)}th,td{padding:10px 11px;border-bottom:1px solid var(--divider-color);text-align:left;vertical-align:middle}th{position:sticky;top:0;background:var(--card-background-color);z-index:1;font-size:11px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}.select-col{width:44px;text-align:center}td small{display:block;color:var(--secondary-text-color);font-size:11px;margin-top:2px}.select-device{width:21px;height:21px;margin:0;accent-color:#36c8ff}.device-name-cell{min-width:190px}.power-cell,.trained-power-cell{white-space:nowrap;font-variant-numeric:tabular-nums}.method-cell{text-transform:capitalize;color:var(--secondary-text-color)}.state-cell{text-align:center;width:70px}.state-box{display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:23px;padding:0 8px;border-radius:12px;font-size:11px;font-weight:800}.state-box.on{background:#35b85a;color:#07140b}.state-box.off{background:rgba(255,255,255,.08);color:var(--secondary-text-color);border:1px solid var(--divider-color)}.state-box.unknown{background:rgba(255,77,95,.12);color:#ff6574}.training-dot{display:inline-block;width:15px;height:15px;border-radius:50%;vertical-align:middle}.training-dot{display:none}.training-box{display:inline-flex;width:46px;height:23px;border-radius:12px;box-sizing:border-box;vertical-align:middle}.training-box.trained{background:rgba(53,184,90,.28);border:1px solid rgba(53,184,90,.55)}.training-box.active,.training-box.error{background:rgba(255,77,95,.28);border:1px solid rgba(255,77,95,.58)}.training-box.untrained{background:rgba(255,255,255,.07);border:1px solid var(--divider-color)}
+      .table-scroll{overflow:auto;min-height:0;flex:1;border:1px solid var(--divider-color);border-radius:11px}table{border-collapse:collapse;width:100%;min-width:900px;background:var(--card-background-color)}th,td{padding:10px 11px;border-bottom:1px solid var(--divider-color);text-align:left;vertical-align:middle}th{position:sticky;top:0;background:var(--card-background-color);z-index:1;font-size:11px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}.sortable-header{cursor:pointer;user-select:none}.sortable-header:hover{color:var(--primary-text-color);background:var(--secondary-background-color)}.sortable-header.sort-active{color:#5dd5ff}.sortable-header.sort-active::after{content:"";display:inline-block;margin-left:5px;width:4px;height:4px;border-radius:50%;background:#36c8ff;vertical-align:middle}.select-col{width:44px;text-align:center}td small{display:block;color:var(--secondary-text-color);font-size:11px;margin-top:2px}.select-device{width:21px;height:21px;margin:0;accent-color:#36c8ff}.device-name-cell{min-width:190px}.power-cell,.trained-power-cell{white-space:nowrap;font-variant-numeric:tabular-nums}.method-cell{text-transform:capitalize;color:var(--secondary-text-color)}.state-cell{text-align:center;width:70px}.state-box{display:inline-flex;align-items:center;justify-content:center;min-width:46px;height:23px;padding:0 8px;border-radius:12px;font-size:11px;font-weight:800}.state-box.on{background:#35b85a;color:#07140b}.state-box.off{background:rgba(255,255,255,.08);color:var(--secondary-text-color);border:1px solid var(--divider-color)}.state-box.unknown{background:rgba(255,77,95,.12);color:#ff6574}.training-dot{display:inline-block;width:15px;height:15px;border-radius:50%;vertical-align:middle}.training-dot{display:none}.training-box{display:inline-flex;width:46px;height:23px;border-radius:12px;box-sizing:border-box;vertical-align:middle}.training-box.trained{background:rgba(53,184,90,.28);border:1px solid rgba(53,184,90,.55)}.training-box.active,.training-box.error{background:rgba(255,77,95,.28);border:1px solid rgba(255,77,95,.58)}.training-box.untrained{background:rgba(255,255,255,.07);border:1px solid var(--divider-color)}
       .empty{text-align:center;padding:36px;color:var(--secondary-text-color)}.pagination{display:none}.training-workspace{flex:none;border:1px solid #36c8ff;border-radius:14px;padding:16px;margin:0 0 16px;background:var(--card-background-color);scroll-margin-top:12px}.training-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start}.eyebrow{display:block;text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:800;color:var(--secondary-text-color);margin-bottom:4px}h2{margin:0 0 5px}h3{margin:5px 0}
       .queue-strip{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:8px;margin:14px 0}.queue-slot,.queue-more{border:1px solid var(--divider-color);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:3px;min-height:58px}.queue-slot span,.queue-more span{font-size:10px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em}.queue-slot small{color:var(--secondary-text-color)}.active-slot{border-color:#36c8ff;box-shadow:0 0 0 1px #36c8ff inset}.empty-slot{opacity:.55}.queue-more{justify-content:center;min-width:170px}.training-grid{display:grid;grid-template-columns:minmax(0,1fr) 250px;gap:14px}.training-main{min-width:0}.training-info{border:1px solid var(--divider-color);border-radius:10px;padding:13px;background:var(--secondary-background-color)}.training-info dl{display:grid;grid-template-columns:auto 1fr;gap:7px;margin-top:14px}.training-info dt{color:var(--secondary-text-color)}.training-info dd{margin:0;text-align:right;font-weight:600}.method-picker{margin-bottom:4px}.method-label{display:block;font-size:12px;color:var(--secondary-text-color);margin-bottom:6px}.method-options{display:flex;gap:18px;align-items:center;flex-wrap:wrap}.method-options label{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--primary-text-color);cursor:pointer}.method-options input{width:20px;height:20px;margin:0}.instruction-card{margin-top:12px;padding:12px;border-radius:10px;background:var(--secondary-background-color);border-left:4px solid #36c8ff}.instruction-card strong{display:block}.capture-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:12px}.capture-grid>div{border:1px solid var(--divider-color);border-radius:9px;padding:10px}.capture-grid span{display:block;font-size:10px;color:var(--secondary-text-color)}.capture-grid strong{display:block;font-size:18px;margin-top:3px}.capture-value.valid{border-color:#35b85a;background:rgba(53,184,90,.12)}.capture-state{display:flex;align-items:center;gap:8px;margin-top:10px;padding:10px;border-radius:9px;background:var(--secondary-background-color)}.capture-state.valid{border:1px solid #35b85a}.status-light{width:11px;height:11px;border-radius:50%;background:#ff4d5f;flex:none}.status-light.green{background:#35b85a}.status-light.amber{background:#ff4d5f}.training-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.completed-card{margin-top:12px;padding:12px;border:1px solid #35b85a;border-radius:10px}.completed-card>strong{font-size:22px;display:block}.completed-card p{font-size:12px;margin-top:3px}
       .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center;z-index:10000;padding:16px}.modal{width:min(760px,100%);max-height:90vh;overflow:auto;background:var(--card-background-color);border-radius:14px;padding:20px;box-shadow:var(--ha-card-box-shadow);color:var(--primary-text-color)}.modal.small{width:min(520px,100%)}.modal-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px}.modal-head>button{font-size:22px;line-height:1;padding:4px 9px}.search-row{display:grid;grid-template-columns:minmax(0,1fr) 170px;gap:8px;margin-bottom:8px}.modal input,.modal select{box-sizing:border-box;width:100%;padding:9px;border:1px solid var(--divider-color);border-radius:6px;background:var(--primary-background-color);color:var(--primary-text-color);font:inherit}.modal>label{display:block;margin:12px 0}.modal>label input{display:block;margin-top:5px}.modal #choices{height:310px}.ownership{min-height:52px;margin-top:10px;padding:10px;border:1px solid var(--divider-color);border-radius:8px;background:var(--secondary-background-color);font-size:13px}.modal-actions{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;margin-top:14px}.toast{position:fixed;right:22px;bottom:22px;z-index:11000;padding:12px 16px;border-radius:8px;background:#26b8f0;color:#07131d;box-shadow:var(--ha-card-box-shadow);max-width:440px;font-weight:700}.toast.error-toast{background:#ff4d5f;color:#fff}
