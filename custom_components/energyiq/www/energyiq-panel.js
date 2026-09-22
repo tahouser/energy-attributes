@@ -8,7 +8,7 @@
 (() => {
   const TAG = "energyiq-panel-v339";
   const VERSION = "31408";
-  const UI_VERSION = "3.1.127";
+  const UI_VERSION = "3.1.137";
 
   if (customElements.get(TAG)) return;
 
@@ -33,6 +33,7 @@
       this.refreshTimer = null;
       this.bulkTimer = null;
       this.bulkStarting = false;
+      this.trainingSessionStarted = new Set();
     }
 
     setConfig() {}
@@ -327,20 +328,26 @@
     openTrainingWorkspace(deviceIds) {
       const valid = deviceIds.filter(id => this.getDevice(id) && this.getPersistedIds().has(id));
       if (!valid.length) return;
+      this.trainingSessionStarted.clear();
       this.trainingQueue = [...new Set(valid)]; this.activeTrainingId = this.trainingQueue[0] || null; this.trainingWorkspaceOpen = true;
       this.render();
       requestAnimationFrame(() => this.querySelector("#training-area")?.scrollIntoView({ behavior: "smooth", block: "start" }));
     }
-    closeTrainingWorkspace() { this.trainingWorkspaceOpen = false; this.trainingQueue = []; this.activeTrainingId = null; this.render(); requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" })); }
+    closeTrainingWorkspace() { this.trainingWorkspaceOpen = false; this.trainingQueue = []; this.activeTrainingId = null; this.trainingSessionStarted.clear(); this.render(); requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" })); }
     trainingQueueSlots() { const ids = this.trainingQueue.slice(0, 3); return [ids[0] || null, ids[1] || null, ids[2] || null]; }
     activeTrainingDevice() { return this.activeTrainingId ? this.getDevice(this.activeTrainingId) : null; }
     trainingComplete(deviceId) { return this.getDevice(deviceId)?.training?.status === "complete"; }
     handleTrainingCompletion() {
-      if (!this.trainingWorkspaceOpen || !this.activeTrainingId || !this.trainingComplete(this.activeTrainingId)) return false;
-      const remaining = this.trainingQueue.filter(id => id !== this.activeTrainingId && !this.trainingComplete(id));
-      if (remaining.length) {
-        this.trainingQueue = remaining;
-        this.activeTrainingId = remaining[0];
+      if (!this.trainingWorkspaceOpen || !this.activeTrainingId) return false;
+      if (!this.trainingSessionStarted.has(this.activeTrainingId) || !this.trainingComplete(this.activeTrainingId)) return false;
+      this.trainingSessionStarted.delete(this.activeTrainingId);
+      if (this.trainingQueue[0] === this.activeTrainingId) {
+        this.trainingQueue.shift();
+      } else {
+        this.trainingQueue = this.trainingQueue.filter(id => id !== this.activeTrainingId);
+      }
+      if (this.trainingQueue.length) {
+        this.activeTrainingId = this.trainingQueue[0];
         return true;
       }
       this.selectedIds.clear();
@@ -350,10 +357,8 @@
       this.view = "trained";
       return true;
     }
-    advanceQueueIfComplete() { if (!this.activeTrainingId || !this.trainingComplete(this.activeTrainingId)) return; if (this.trainingQueue[0] === this.activeTrainingId) this.trainingQueue.shift(); else this.trainingQueue = this.trainingQueue.filter(id => id !== this.activeTrainingId); this.activeTrainingId = this.trainingQueue[0] || null; }
 
     renderTrainingWorkspace() {
-      this.advanceQueueIfComplete();
       const active = this.activeTrainingDevice(), slots = this.trainingQueueSlots(), remaining = Math.max(0, this.trainingQueue.length - 3);
       if (!active) return `<section class="training-workspace"><div class="training-head"><div><span class="eyebrow">Training</span><h2>Training complete</h2><p>All selected devices have completed or left the queue.</p></div><button data-training-close>Close</button></div></section>`;
       return `<section class="training-workspace" id="training-workspace"><div class="training-head"><div><span class="eyebrow">Training workspace</span><h2>${this.escape(active.name || active.device_id)}</h2><p>Complete the active device before moving to the next. The queue stays visible while you work.</p></div><button data-training-close>Close</button></div><div class="queue-strip">${this.renderQueueSlot(slots[0], "Active", true)}${this.renderQueueSlot(slots[1], "Queue #1", false)}${this.renderQueueSlot(slots[2], "Queue #2", false)}${remaining ? `<div class="queue-more"><strong>${remaining} additional device${remaining === 1 ? "" : "s"} waiting</strong><span>They remain in the background queue.</span></div>` : ""}</div><div class="training-detail">${this.renderTrainingDetail(active)}</div></section>`;
@@ -380,7 +385,6 @@
         if (legacyFullCycle) return `<button data-training-stop>Stop Without Saving</button>`;
         return `<button data-training-stop>Stop Without Saving</button>`;
       }
-      if (complete) return `<button class="primary" data-training-retrain>Retrain</button>`;
       return `<button class="primary" data-training-start>Start ${method === "manual" ? "Manual Training" : "Quick ON/OFF"}</button>`;
     }
 
@@ -405,18 +409,17 @@
         this.renderTrainingDetailInPlace();
       }));
       this.querySelector("[data-training-start]")?.addEventListener("click", () => this.startWorkspaceTraining());
-      this.querySelector("[data-training-retrain]")?.addEventListener("click", () => this.startWorkspaceTraining(true));
       this.querySelector("[data-training-stop]")?.addEventListener("click", () => this.stopWorkspaceTraining());
     }
     renderTrainingDetailInPlace() { const active = this.activeTrainingDevice(), area = this.querySelector(".training-detail"); if (active && area) area.innerHTML = this.renderTrainingDetail(active); this.bindTrainingWorkspace(); }
     selectedWorkspaceMethod() { return this.querySelector(".training-method-choice:checked")?.dataset.method || "quick"; }
 
-    async startWorkspaceTraining(retrain = false) {
+    async startWorkspaceTraining() {
       const device = this.activeTrainingDevice(); if (!device) return;
       const method = this.selectedWorkspaceMethod();
       if (this.bulkStarting || this.bulk?.status === "running") return;
       try {
-        if (!retrain && method === "quick" && this.trainingQueue.length > 1) {
+        if (method === "quick" && this.trainingQueue.length > 1) {
           const deviceIds = this.trainingQueue.filter(id => this.getDevice(id) && this.getPersistedIds().has(id) && !this.trainingComplete(id));
           if (!deviceIds.length) return;
           this.bulkStarting = true;
@@ -435,6 +438,7 @@
           });
           return;
         }
+        this.trainingSessionStarted.add(device.device_id);
         await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: device.device_id, method });
         await this.refresh(true);
       } catch (error) { this.showToast(error?.message || "Unable to start training", true); }
