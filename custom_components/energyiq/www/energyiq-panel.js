@@ -328,11 +328,12 @@
     openTrainingWorkspace(deviceIds) {
       const valid = deviceIds.filter(id => this.getDevice(id) && this.getPersistedIds().has(id));
       if (!valid.length) return;
+      this.trainingSessionStarted.clear();
       this.trainingQueue = [...new Set(valid)]; this.activeTrainingId = this.trainingQueue[0] || null; this.trainingWorkspaceOpen = true;
       this.render();
       requestAnimationFrame(() => this.querySelector("#training-area")?.scrollIntoView({ behavior: "smooth", block: "start" }));
     }
-    closeTrainingWorkspace() { this.trainingWorkspaceOpen = false; this.trainingQueue = []; this.activeTrainingId = null; this.render(); requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" })); }
+    closeTrainingWorkspace() { this.trainingWorkspaceOpen = false; this.trainingQueue = []; this.activeTrainingId = null; this.trainingSessionStarted.clear(); this.render(); requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" })); }
     trainingQueueSlots() { const ids = this.trainingQueue.slice(0, 3); return [ids[0] || null, ids[1] || null, ids[2] || null]; }
     activeTrainingDevice() { return this.activeTrainingId ? this.getDevice(this.activeTrainingId) : null; }
     trainingComplete(deviceId) { return this.getDevice(deviceId)?.training?.status === "complete"; }
