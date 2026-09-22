@@ -435,11 +435,7 @@
           });
           return;
         }
-        if (retrain && device.training?.status === "complete") {
-          await this.ws({ type: "energy_attribution/retry_training", entry_id: this.entryId, device_id: device.device_id });
-        } else {
-          await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: device.device_id, method });
-        }
+        await this.ws({ type: "energy_attribution/start_training", entry_id: this.entryId, device_id: device.device_id, method });
         await this.refresh(true);
       } catch (error) { this.showToast(error?.message || "Unable to start training", true); }
     }
