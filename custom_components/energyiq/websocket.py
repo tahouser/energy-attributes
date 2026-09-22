@@ -210,6 +210,16 @@ def _monitored_entity_ids(coordinator) -> list[str]:
     return result
 
 
+def _save_options(coordinator, **updates) -> None:
+    """Persist EnergyIQ-owned options without rebuilding unrelated state."""
+    options = dict(coordinator.entry.options)
+    options.update(updates)
+    coordinator.hass.config_entries.async_update_entry(
+        coordinator.entry,
+        options=options,
+    )
+
+
 def _coordinator(hass: HomeAssistant, entry_id: str):
     """Return a loaded coordinator for a real config entry."""
     entry = hass.config_entries.async_get_entry(entry_id)
@@ -289,12 +299,12 @@ async def ws_set_monitoring(hass, connection, msg):
     selected &= valid
     coordinator.device_classifications = {did: "monitor" if did in selected else "ignore" for did in valid}
     coordinator.monitored_entities = _monitored_entity_ids(coordinator)
-    hass.config_entries.async_update_entry(coordinator.entry, options={
-        **coordinator.entry.options,
-        "monitored_entities": coordinator.monitored_entities,
-        "device_classifications": coordinator.device_classifications,
-        "candidate_devices": coordinator.candidate_devices,
-    })
+    _save_options(
+        coordinator,
+        monitored_entities=coordinator.monitored_entities,
+        device_classifications=coordinator.device_classifications,
+        candidate_devices=coordinator.candidate_devices,
+    )
     connection.send_result(msg["id"], {"saved": True})
 
 
@@ -332,12 +342,12 @@ async def ws_add_manual_device(hass, connection, msg):
     }
     coordinator.candidate_devices[did] = candidate
     coordinator.device_classifications[did] = "monitor"
-    hass.config_entries.async_update_entry(coordinator.entry, options={
-        **coordinator.entry.options,
-        "candidate_devices": coordinator.candidate_devices,
-        "device_classifications": coordinator.device_classifications,
-        "monitored_entities": coordinator.monitored_entities,
-    })
+    _save_options(
+        coordinator,
+        candidate_devices=coordinator.candidate_devices,
+        device_classifications=coordinator.device_classifications,
+        monitored_entities=coordinator.monitored_entities,
+    )
     connection.send_result(msg["id"], {"saved": True, "device": candidate})
 
 
@@ -432,12 +442,12 @@ async def ws_add_entity(hass, connection, msg):
     candidate["evidence"] = (candidate.get("evidence") + "; " if candidate.get("evidence") else "") + f"Manually selected HA entity: {entity_id}"
     coordinator.device_classifications[did] = "monitor"
     coordinator.monitored_entities = _monitored_entity_ids(coordinator)
-    hass.config_entries.async_update_entry(coordinator.entry, options={
-        **coordinator.entry.options,
-        "candidate_devices": coordinator.candidate_devices,
-        "device_classifications": coordinator.device_classifications,
-        "monitored_entities": coordinator.monitored_entities,
-    })
+    _save_options(
+        coordinator,
+        candidate_devices=coordinator.candidate_devices,
+        device_classifications=coordinator.device_classifications,
+        monitored_entities=coordinator.monitored_entities,
+    )
     matches = []
     for candidate_did, existing_candidate in coordinator.candidate_devices.items():
         attached = [*(existing_candidate.get("measurements", []) or []), *(existing_candidate.get("controls", []) or [])]
@@ -544,21 +554,6 @@ async def ws_end_long_cycle(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
-    vol.Required("type"): "energy_attribution/retry_training",
-    vol.Required("entry_id"): str,
-    vol.Required("device_id"): str,
-})
-@websocket_api.require_admin
-@websocket_api.async_response
-async def ws_retry_training(hass, connection, msg):
-    coordinator = _coordinator(hass, msg["entry_id"])
-    method = coordinator.training_state.get(msg["device_id"], {}).get("method", "quick")
-    await coordinator.async_reset_training(msg["device_id"])
-    result = await coordinator.async_start_training(msg["device_id"], method)
-    connection.send_result(msg["id"], result)
-
-
-@websocket_api.websocket_command({
     vol.Required("type"): "energy_attribution/stop_training",
     vol.Required("entry_id"): str,
     vol.Required("device_id"): str,
@@ -598,5 +593,5 @@ async def ws_stop_training(hass, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_retry_training, ws_stop_training):
+    for handler in (ws_list_entries, ws_workspace, ws_set_monitoring, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_stop_training):
         websocket_api.async_register_command(hass, handler)
