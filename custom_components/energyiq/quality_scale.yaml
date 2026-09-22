@@ -90,8 +90,8 @@ unique-config-entry:
 # Silver
 
 action-exceptions:
-  status: todo
-  comment: Review WebSocket/API actions and error translation.
+  status: done
+  comment: WebSocket handlers use centralized option persistence and translate invalid requests through HA WebSocket errors.
 
 config-entry-unloading:
   status: done
