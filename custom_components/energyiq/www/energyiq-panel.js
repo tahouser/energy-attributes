@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v339";
-  const VERSION = "31418";
-  const UI_VERSION = "3.1.143";
+  const VERSION = "31419";
+  const UI_VERSION = "3.1.144";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon.png?v=31418";
+      this.brandUrl = "/energyiq-brand/icon.png?v=31419";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -135,10 +135,13 @@
     getIncludedIds() { return this.pendingIncluded ? new Set(this.pendingIncluded) : this.getPersistedIds(); }
     getSelectedIds() { return new Set(this.selectedIds); }
         setSort(column) {
+      const tableScroll = this.querySelector(".table-scroll");
+      const scrollLeft = tableScroll?.scrollLeft || 0;
       if (this.sortColumn === column) this.sortDirection = this.sortDirection === "asc" ? "desc" : "asc";
       else { this.sortColumn = column; this.sortDirection = "asc"; }
-      this.page = 1;
       this.render();
+      const newTableScroll = this.querySelector(".table-scroll");
+      if (newTableScroll) newTableScroll.scrollLeft = scrollLeft;
     }
     sortValue(device, column) {
       if (column === "name") return String(device?.name || device?.device_id || "");
