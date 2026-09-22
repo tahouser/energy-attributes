@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.148 */
+/* EnergyIQ dashboard card — 3.1.149 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -33,7 +33,7 @@ if (!customElements.get(TAG)) {
     }
 
     static getStubConfig() {
-      return {};
+      return { grid_options: { columns: "full", rows: 4 } };
     }
 
     static getConfigElement() {
@@ -45,7 +45,7 @@ if (!customElements.get(TAG)) {
     connectedCallback(){ this.addEventListener("click",this._click); this._loading(); this._observeSize(); if(this._hass)this._start(); }
     disconnectedCallback(){ if(this._timer)clearInterval(this._timer); if(this._ro)this._ro.disconnect(); this.removeEventListener("click",this._click); }
     getCardSize(){return 4;}
-    getGridOptions(){return {rows:4,columns:12,min_rows:4,max_rows:4,min_columns:12,max_columns:12};}
+    getGridOptions(){return {columns:"full",rows:4};}
     async _ws(m){return this._hass.connection.sendMessagePromise(m);}
     _observeSize(){
       if(typeof ResizeObserver==="undefined"||this._ro)return;
