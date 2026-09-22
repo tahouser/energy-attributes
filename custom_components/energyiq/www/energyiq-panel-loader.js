@@ -1,7 +1,7 @@
 (() => {
-  const TARGET = "energyiq-panel-v328";
-  const SOURCE = "/energyiq-static/energyiq-panel.js?v=31389";
-  const CARD_SOURCE = "/energyiq-static/energyiq-card.js?v=31387";
+  const TARGET = "energyiq-panel-v339";
+  const SOURCE = "/energyiq-static/energyiq-panel.js?v=31413";
+  const CARD_SOURCE = "/energyiq-static/energyiq-card.js?v=31413";
 
   const loadCard = () => {
     if (customElements.get("energyiq-card")) return;
@@ -12,26 +12,17 @@
     document.head.appendChild(card);
   };
 
-  const defineAlias = () => {
-    if (customElements.get(TARGET)) return true;
-    const Base = customElements.get("energyiq-panel-v328");
-    if (!Base) return false;
-    class EnergyIQPanelV327 extends Base {}
-    customElements.define(TARGET, EnergyIQPanelV327);
-    return true;
+  const loadPanel = () => {
+    if (customElements.get(TARGET)) {
+      loadCard();
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = SOURCE;
+    script.onload = loadCard;
+    script.onerror = () => console.error("EnergyIQ: failed to load panel source.");
+    document.head.appendChild(script);
   };
 
-  if (defineAlias()) {
-    loadCard();
-    return;
-  }
-
-  const script = document.createElement("script");
-  script.src = SOURCE;
-  script.onload = () => {
-    if (!defineAlias()) console.error("EnergyIQ: v327 panel did not register.");
-    loadCard();
-  };
-  script.onerror = () => console.error("EnergyIQ: failed to load panel source.");
-  document.head.appendChild(script);
+  loadPanel();
 })();
