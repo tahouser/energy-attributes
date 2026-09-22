@@ -78,11 +78,11 @@ if (!customElements.get(TAG)) {
       const offPeakCostId=this._cfg.off_peak_cost_entity||"sensor.dte_off_peak_energy_cost";
       const peakEnergyId="sensor.dte_house_energy_peak";
       const peakRateId="input_number.dte_peak_base_rate";
-      const ids=[peakCostId,offPeakCostId,peakEnergyId];
+      const ids=[peakCostId,offPeakCostId];
       try{
         const {start,end}=this._periodBounds(this._costPeriod);
-        const history=await this._ws({type:"history/history_during_period",start_time:start.toISOString(),end_time:end.toISOString(),entity_ids:ids,include_start_time_state:true,significant_changes_only:true,minimal_response:true,no_attributes:true});
-        const delta=id=>{
+        const history=await this._ws({type:"history/history_during_period",start_time:start.toISOString(),end_time:end.toISOString(),entity_ids:ids,include_start_time_state:true,significant_changes_only:false,minimal_response:true,no_attributes:true});
+        const historyDelta=id=>{
           const states=(history&&history[id])||[];
           const nums=states.map(x=>Number(x.s??x.state)).filter(Number.isFinite);
           const current=this._state(id);
@@ -90,8 +90,22 @@ if (!customElements.get(TAG)) {
           const last=nums.length?nums[nums.length-1]:current;
           return first==null||last==null?null:Math.max(0,last-first);
         };
-        const off=delta(offPeakCostId);
-        const peakEnergy=delta(peakEnergyId);
+        const off=historyDelta(offPeakCostId);
+        let peakEnergy=null;
+        try{
+          const stats=await this._ws({type:"recorder/statistics_during_period",start_time:start.toISOString(),end_time:end.toISOString(),statistic_ids:[peakEnergyId],period:"5minute",types:["change","state","last_reset"]});
+          const rows=(stats&&stats[peakEnergyId])||[];
+          if(rows.length){
+            const changes=rows.map(x=>Number(x.change)).filter(Number.isFinite).reduce((sum,v)=>sum+Math.max(0,v),0);
+            const lastRow=rows[rows.length-1];
+            const lastState=Number(lastRow.state);
+            const current=this._state(peakEnergyId);
+            let tail=0;
+            if(Number.isFinite(current)&&Number.isFinite(lastState))tail=current>=lastState?current-lastState:current;
+            peakEnergy=Math.max(0,changes+tail);
+          }
+        }catch(e){console.warn("EnergyIQ peak statistics unavailable; using history",e);}
+        if(peakEnergy==null)peakEnergy=historyDelta(peakEnergyId);
         const peakRate=this._state(peakRateId);
         const peak=peakEnergy==null||peakRate==null?null:Math.max(0,peakEnergy*peakRate);
         this._costHistory={peak,off,total:peak==null&&off==null?null:(peak||0)+(off||0)};
