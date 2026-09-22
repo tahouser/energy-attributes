@@ -176,7 +176,7 @@ hasPendingChanges() {
     }
     filteredDevices() {
       const term = this.searchTerm.trim().toLowerCase(), included = this.getIncludedIds();
-      return this.getDevices().filter(d => {
+      const devices = this.getDevices().filter(d => {
         const isIncluded = included.has(d.device_id);
         if (this.view === "excluded" && isIncluded) return false;
         if (this.view !== "excluded" && !isIncluded) return false;
