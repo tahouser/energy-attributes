@@ -2,7 +2,7 @@
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
-    constructor() { super(); this._hass=null; this._cfg={}; this._data=null; this._entryId=null; this._view=0; this._timer=null; this._busy=false; this._ro=null; this._click=this._handleClick.bind(this); this._costPeriod="day"; this._costHistory=null; this._costHistoryAt=0; this._costLearned=null; this._costSwipeStartX=0; this._costSwipeStartY=0; this._costSwipeActive=false; this._brandToken=null; }
+    constructor() { super(); this._hass=null; this._cfg={}; this._data=null; this._entryId=null; this._view=0; this._timer=null; this._busy=false; this._ro=null; this._click=this._handleClick.bind(this); this._costPeriod="day"; this._costHistory=null; this._costHistoryAt=0; this._costLearned=null; this._costSwipeStartX=0; this._costSwipeStartY=0; this._costSwipeActive=false; }
     static getConfigForm() {
       return {
         schema: [
@@ -59,7 +59,7 @@ if (!customElements.get(TAG)) {
     async _start(){
       if(this._busy||!this._hass)return; this._busy=true;
       try{ let id=this._cfg.entry_id; if(!id){let r=await this._ws({type:"energy_attribution/list_entries"});id=r.entries&&r.entries[0]&&r.entries[0].entry_id;}
-        if(!id)throw new Error("EnergyIQ is not configured."); this._entryId=id; try{const brand=await this._ws({type:"brands/access_token"});this._brandToken=brand?.token||null;}catch(e){console.warn("EnergyIQ brand token unavailable",e);} await this._refresh(); if(this._timer)clearInterval(this._timer); this._timer=setInterval(()=>this._refresh(),2000);
+        if(!id)throw new Error("EnergyIQ is not configured."); this._entryId=id; await this._refresh(); if(this._timer)clearInterval(this._timer); this._timer=setInterval(()=>this._refresh(),2000);
       }catch(e){this._error(e.message||e);} finally{this._busy=false;}
     }
     async _refresh(){try{this._data=await this._ws({type:"energy_attribution/workspace",entry_id:this._entryId});if(this._view===2&&Date.now()-this._costHistoryAt>30000)await this._loadCostHistory();this._render();}catch(e){console.error("EnergyIQ card",e);}}
@@ -162,6 +162,14 @@ if (!customElements.get(TAG)) {
         const directTotal=configuredTotal?this._state(configuredTotal):null;
         const total=peak==null&&off==null?(Number.isFinite(directTotal)?directTotal:null):(peak||0)+(off||0);
         this._costHistory={peak,off,total};
+
+        const spec=this._costLearningSpec(this._costPeriod);
+        const learnStart=this._shiftPeriodStart(periodStart,this._costPeriod,spec.count);
+        const learnedHistory=await this._ws({type:"history/history_during_period",start_time:learnStart.toISOString(),end_time:periodEnd.toISOString(),entity_ids:ids,include_start_time_state:true,significant_changes_only:false,minimal_response:true,no_attributes:true});
+        const elapsedMs=Math.max(0,periodEnd.getTime()-periodStart.getTime());
+        const peakSamples=this._historicalMovingDeltas((learnedHistory&&learnedHistory[peakCostId])||[],this._costPeriod,periodStart,periodEnd,spec.count);
+        const offSamples=this._historicalMovingDeltas((learnedHistory&&learnedHistory[offPeakCostId])||[],this._costPeriod,periodStart,periodEnd,spec.count);
+        this._costLearned={peak:this._learnedBar(peak,peakSamples),off:this._learnedBar(off,offSamples)};
         this._costHistoryAt=Date.now();
       }catch(e){
         console.error("EnergyIQ cost history",e);
