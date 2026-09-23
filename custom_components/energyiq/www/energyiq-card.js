@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.167 */
+/* EnergyIQ dashboard card — 3.1.168 */
 const TAG = "energyiq-card";
 const BRAND_ICON_URL = "/energyiq-brand/icon.png?v=31441";
 if (!customElements.get(TAG)) {
@@ -108,14 +108,13 @@ if (!customElements.get(TAG)) {
       }
       return best?Number(best.s??best.state):null;
     }
-    _historicalPartialDeltas(states,period,currentStart,elapsedMs,count){
+    _historicalPeriodDeltas(states,period,currentStart,count){
       const values=[];
       for(let i=1;i<=count;i++){
         const pStart=this._shiftPeriodStart(currentStart,period,i);
-        const pEndFull=this._periodEnd(pStart,period);
-        const target=Math.min(pStart.getTime()+elapsedMs,pEndFull.getTime());
+        const pEnd=this._periodEnd(pStart,period);
         const before=this._historyNumberAt(states,pStart.getTime(),false);
-        const at=this._historyNumberAt(states,target,true)??this._historyNumberAt(states,target,false);
+        const at=this._historyNumberAt(states,pEnd.getTime(),true)??this._historyNumberAt(states,pEnd.getTime(),false);
         if(Number.isFinite(before)&&Number.isFinite(at)&&at>=before)values.push(at-before);
       }
       return values;
@@ -180,9 +179,10 @@ if (!customElements.get(TAG)) {
         const spec=this._costLearningSpec(this._costPeriod);
         const learnStart=this._shiftPeriodStart(start,this._costPeriod,spec.count);
         const learnedHistory=await this._ws({type:"history/history_during_period",start_time:learnStart.toISOString(),end_time:end.toISOString(),entity_ids:ids,include_start_time_state:true,significant_changes_only:false,minimal_response:true,no_attributes:true});
-        const elapsedMs=Math.max(0,end.getTime()-start.getTime());
-        const peakSamples=this._historicalPartialDeltas((learnedHistory&&learnedHistory[peakCostId])||[],this._costPeriod,start,elapsedMs,spec.count);
-        const offSamples=this._historicalPartialDeltas((learnedHistory&&learnedHistory[offPeakCostId])||[],this._costPeriod,start,elapsedMs,spec.count);
+        // Targets are complete historical period totals, not elapsed-time-scaled partial totals.
+        // The current bar therefore progresses naturally from zero toward the learned full-period target.
+        const peakSamples=this._historicalPeriodDeltas((learnedHistory&&learnedHistory[peakCostId])||[],this._costPeriod,start,spec.count);
+        const offSamples=this._historicalPeriodDeltas((learnedHistory&&learnedHistory[offPeakCostId])||[],this._costPeriod,start,spec.count);
         this._costLearned={peak:this._learnedBar(peak,peakSamples),off:this._learnedBar(off,offSamples)};
         this._costHistoryAt=Date.now();
       }catch(e){
