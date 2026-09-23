@@ -135,7 +135,7 @@ if (!customElements.get(TAG)) {
       // Three solid color states; no gradient and no per-bar color scale.
       const color=ratio>1.10?"red":ratio>=0.90?"yellow":"green";
       // Bar length remains the moving historical comparison from 3.1.170.
-      const pct=average>0?Math.max(3,Math.min(100,ratio*75)):value>0?100:0;
+      const pct=average>0?Math.max(3,Math.min(100,ratio*92.6)):value>0?100:0;
       return {pct,target:average,ratio,color,sampleCount:clean.length};
     }
     async _loadCostHistory(){
