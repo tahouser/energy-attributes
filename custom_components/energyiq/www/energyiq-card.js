@@ -1,9 +1,8 @@
-/* EnergyIQ dashboard card — 3.1.172 */
+/* EnergyIQ dashboard card — 3.1.183 */
 const TAG = "energyiq-card";
-const BRAND_ICON_URL = "/api/brands/integration/energyiq/icon.png";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
-    constructor() { super(); this._hass=null; this._cfg={}; this._data=null; this._entryId=null; this._view=0; this._timer=null; this._busy=false; this._ro=null; this._click=this._handleClick.bind(this); this._costPeriod="day"; this._costHistory=null; this._costHistoryAt=0; this._costLearned=null; this._costSwipeStartX=0; this._costSwipeStartY=0; this._costSwipeActive=false; this._brandToken=null; }
+    constructor() { super(); this._hass=null; this._cfg={}; this._data=null; this._entryId=null; this._view=0; this._timer=null; this._busy=false; this._ro=null; this._click=this._handleClick.bind(this); this._costPeriod="day"; this._costHistory=null; this._costHistoryAt=0; this._costLearned=null; this._costSwipeStartX=0; this._costSwipeStartY=0; this._costSwipeActive=false; }
     static getConfigForm() {
       return {
         schema: [
@@ -60,7 +59,7 @@ if (!customElements.get(TAG)) {
     async _start(){
       if(this._busy||!this._hass)return; this._busy=true;
       try{ let id=this._cfg.entry_id; if(!id){let r=await this._ws({type:"energy_attribution/list_entries"});id=r.entries&&r.entries[0]&&r.entries[0].entry_id;}
-        if(!id)throw new Error("EnergyIQ is not configured."); this._entryId=id; try{const brand=await this._ws({type:"brands/access_token"});this._brandToken=brand&&brand.token||null;}catch(e){console.warn("EnergyIQ brand token unavailable",e);} await this._refresh(); if(this._timer)clearInterval(this._timer); this._timer=setInterval(()=>this._refresh(),2000);
+        if(!id)throw new Error("EnergyIQ is not configured."); this._entryId=id; await this._refresh(); if(this._timer)clearInterval(this._timer); this._timer=setInterval(()=>this._refresh(),2000);
       }catch(e){this._error(e.message||e);} finally{this._busy=false;}
     }
     async _refresh(){try{this._data=await this._ws({type:"energy_attribution/workspace",entry_id:this._entryId});if(this._view===2&&Date.now()-this._costHistoryAt>30000)await this._loadCostHistory();this._render();}catch(e){console.error("EnergyIQ card",e);}}
@@ -119,79 +118,234 @@ if (!customElements.get(TAG)) {
       }
       return values;
     }
-    _percentile(values,value){
-      const sorted=(values||[]).filter(Number.isFinite).sort((a,b)=>a-b);
-      if(!sorted.length||!Number.isFinite(value))return null;
-      let below=0;
-      for(const v of sorted)if(v<=value)below++;
-      return Math.max(0,Math.min(100,(below-0.5)/sorted.length*100));
+    _periodStart(period,offset=0,from=new Date()){
+      const d=new Date(from); d.setHours(0,0,0,0);
+      if(period==="week"){d.setDate(d.getDate()-d.getDay()+offset*7);}
+      else if(period==="month"){d.setDate(1);d.setMonth(d.getMonth()+offset);}
+      else {d.setDate(d.getDate()+offset);}
+      return d;
     }
-    _learnedBar(value,samples){
-      const clean=(samples||[]).filter(v=>Number.isFinite(v)&&v>=0);
-      if(!clean.length||!Number.isFinite(value))return {pct:value>0?50:0,target:null,ratio:null,color:"green",sampleCount:clean.length};
-      // Use the average of up to 30 prior matching periods at the same elapsed point.
-      const average=clean.reduce((sum,v)=>sum+v,0)/clean.length;
-      const ratio=average>0?Math.max(0,value/average):value>0?Infinity:0;
-      // Three solid color states; no gradient and no per-bar color scale.
-      const color=ratio>1.10?"red":ratio>=0.90?"yellow":"green";
-      // Bar length remains the moving historical comparison from 3.1.170.
-      const pct=average>0?Math.max(3,Math.min(100,ratio*92.6)):value>0?100:0;
-      return {pct,target:average,ratio,color,sampleCount:clean.length};
+    _periodEnd(period,start){const d=new Date(start);if(period==="week")d.setDate(d.getDate()+7);else if(period==="month")d.setMonth(d.getMonth()+1);else d.setDate(d.getDate()+1);return d;}
+    _costEntity(preferred,exact,patterns){
+      if(preferred&&this._hass?.states?.[preferred])return preferred;
+      for(const id of exact||[])if(this._hass?.states?.[id])return id;
+      const scored=[];
+      for(const [id,obj] of Object.entries(this._hass?.states||{})){
+        if(!id.startsWith("sensor."))continue;
+        const text=(id+" "+String(obj?.attributes?.friendly_name||"")).toLowerCase();
+        let score=0;
+        for(const p of patterns||[])if(text.includes(p))score++;
+        if(score===(patterns||[]).length&&score>0)scored.push(id);
+      }
+      return scored.sort()[0]||null;
+    }
+    _historyEntries(states){
+      return (states||[]).map(item=>{
+        const raw=item.lu??item.last_updated??item.last_changed;
+        let t=typeof raw==="number"?raw:Date.parse(raw||"");
+        if(Number.isFinite(t)&&t<1e12)t*=1000;
+        const v=Number(item.s??item.state);
+        return {t,v};
+      }).filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.v)).sort((a,b)=>a.t-b.t);
+    }
+    _periodAccumulatedCost(states,startMs,endMs){
+      const entries=this._historyEntries(states);
+      if(!entries.length)return null;
+      let previous=null,total=0,started=false;
+      for(const e of entries){
+        if(e.t<startMs){
+          previous=e.v;
+          continue;
+        }
+        if(e.t>endMs)break;
+        if(!started){
+          if(previous==null)total=Math.max(0,e.v);
+          started=true;
+          previous=e.v;
+          continue;
+        }
+        if(e.v>=previous)total+=e.v-previous;
+        else total+=Math.max(0,e.v);
+        previous=e.v;
+      }
+      return started?Math.max(0,total):null;
+    }
+    _periodCost(states,start,end,sampleEnd=end){
+      return this._periodAccumulatedCost(states,start.getTime(),Math.min(end.getTime(),sampleEnd.getTime()));
+    }
+    _learnCost(states,period,now,periodCount=30){
+      const currentStart=this._periodStart(period,0,now);
+      const currentEnd=this._periodEnd(period,currentStart);
+      const elapsed=Math.max(0,Math.min(now.getTime(),currentEnd.getTime())-currentStart.getTime());
+      const sampleEnd=new Date(currentStart.getTime()+elapsed);
+      const current=this._periodCost(states,currentStart,currentEnd,sampleEnd);
+      const samples=[];
+      for(let i=1;i<=periodCount;i++){
+        const s=this._periodStart(period,-i,now);
+        const e=this._periodEnd(period,s);
+        const se=new Date(s.getTime()+elapsed);
+        const v=this._periodCost(states,s,e,se);
+        if(v!=null&&Number.isFinite(v)&&v>=0)samples.push(v);
+      }
+      const average=samples.length?samples.reduce((a,b)=>a+b,0)/samples.length:null;
+      const max=Math.max(current||0,...samples,0);
+      const ratio=average>0&&current!=null?current/average:null;
+      const color=ratio==null?"neutral":ratio>1.10?"red":ratio>=0.90?"yellow":"green";
+      return {current,average,max,ratio,color,samples:samples.length};
+    }
+    _statChangeValue(result){
+      const n=Number(result?.change);
+      return Number.isFinite(n)?Math.max(0,n):null;
+    }
+    async _statChangeForPeriod(statisticId,start,end){
+      if(!statisticId||!start||!end)return null;
+      try{
+        const result=await this._ws({
+          type:"recorder/statistic_during_period",
+          statistic_id:statisticId,
+          fixed_period:{start_time:start.toISOString(),end_time:end.toISOString()},
+          types:["change"]
+        });
+        return this._statChangeValue(result);
+      }catch(e){
+        console.debug("EnergyIQ cost period statistic unavailable",statisticId,e);
+        return null;
+      }
+    }
+    _statisticsRowTime(row,key){
+      const raw=row?.[key];
+      const t=typeof raw==="number"?(raw<1e12?raw*1000:raw):Date.parse(raw||"");
+      return Number.isFinite(t)?t:null;
+    }
+    _historicalStatisticChange(rows,startMs,endMs){
+      let total=0,seen=false;
+      for(const row of (rows||[])){
+        const rs=this._statisticsRowTime(row,"start"),re=this._statisticsRowTime(row,"end");
+        if(rs==null||re==null)continue;
+        if(re<=startMs)continue;
+        if(rs>=endMs)break;
+        // Only use complete statistics intervals. The current period is queried
+        // separately with statistic_during_period so partial hours stay exact.
+        if(rs>=startMs&&re<=endMs){
+          const n=Number(row.change);
+          if(Number.isFinite(n)){total+=Math.max(0,n);seen=true;}
+        }
+      }
+      return seen?Math.max(0,total):null;
+    }
+    _historicalSamples(rows,period,now,count=30){
+      const currentStart=this._periodStart(period,0,now);
+      const elapsed=Math.max(0,Math.min(now.getTime(),this._periodEnd(period,currentStart).getTime())-currentStart.getTime());
+      const values=[];
+      for(let i=1;i<=count;i++){
+        const s=this._periodStart(period,-i,now);
+        const e=this._periodEnd(period,s);
+        const sampleEnd=new Date(s.getTime()+elapsed);
+        const v=this._historicalStatisticChange(rows,s.getTime(),Math.min(sampleEnd.getTime(),e.getTime()));
+        if(v!=null&&Number.isFinite(v)&&v>=0)values.push(v);
+      }
+      return values;
+    }
+    _historyEntries(states){
+      return (states||[]).map(item=>{
+        const raw=item.lu??item.last_updated??item.last_changed;
+        let t=typeof raw==="number"?raw:Date.parse(raw||"");
+        if(Number.isFinite(t)&&t<1e12)t*=1000;
+        const v=Number(item.s??item.state);
+        return {t,v};
+      }).filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.v)).sort((a,b)=>a.t-b.t);
+    }
+    _periodAccumulatedCost(states,startMs,endMs){
+      const entries=this._historyEntries(states);
+      if(!entries.length)return null;
+      let previous=null,total=0,started=false;
+      for(const e of entries){
+        if(e.t<startMs){previous=e.v;continue;}
+        if(e.t>endMs)break;
+        if(!started){
+          if(previous==null)total=Math.max(0,e.v);
+          started=true;previous=e.v;continue;
+        }
+        if(e.v>=previous)total+=e.v-previous;
+        else total+=Math.max(0,e.v);
+        previous=e.v;
+      }
+      return started?Math.max(0,total):null;
+    }
+    _periodCost(states,start,end,sampleEnd=end){
+      return this._periodAccumulatedCost(states,start.getTime(),Math.min(end.getTime(),sampleEnd.getTime()));
+    }
+    _buildLearned(period,now,current,statRows,historyStates){
+      const currentStart=this._periodStart(period,0,now),currentEnd=this._periodEnd(period,currentStart);
+      const elapsed=Math.max(0,Math.min(now.getTime(),currentEnd.getTime())-currentStart.getTime());
+      const sampleEnd=new Date(currentStart.getTime()+elapsed);
+      let currentValue=current;
+      if(currentValue==null)currentValue=this._periodCost(historyStates,currentStart,currentEnd,sampleEnd);
+      let samples=this._historicalSamples(statRows,period,now,30);
+      if(samples.length===0){
+        const elapsedSamples=[];
+        for(let i=1;i<=30;i++){
+          const s=this._periodStart(period,-i,now),e=this._periodEnd(period,s),se=new Date(s.getTime()+elapsed);
+          const v=this._periodCost(historyStates,s,e,se);
+          if(v!=null&&Number.isFinite(v)&&v>=0)elapsedSamples.push(v);
+        }
+        samples=elapsedSamples;
+      }
+      const average=samples.length?samples.reduce((a,b)=>a+b,0)/samples.length:null;
+      const ratio=average>0&&currentValue!=null?currentValue/average:null;
+      const color=ratio==null?"neutral":ratio>1.10?"red":ratio>=0.90?"yellow":"green";
+      return {current:currentValue,average,max:Math.max(currentValue||0,...samples,0),ratio,color,samples:samples.length};
     }
     async _loadCostHistory(){
-      if(!this._hass||!this._cfg.cost_entity&&!this._cfg.peak_cost_entity&&!this._cfg.off_peak_cost_entity)return;
-      const peakCostId=this._cfg.peak_cost_entity||"sensor.dte_peak_energy_cost";
-      const offPeakCostId=this._cfg.off_peak_cost_entity||"sensor.dte_off_peak_energy_cost";
-      const peakEnergyId="sensor.dte_house_energy_peak";
-      const peakRateId="input_number.dte_peak_base_rate";
-      const ids=[peakCostId,offPeakCostId];
+      if(!this._hass||!this._data)return;
+      this._costError=null;
       try{
-        const {start,end}=this._periodBounds(this._costPeriod);
-        const currentHistory=await this._ws({type:"history/history_during_period",start_time:start.toISOString(),end_time:end.toISOString(),entity_ids:ids,include_start_time_state:true,significant_changes_only:false,minimal_response:true,no_attributes:true});
-        const historyDelta=id=>{
-          const states=(currentHistory&&currentHistory[id])||[];
-          const nums=states.map(x=>Number(x.s??x.state)).filter(Number.isFinite);
-          const current=this._state(id);
-          const first=nums.length?nums[0]:null;
-          const last=nums.length?nums[nums.length-1]:current;
-          return first==null||last==null?null:Math.max(0,last-first);
-        };
-        const off=historyDelta(offPeakCostId);
-        let peakEnergy=null;
-        try{
-          const stats=await this._ws({type:"recorder/statistics_during_period",start_time:start.toISOString(),end_time:end.toISOString(),statistic_ids:[peakEnergyId],period:"5minute",types:["change","state","last_reset"]});
-          const rows=(stats&&stats[peakEnergyId])||[];
-          if(rows.length){
-            const changes=rows.map(x=>Number(x.change)).filter(Number.isFinite).reduce((sum,v)=>sum+Math.max(0,v),0);
-            const lastRow=rows[rows.length-1],lastState=Number(lastRow.state),current=this._state(peakEnergyId);
-            let tail=0;
-            if(Number.isFinite(current)&&Number.isFinite(lastState))tail=current>=lastState?current-lastState:current;
-            peakEnergy=Math.max(0,changes+tail);
-          }
-        }catch(e){console.warn("EnergyIQ peak statistics unavailable; using history",e);}
-        if(peakEnergy==null)peakEnergy=historyDelta(peakEnergyId);
-        const peakRate=this._state(peakRateId);
-        const peak=peakEnergy==null||peakRate==null?null:Math.max(0,peakEnergy*peakRate);
-        this._costHistory={peak,off,total:peak==null&&off==null?null:(peak||0)+(off||0)};
-
-        const spec=this._costLearningSpec(this._costPeriod);
-        const learnStart=this._shiftPeriodStart(start,this._costPeriod,spec.count);
-        const learnedHistory=await this._ws({type:"history/history_during_period",start_time:learnStart.toISOString(),end_time:end.toISOString(),entity_ids:ids,include_start_time_state:true,significant_changes_only:false,minimal_response:true,no_attributes:true});
-        // Compare current accumulated cost with prior periods at the same elapsed point.
-        const peakSamples=this._historicalMovingDeltas((learnedHistory&&learnedHistory[peakCostId])||[],this._costPeriod,start,end,spec.count);
-        const offSamples=this._historicalMovingDeltas((learnedHistory&&learnedHistory[offPeakCostId])||[],this._costPeriod,start,end,spec.count);
-        this._costLearned={peak:this._learnedBar(peak,peakSamples),off:this._learnedBar(off,offSamples)};
+        const period=this._costPeriod,now=new Date(),oldest=this._periodStart(period,-30,now);
+        const currentStart=this._periodStart(period,0,now),currentEnd=new Date(now);
+        const peakId=this._costEntity(this._cfg.peak_cost_entity,["sensor.dte_peak_energy_cost"],["dte","peak","cost"]);
+        const offId=this._costEntity(this._cfg.off_peak_cost_entity,["sensor.dte_off_peak_energy_cost"],["dte","off","peak","cost"]);
+        if(!peakId&&!offId)throw new Error("EnergyIQ could not find the Peak and Off-Peak cost sensors.");
+        const ids=[peakId,offId].filter(Boolean);
+        const currentPromises=ids.map(id=>this._statChangeForPeriod(id,currentStart,currentEnd));
+        const [currentValues,stats,history]=await Promise.all([
+          Promise.all(currentPromises),
+          this._ws({
+            type:"recorder/statistics_during_period",
+            start_time:oldest.toISOString(),
+            end_time:now.toISOString(),
+            statistic_ids:ids,
+            period:period==="day"?"5minute":"hour",
+            types:["change"]
+          }).catch(()=>({})),
+          this._ws({
+            type:"history/history_during_period",
+            start_time:oldest.toISOString(),
+            end_time:now.toISOString(),
+            entity_ids:ids,
+            include_start_time_state:true,
+            significant_changes_only:false,
+            minimal_response:true,
+            no_attributes:true
+          }).catch(()=>({}))
+        ]);
+        const peakCurrent=peakId?currentValues[ids.indexOf(peakId)]:null;
+        const offCurrent=offId?currentValues[ids.indexOf(offId)]:null;
+        const peakStats=peakId?(stats?.[peakId]||[]):[],offStats=offId?(stats?.[offId]||[]):[];
+        const peakStates=peakId?(history?.[peakId]||[]):[],offStates=offId?(history?.[offId]||[]):[];
+        const peak=this._buildLearned(period,now,peakCurrent,peakStats,peakStates);
+        const off=this._buildLearned(period,now,offCurrent,offStats,offStates);
+        if(peak.current==null&&off.current==null)throw new Error("Cost sensors returned no usable values for the selected period.");
+        this._costHistory={peak:peak.current,off:off.current,total:(peak.current||0)+(off.current||0)};
+        this._costLearned={peak,off};
         this._costHistoryAt=Date.now();
       }catch(e){
         console.error("EnergyIQ cost history",e);
-        this._costHistory={peak:null,off:null,total:null};
-        this._costLearned=null;
-        this._costHistoryAt=Date.now();
+        this._costHistory=null;this._costLearned=null;this._costError=e?.message||String(e);this._costHistoryAt=Date.now();
       }
       this._render();
     }
     _state(id){return this._num(this._hass&&this._hass.states&&this._hass.states[id]&&this._hass.states[id].state);}
-    _brandIconUrl(){const base="/api/brands/integration/energyiq/icon.png";return this._brandToken?base+"?token="+encodeURIComponent(this._brandToken)+"&v=31445":base+"?v=31445";}
+    _brandIcon(){return '<ha-icon class="energyiq-brand-icon" icon="mdi:home-lightning-bolt-outline"></ha-icon>';}
     _next(e){if(!e.target.closest||!e.target.closest("[data-next]"))return;e.stopPropagation();this._view=(this._view+1)%3;if(this._view===2&&Date.now()-this._costHistoryAt>30000)this._loadCostHistory();this._render();}
     _handleClick(e){this._next(e);const costNav=e.target.closest&&e.target.closest("[data-cost-period]");if(costNav&&this._view===2){const periods=["day","week","month"],index=periods.indexOf(this._costPeriod),dir=costNav.getAttribute("data-cost-period")==="next"?1:-1,nextIndex=Math.max(0,Math.min(periods.length-1,index+dir));if(nextIndex!==index){this._costPeriod=periods[nextIndex];this._costHistory=null;this._costHistoryAt=0;this._render();this._loadCostHistory();}return;}const active=e.target.closest&&e.target.closest("[data-active-loads]");if(active){e.stopPropagation();this._showActiveLoads();return;}const open=e.target.closest&&e.target.closest("[data-open-energyiq]");if(open){e.stopPropagation();this._openEnergyIQ();return;}const close=e.target.closest&&e.target.closest("[data-close-active]");if(close){e.stopPropagation();this._closeActiveLoads();return;}}
     _bindCostSwipe(){
@@ -242,11 +396,15 @@ if (!customElements.get(TAG)) {
     _loading(){this.innerHTML='<ha-card><div class="pad"><b>EnergyIQ</b> <span>Loading...</span></div></ha-card>';}
     _error(m){this.innerHTML='<ha-card><div class="pad"><b>EnergyIQ</b><div class="err">'+this._esc(m)+'</div></div></ha-card>';}
     _render(){
-      var d=this._data||{}, home=this._num(d.whole_home_power), trained=Math.max(0,this._num(d.trained_live_power_w)||0), known=home==null?null:Math.min(home,trained), mystery=home==null?null:Math.max(0,home-trained);
+      var d=this._data||{},home=this._num(d.whole_home_power),trained=Math.max(0,this._num(d.trained_live_power_w)||0),known=home==null?null:Math.min(home,trained),mystery=home==null?null:Math.max(0,home-trained);
       var devices=(d.devices||[]).filter(function(x){return x.classification==="monitor";}).map(function(x){return Object.assign({},x,{w:Math.max(0,Number(x.current_power)||0)});}).filter(function(x){return x.w>0;}).sort(function(a,b){return b.w-a.w;});
-      var total=this._state(this._cfg.cost_entity||"sensor.dte_variable_energy_cost"), peak=this._state(this._cfg.peak_cost_entity||"sensor.dte_peak_energy_cost"), off=this._state(this._cfg.off_peak_cost_entity||"sensor.dte_off_peak_energy_cost");
-      var titles=["CONSUMPTION","MYSTERY WATTS","COST"], subs=["Current attributed power","Known vs. unexplained power",""], body=this._view===0?this._pareto(devices):this._view===1?this._mystery(home,known,mystery):this._cost(total,peak,off),costMoney=this._costHistory&&this._costHistory.total!=null?"$"+Number(this._costHistory.total).toFixed(2):"—",costLabel=this._costPeriod==="week"?"TOTAL THIS WEEK":this._costPeriod==="month"?"TOTAL THIS MONTH":"TOTAL TODAY",headExtra=this._view===2?'<div class="cost-head-total"><span>'+costLabel+'</span><strong>'+costMoney+'</strong></div>':"";
-      this.innerHTML='<style>'+this._css()+'</style><ha-card><div class="pad"><div class="head '+(this._view===2?"cost-view":"")+'"><div class="card-title-wrap"><div class="card-icon" aria-hidden="true"><img src="'+this._brandIconUrl()+'" alt=""></div><div><div class="eyebrow">ENERGYIQ</div><div class="title">'+titles[this._view]+'</div><div class="sub">'+subs[this._view]+'</div></div></div>'+headExtra+'<div class="head-actions"><button class="active-shortcut" data-active-loads aria-label="Show active loads">⚡</button><button class="open-shortcut" data-open-energyiq aria-label="Open EnergyIQ">↗</button><button data-next aria-label="Next view">→</button></div></div><div class="body">'+body+'</div><div class="dots"><i class="'+(this._view===0?'on':'')+'"></i><i class="'+(this._view===1?'on':'')+'"></i><i class="'+(this._view===2?'on':'')+'"></i></div></div></ha-card>';
+      var total=this._state(this._cfg.cost_entity||"sensor.dte_variable_energy_cost"),peak=this._state(this._cfg.peak_cost_entity||"sensor.dte_peak_energy_cost"),off=this._state(this._cfg.off_peak_cost_entity||"sensor.dte_off_peak_energy_cost");
+      var titles=["CONSUMPTION","MYSTERY WATTS","COST"],subs=["Current attributed power","Known vs. unexplained power",""],body=this._view===0?this._pareto(devices):this._view===1?this._mystery(home,known,mystery):this._cost(total,peak,off);
+      const costTotal=this._costHistory&&this._costHistory.total!=null?this._costHistory.total:total;
+      const costMoney=Number.isFinite(Number(costTotal))?"$"+Number(costTotal).toFixed(2):"—";
+      const costLabel=this._costPeriod==="week"?"TOTAL THIS WEEK":this._costPeriod==="month"?"TOTAL THIS MONTH":"TOTAL TODAY";
+      const headExtra=this._view===2?'<div class="cost-head-total"><span>'+costLabel+'</span><strong>'+costMoney+'</strong></div>':"";
+      this.innerHTML='<style>'+this._css()+'</style><ha-card><div class="pad"><div class="head '+(this._view===2?"cost-view":"")+'"><div class="card-title-wrap"><div class="card-icon">'+this._brandIcon()+'</div><div><div class="eyebrow">ENERGYIQ</div><div class="title">'+titles[this._view]+'</div><div class="sub">'+subs[this._view]+'</div></div></div>'+headExtra+'<div class="head-actions"><button class="active-shortcut" data-active-loads aria-label="Show active loads">⚡</button><button class="open-shortcut" data-open-energyiq aria-label="Open EnergyIQ">↗</button><button data-next aria-label="Next view">→</button></div></div><div class="body">'+body+'</div></div></ha-card>';
       if(this._view===2)this._bindCostSwipe();
     }
     _pareto(a){
@@ -263,19 +421,22 @@ if (!customElements.get(TAG)) {
       return '<div class="myst"><div class="big">'+Math.round(mystery)+' <span>W</span></div><div class="status"><span>Unexplained right now</span><b>'+up.toFixed(0)+'%</b></div><div class="stack"><div class="known" style="width:'+kp+'%"></div><div class="unknown" style="width:'+up+'%"></div></div><div class="legend"><span><i class="kd"></i>Known <b>'+Math.round(known)+' W</b></span><span><i class="ud"></i>Unknown <b>'+Math.round(mystery)+' W</b></span></div><div class="total">Whole-home power <b>'+Math.round(home)+' W</b></div></div>';
     }
     _cost(total,peak,off){
-      const h=this._costHistory,learned=this._costLearned;
-      if(!h||h.total==null)return '<div class="cost-loading">Loading cost history…</div>';
-      const periods=["day","week","month"],labels={day:"DAY",week:"WEEK",month:"MONTH"},periodLabel=labels[this._costPeriod]||"DAY";
-      const peakValue=h.peak||0,offValue=h.off||0,money=v=>"$"+Number(v||0).toFixed(2);
-      const bar=(value,info,type)=>{
-        const target=info&&Number.isFinite(info.target)&&info.target>0?info.target:null;
-        const pct=info&&Number.isFinite(info.pct)?info.pct:(value>0?50:0);
-        const color=info&&info.color?info.color:"green";
-        return '<div class="cost-bar-row"><div class="cost-bar-label"><span>'+(type==="peak"?"Peak":"Off-Peak")+'</span></div><div class="cost-bar-main"><div class="cost-track"><div class="cost-fill '+color+'" style="width:'+pct+'%"></div></div><div class="cost-total">'+money(value)+'</div></div></div>';
+      const h=this._costHistory, learned=this._costLearned;
+      if(this._costError)return '<div class="cost-error">'+this._esc(this._costError)+'</div>';
+      if(!h||!learned)return '<div class="cost-loading">Loading cost history…</div>';
+      const labels={day:"DAY",week:"WEEK",month:"MONTH"},periodLabel=labels[this._costPeriod]||"DAY";
+      const money=v=>"$"+Number(v||0).toFixed(2);
+      const bar=(label,item)=>{
+        const value=Number(item?.current)||0;
+        const now=new Date(),start=this._periodStart(this._costPeriod,0,now),end=this._periodEnd(this._costPeriod,start);
+        const duration=Math.max(1,end.getTime()-start.getTime());
+        const elapsed=Math.max(0,Math.min(now.getTime(),end.getTime())-start.getTime());
+        const width=Math.max(0,Math.min(100,elapsed/duration*100));
+        return '<div class="cost-bar-row"><div class="cost-bar-head"><span>'+label+'</span><strong>'+money(value)+'</strong></div><div class="cost-bar-track"><div class="cost-bar-fill '+(item?.color||"neutral")+'" style="width:'+width.toFixed(1)+'%"></div></div></div>';
       };
-      return '<div class="cost-swipe" role="group" aria-label="Cost period '+periodLabel+'. Swipe left or right to change period."><div class="cost-bars">'+bar(peakValue,learned&&learned.peak,"peak")+bar(offValue,learned&&learned.off,"off")+'</div><div class="cost-period-nav"><button type="button" data-cost-period="prev" aria-label="Previous cost period">‹</button><strong>'+periodLabel+'</strong><button type="button" data-cost-period="next" aria-label="Next cost period">›</button></div><div class="cost-dots">'+periods.map(function(p){return '<i class="'+(p===this._costPeriod?"on":"")+'"></i>';},this).join("")+'</div></div>';
+      return '<div class="cost-swipe" role="group" aria-label="Cost period '+periodLabel+'. Swipe left or right to change period."><div class="cost-bars">'+bar("Peak",learned.peak)+bar("Off-Peak",learned.off)+'</div><div class="cost-period-nav"><button type="button" data-cost-period="prev" aria-label="Previous cost period">‹</button><strong>'+periodLabel+'</strong><button type="button" data-cost-period="next" aria-label="Next cost period">›</button></div></div>';
     }
-    _css(){return ':host{display:block;width:100%;min-width:0;max-width:100%;height:auto;box-sizing:border-box;container-type:inline-size;container-name:energyiq-card}.pad{padding:clamp(10px,2.2cqw,16px) clamp(10px,2.4cqw,16px) clamp(8px,1.7cqw,10px);color:var(--primary-text-color);min-width:0;width:100%;height:auto;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column}ha-card{display:flex;flex-direction:column;width:100%;height:auto;max-width:100%;box-sizing:border-box;overflow:hidden}.head{display:flex;justify-content:space-between;align-items:flex-start;gap:clamp(6px,1.5cqw,10px);flex:0 0 auto}.card-title-wrap{display:flex;align-items:center;gap:clamp(6px,1.5cqw,9px);min-width:0}.card-icon{width:clamp(28px,5.5cqw,34px);height:clamp(28px,5.5cqw,34px);flex:none;display:grid;place-items:center;border-radius:clamp(8px,1.7cqw,10px);background:rgba(28,205,255,.12);border:1px solid rgba(28,205,255,.28);overflow:hidden}.card-icon img{width:72%;height:72%;object-fit:contain;display:block}.head-actions{display:flex;align-items:center;gap:clamp(3px,1cqw,6px);flex:none}.eyebrow{font-size:clamp(.62rem,1.9cqw,.72rem);letter-spacing:.12em;font-weight:700;color:var(--secondary-text-color)}.title{font-size:clamp(.98rem,3.2cqw,1.2rem);font-weight:700;line-height:1.15}.cost-view .title{font-size:clamp(1.18rem,4.2cqw,1.58rem);font-weight:800}.sub{font-size:clamp(.68rem,2cqw,.78rem);color:var(--secondary-text-color);line-height:1.2}.head-actions button{width:clamp(30px,5.8cqw,36px);height:clamp(30px,5.8cqw,36px);padding:0}button{width:clamp(34px,6.5cqw,40px);height:clamp(34px,6.5cqw,40px);border:0;border-radius:50%;background:var(--primary-color,#03a9f4);color:#fff;font-size:clamp(1.15rem,3.5cqw,1.5rem);cursor:pointer}.active-shortcut{background:rgba(20,242,184,.14);color:#35e7b0;border:1px solid rgba(20,242,184,.35)}.open-shortcut{background:rgba(28,205,255,.12);color:#36c8ff;border:1px solid rgba(28,205,255,.28)}.body{min-height:0;flex:1;display:flex;align-items:center;min-width:0;width:100%;overflow:hidden}.dots{display:flex;justify-content:center;gap:6px;flex:0 0 auto;padding-top:4px}.dots i{width:6px;height:6px;border-radius:50%;background:var(--divider-color)}.dots i.on{background:var(--primary-color)}.chart{width:100%;min-width:0;overflow:hidden}.summary{display:flex;gap:7px;align-items:baseline;margin:4px}.summary b,.big{font-size:clamp(1.65rem,5.5cqw,2.1rem);line-height:1.05}.summary span,.sub{color:var(--secondary-text-color);font-size:clamp(.68rem,2cqw,.76rem)}svg{display:block;width:100%;max-width:100%;height:min(175px,30cqw);min-height:105px;overflow:hidden}.axis{stroke:var(--divider-color)}.line{fill:none;stroke:var(--primary-color);stroke-width:3;stroke-linecap:round}.dotline{fill:var(--primary-color);stroke:var(--ha-card-background,#1c1c1c);stroke-width:2}.v{fill:var(--primary-text-color);font-size:clamp(9px,1.8cqw,11px);font-weight:700}.x{fill:var(--secondary-text-color);font-size:clamp(8px,1.8cqw,11px)}.c0{fill:#2196f3}.c1{fill:#42a5f5}.c2{fill:#26a69a}.c3{fill:#ffb300}.c4{fill:#ef5350}.myst,.cost{width:100%;padding:0;box-sizing:border-box;min-width:0}.cost-swipe{width:100%;min-width:0;touch-action:pan-y}.cost-period-nav{display:flex;align-items:center;justify-content:center;gap:10px;margin:0 0 8px}.cost-period-nav strong{font-size:clamp(.95rem,3cqw,1.18rem);letter-spacing:.08em}.cost-period-nav button{width:30px;height:30px;font-size:1.35rem;line-height:1;background:transparent;color:var(--primary-text-color);border:1px solid var(--divider-color);cursor:pointer;display:grid;place-items:center}.cost-period-nav button:hover{background:var(--secondary-background-color);border-color:var(--primary-color)}.cost-bars{display:flex;flex-direction:column;gap:12px;margin:0;padding:1px 0 0}.cost-bar-row{min-width:0}.cost-bar-label{margin-bottom:4px;font-size:clamp(.88rem,2.6cqw,1.04rem);font-weight:800}.cost-bar-label span{color:var(--primary-text-color)}.cost-bar-main{display:grid;grid-template-columns:minmax(0,1fr) clamp(72px,11cqw,104px);gap:8px;align-items:stretch}.cost-track{position:relative;height:28px;border-radius:8px;background:var(--secondary-background-color);border:1px solid var(--divider-color);box-sizing:border-box;overflow:hidden}.cost-fill{height:100%;border-radius:7px;min-width:0;transition:width .35s ease,background-color .25s ease;box-shadow:inset 0 0 0 1px rgba(255,255,255,.12)}.cost-fill.green{background:#43d85b}.cost-fill.yellow{background:#f2c21f}.cost-fill.red{background:#e8453c}.cost-target-marker{position:absolute;top:-1px;bottom:-1px;width:4px;transform:translateX(-50%);background:#fff;border-radius:2px;box-shadow:0 0 3px rgba(0,0,0,.7);z-index:2}.cost-total{display:flex;align-items:center;justify-content:center;min-width:0;border-radius:8px;background:var(--secondary-background-color);border:1px solid var(--divider-color);font-size:clamp(.92rem,2.9cqw,1.12rem);font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}.cost-loading{width:100%;text-align:center;color:var(--secondary-text-color);padding:18px 10px}.cost-head-total{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;min-width:68px;margin-left:auto;margin-right:clamp(28px,4cqw,52px);padding-top:0;transform:translateY(-3px)}.cost-head-total span{font-size:clamp(.52rem,1.5cqw,.62rem);letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}.cost-head-total strong{font-size:clamp(1rem,3cqw,1.28rem);line-height:1.05;font-variant-numeric:tabular-nums;white-space:nowrap}.body:has(.cost-swipe)+.dots{display:none}.cost-loading{width:100%;text-align:center;color:var(--secondary-text-color);padding:18px 10px}.cost-head-total{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;min-width:68px;margin-left:auto;margin-right:clamp(28px,4cqw,52px);padding-top:0;transform:translateY(-3px)}.cost-head-total span{font-size:clamp(.52rem,1.5cqw,.62rem);letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}.cost-head-total strong{font-size:clamp(1rem,3cqw,1.28rem);line-height:1.05;font-variant-numeric:tabular-nums;white-space:nowrap}.body:has(.cost-swipe)+.dots{display:none}@media (pointer:fine){.cost-swipe-hint{display:none}}@container energyiq-card (max-width:420px){.cost-period-nav{gap:7px;margin-top:8px;margin-bottom:0}.cost-bars{gap:8px}.cost-track{height:21px}.cost-bar-main{grid-template-columns:minmax(0,1fr) 68px;gap:6px}.cost-total{font-size:.9rem}.cost-head-total{min-width:60px}.cost-head-total span{font-size:.5rem}.cost-head-total strong{font-size:1rem}.cost-view .title{font-size:1.3rem}}@container energyiq-card (max-width:420px){.pad{padding:9px 10px 7px}.head-actions button{width:29px;height:29px}.active-shortcut{font-size:0}.active-shortcut::before{content:"⚡";font-size:1rem}.title{font-size:1rem}.sub{font-size:.67rem}.summary{margin:2px}.summary b,.big{font-size:1.7rem}svg{height:120px;min-height:100px}.legend{gap:5px}.break{gap:6px}}@container energyiq-card (max-height:240px){.pad{padding-top:8px;padding-bottom:6px}.body{overflow:hidden}.sub{display:none}.dots{padding-top:2px}.track{margin-top:8px}.break{margin-top:7px}}@container energyiq-card (min-width:700px){.body{padding-left:4px;padding-right:4px}.summary{margin-left:0}.chart svg{height:min(185px,28cqw)}}.empty{width:100%;text-align:center;color:var(--secondary-text-color);font-size:clamp(.78rem,2.3cqw,.9rem);padding:10px}.err{margin-top:10px;color:var(--error-color)}.active-loads-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center;padding:16px}.active-loads{width:min(430px,100%);max-height:82vh;overflow:auto;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:14px;box-shadow:var(--ha-card-box-shadow);padding:16px;box-sizing:border-box}.active-loads-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.active-loads-title{font-size:1.25rem;font-weight:800}.active-loads-head button{width:38px;height:38px;padding:0}.active-load-list{margin-top:12px}.active-load-row{display:flex;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid var(--divider-color)}.active-load-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.active-load-row strong{white-space:nowrap;font-variant-numeric:tabular-nums}.active-load-empty{text-align:center;padding:22px;color:var(--secondary-text-color)}.active-load-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}.active-load-summary div{padding:9px;border-radius:9px;background:var(--secondary-background-color);border:1px solid var(--divider-color)}.active-load-summary span{display:block;font-size:9px;text-transform:uppercase;color:var(--secondary-text-color)}.active-load-summary strong{display:block;margin-top:3px;font-size:14px;font-variant-numeric:tabular-nums}@media(max-width:500px){.active-loads-backdrop{padding:10px}.active-loads{max-height:88vh;padding:14px}.active-load-summary{grid-template-columns:1fr 1fr}.active-load-summary div:last-child{grid-column:1/-1}}';}
+    _css(){return ':host{display:block;width:100%;min-width:0;max-width:100%;height:auto;box-sizing:border-box;container-type:inline-size;container-name:energyiq-card}.pad{padding:clamp(10px,2.2cqw,16px) clamp(10px,2.4cqw,16px) clamp(8px,1.7cqw,10px);color:var(--primary-text-color);min-width:0;width:100%;height:auto;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column}ha-card{display:flex;flex-direction:column;width:100%;height:auto;max-width:100%;box-sizing:border-box;overflow:hidden}.head{display:flex;justify-content:space-between;align-items:flex-start;gap:clamp(6px,1.5cqw,10px);flex:0 0 auto}.card-title-wrap{display:flex;align-items:center;gap:clamp(6px,1.5cqw,9px);min-width:0}.energyiq-brand-icon{--mdc-icon-size:28px;color:#e7ecef}.card-icon{width:clamp(28px,5.5cqw,34px);height:clamp(28px,5.5cqw,34px);flex:none;display:grid;place-items:center;border-radius:clamp(8px,1.7cqw,10px);background:rgba(28,205,255,.12);border:1px solid rgba(28,205,255,.28);overflow:hidden}.card-icon svg{width:88%;height:88%;display:block}.head-actions{display:flex;align-items:center;gap:clamp(3px,1cqw,6px);flex:none}.eyebrow{font-size:clamp(.62rem,1.9cqw,.72rem);letter-spacing:.12em;font-weight:700;color:var(--secondary-text-color)}.title{font-size:clamp(.98rem,3.2cqw,1.2rem);font-weight:700;line-height:1.15}.cost-view .title{font-size:clamp(1.18rem,4.2cqw,1.58rem);font-weight:800}.sub{font-size:clamp(.68rem,2cqw,.78rem);color:var(--secondary-text-color);line-height:1.2}.head-actions button{width:clamp(30px,5.8cqw,36px);height:clamp(30px,5.8cqw,36px);padding:0}button{width:clamp(34px,6.5cqw,40px);height:clamp(34px,6.5cqw,40px);border:0;border-radius:50%;background:var(--primary-color,#03a9f4);color:#fff;font-size:clamp(1.15rem,3.5cqw,1.5rem);cursor:pointer}.active-shortcut{background:rgba(20,242,184,.14);color:#35e7b0;border:1px solid rgba(20,242,184,.35)}.open-shortcut{background:rgba(28,205,255,.12);color:#36c8ff;border:1px solid rgba(28,205,255,.28)}.body{min-height:0;flex:1;display:flex;align-items:center;min-width:0;width:100%;overflow:hidden}.dots{display:flex;justify-content:center;gap:6px;flex:0 0 auto;padding-top:4px}.dots i{width:6px;height:6px;border-radius:50%;background:var(--divider-color)}.dots i.on{background:var(--primary-color)}.chart{width:100%;min-width:0;overflow:hidden}.summary{display:flex;gap:7px;align-items:baseline;margin:4px}.summary b,.big{font-size:clamp(1.65rem,5.5cqw,2.1rem);line-height:1.05}.summary span,.sub{color:var(--secondary-text-color);font-size:clamp(.68rem,2cqw,.76rem)}svg{display:block;width:100%;max-width:100%;height:min(175px,30cqw);min-height:105px;overflow:hidden}.axis{stroke:var(--divider-color)}.line{fill:none;stroke:var(--primary-color);stroke-width:3;stroke-linecap:round}.dotline{fill:var(--primary-color);stroke:var(--ha-card-background,#1c1c1c);stroke-width:2}.v{fill:var(--primary-text-color);font-size:clamp(9px,1.8cqw,11px);font-weight:700}.x{fill:var(--secondary-text-color);font-size:clamp(8px,1.8cqw,11px)}.c0{fill:#2196f3}.c1{fill:#42a5f5}.c2{fill:#26a69a}.c3{fill:#ffb300}.c4{fill:#ef5350}.myst,.cost{width:100%;padding:0;box-sizing:border-box;min-width:0}.cost-swipe{width:100%;min-width:0;touch-action:pan-y}.cost-bars{display:flex;flex-direction:column;gap:18px;width:100%;padding:6px 0 12px}.cost-bar-row{width:100%}.cost-bar-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:7px}.cost-bar-head span{font-size:clamp(1rem,3cqw,1.18rem);font-weight:800;letter-spacing:.02em}.cost-bar-head strong{font-size:clamp(1.1rem,3.8cqw,1.45rem);font-weight:800;font-variant-numeric:tabular-nums}.cost-bar-track{width:100%;height:24px;border-radius:8px;overflow:hidden;background:var(--secondary-background-color);border:1px solid var(--divider-color);box-sizing:border-box}.cost-bar-fill{height:100%;border-radius:7px;transition:width .35s ease}.cost-bar-fill.green{background:#43d85b}.cost-bar-fill.yellow{background:#f2c21f}.cost-bar-fill.red{background:#e8453c}.cost-bar-fill.neutral{background:#70757a}.cost-period-nav{display:flex;align-items:center;justify-content:center;gap:10px;margin:4px 0 0}.cost-period-nav strong{font-size:clamp(1rem,3.2cqw,1.25rem);letter-spacing:.08em;font-weight:800}.cost-period-nav button{width:30px;height:30px;font-size:1.35rem;line-height:1;background:transparent;color:var(--primary-text-color);border:1px solid var(--divider-color);cursor:pointer;display:grid;place-items:center}.cost-period-nav button:hover{background:var(--secondary-background-color);border-color:var(--primary-color)}.cost-head-total{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;min-width:68px;margin-left:auto;margin-right:clamp(4px,1.5cqw,10px);padding-top:0}.cost-head-total span{font-size:clamp(.52rem,1.5cqw,.62rem);letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}.cost-head-total strong{font-size:clamp(1rem,3cqw,1.28rem);line-height:1.05;font-variant-numeric:tabular-nums;white-space:nowrap}.cost-loading,.cost-error{width:100%;text-align:center;color:var(--secondary-text-color);padding:22px 10px}.cost-error{color:var(--error-color)}@container energyiq-card (max-width:420px){.cost-period-nav{gap:7px;margin-top:8px;margin-bottom:0}.cost-bars{gap:8px}.cost-track{height:21px}.cost-bar-main{grid-template-columns:minmax(0,1fr) 68px;gap:6px}.cost-total{font-size:.9rem}.cost-view .title{font-size:1.3rem}}@container energyiq-card (max-width:420px){.pad{padding:9px 10px 7px}.head-actions button{width:29px;height:29px}.active-shortcut{font-size:0}.active-shortcut::before{content:"⚡";font-size:1rem}.title{font-size:1rem}.sub{font-size:.67rem}.summary{margin:2px}.summary b,.big{font-size:1.7rem}svg{height:120px;min-height:100px}.legend{gap:5px}.break{gap:6px}}@container energyiq-card (max-height:240px){.pad{padding-top:8px;padding-bottom:6px}.body{overflow:hidden}.sub{display:none}.dots{padding-top:2px}.track{margin-top:8px}.break{margin-top:7px}}@container energyiq-card (min-width:700px){.body{padding-left:4px;padding-right:4px}.summary{margin-left:0}.chart svg{height:min(185px,28cqw)}}.empty{width:100%;text-align:center;color:var(--secondary-text-color);font-size:clamp(.78rem,2.3cqw,.9rem);padding:10px}.err{margin-top:10px;color:var(--error-color)}.active-loads-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center;padding:16px}.active-loads{width:min(430px,100%);max-height:82vh;overflow:auto;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:14px;box-shadow:var(--ha-card-box-shadow);padding:16px;box-sizing:border-box}.active-loads-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.active-loads-title{font-size:1.25rem;font-weight:800}.active-loads-head button{width:38px;height:38px;padding:0}.active-load-list{margin-top:12px}.active-load-row{display:flex;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid var(--divider-color)}.active-load-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.active-load-row strong{white-space:nowrap;font-variant-numeric:tabular-nums}.active-load-empty{text-align:center;padding:22px;color:var(--secondary-text-color)}.active-load-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}.active-load-summary div{padding:9px;border-radius:9px;background:var(--secondary-background-color);border:1px solid var(--divider-color)}.active-load-summary span{display:block;font-size:9px;text-transform:uppercase;color:var(--secondary-text-color)}.active-load-summary strong{display:block;margin-top:3px;font-size:14px;font-variant-numeric:tabular-nums}@media(max-width:500px){.active-loads-backdrop{padding:10px}.active-loads{max-height:88vh;padding:14px}.active-load-summary{grid-template-columns:1fr 1fr}.active-load-summary div:last-child{grid-column:1/-1}}';}
   }
   class EnergyIQCardEditor extends HTMLElement {
     constructor() {
