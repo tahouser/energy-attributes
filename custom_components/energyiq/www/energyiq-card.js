@@ -349,7 +349,7 @@ if (!customElements.get(TAG)) {
         const offCurrent=offHistoryCurrent!=null?offHistoryCurrent:offStatCurrent;
 
         const peakStats=peakId?(stats?.[peakId]||[]):[];
-        const offStats=offId?(stats?.[offId]||[]);
+        const offStats=offId?(stats?.[offId]||[]):[];
 
         const peak=this._buildLearned(period,now,peakCurrent,peakStats,peakStates);
         const off=this._buildLearned(period,now,offCurrent,offStats,offStates);
