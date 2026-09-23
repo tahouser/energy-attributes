@@ -334,7 +334,7 @@ if (!customElements.get(TAG)) {
         ]);
 
         const peakStates=peakId?(history?.[peakId]||[]):[];
-        const offStates=offId?(history?.[offId]||[]);
+        const offStates=offId?(history?.[offId]||[]):[];
 
         // Prefer recorder history for the current period. The singular statistics
         // call is only a fallback when history is unavailable, not the primary
