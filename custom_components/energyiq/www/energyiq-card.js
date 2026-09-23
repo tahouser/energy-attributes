@@ -1,6 +1,6 @@
-/* EnergyIQ dashboard card — 3.1.167 */
+/* EnergyIQ dashboard card — 3.1.169 */
 const TAG = "energyiq-card";
-const BRAND_ICON_URL = "/energyiq-brand/icon.png?v=31441";
+const BRAND_ICON_URL = "/energyiq-brand/icon.png?v=31442";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
     constructor() { super(); this._hass=null; this._cfg={}; this._data=null; this._entryId=null; this._view=0; this._timer=null; this._busy=false; this._ro=null; this._click=this._handleClick.bind(this); this._costPeriod="day"; this._costHistory=null; this._costHistoryAt=0; this._costLearned=null; this._costSwipeStartX=0; this._costSwipeStartY=0; this._costSwipeActive=false; }
@@ -108,14 +108,13 @@ if (!customElements.get(TAG)) {
       }
       return best?Number(best.s??best.state):null;
     }
-    _historicalPartialDeltas(states,period,currentStart,elapsedMs,count){
+    _historicalPeriodDeltas(states,period,currentStart,count){
       const values=[];
       for(let i=1;i<=count;i++){
         const pStart=this._shiftPeriodStart(currentStart,period,i);
-        const pEndFull=this._periodEnd(pStart,period);
-        const target=Math.min(pStart.getTime()+elapsedMs,pEndFull.getTime());
+        const pEnd=this._periodEnd(pStart,period);
         const before=this._historyNumberAt(states,pStart.getTime(),false);
-        const at=this._historyNumberAt(states,target,true)??this._historyNumberAt(states,target,false);
+        const at=this._historyNumberAt(states,pEnd.getTime(),true)??this._historyNumberAt(states,pEnd.getTime(),false);
         if(Number.isFinite(before)&&Number.isFinite(at)&&at>=before)values.push(at-before);
       }
       return values;
@@ -130,10 +129,8 @@ if (!customElements.get(TAG)) {
     _learnedBar(value,samples){
       const clean=(samples||[]).filter(Number.isFinite);
       if(!clean.length||!Number.isFinite(value))return {pct:value>0?50:0,target:null,sampleCount:clean.length};
-      const sorted=[...clean].sort((a,b)=>a-b);
-      // Historical 90th-percentile partial-period cost becomes the target.
-      // Peak and Off-Peak are scaled independently against their own target.
-      const target=Math.max(0.01,sorted[Math.max(0,Math.floor((sorted.length-1)*0.90))]);
+      // Agreed target: the running historical maximum for the selected period.
+      const target=Math.max(0.01,...clean);
       const scaled=value/target*100;
       return {
         pct:Math.max(3,Math.min(100,scaled)),
@@ -180,9 +177,9 @@ if (!customElements.get(TAG)) {
         const spec=this._costLearningSpec(this._costPeriod);
         const learnStart=this._shiftPeriodStart(start,this._costPeriod,spec.count);
         const learnedHistory=await this._ws({type:"history/history_during_period",start_time:learnStart.toISOString(),end_time:end.toISOString(),entity_ids:ids,include_start_time_state:true,significant_changes_only:false,minimal_response:true,no_attributes:true});
-        const elapsedMs=Math.max(0,end.getTime()-start.getTime());
-        const peakSamples=this._historicalPartialDeltas((learnedHistory&&learnedHistory[peakCostId])||[],this._costPeriod,start,elapsedMs,spec.count);
-        const offSamples=this._historicalPartialDeltas((learnedHistory&&learnedHistory[offPeakCostId])||[],this._costPeriod,start,elapsedMs,spec.count);
+        // Compare current accumulated cost with the maximum complete historical period.
+        const peakSamples=this._historicalPeriodDeltas((learnedHistory&&learnedHistory[peakCostId])||[],this._costPeriod,start,spec.count);
+        const offSamples=this._historicalPeriodDeltas((learnedHistory&&learnedHistory[offPeakCostId])||[],this._costPeriod,start,spec.count);
         this._costLearned={peak:this._learnedBar(peak,peakSamples),off:this._learnedBar(off,offSamples)};
         this._costHistoryAt=Date.now();
       }catch(e){
@@ -248,7 +245,7 @@ if (!customElements.get(TAG)) {
       var devices=(d.devices||[]).filter(function(x){return x.classification==="monitor";}).map(function(x){return Object.assign({},x,{w:Math.max(0,Number(x.current_power)||0)});}).filter(function(x){return x.w>0;}).sort(function(a,b){return b.w-a.w;});
       var total=this._state(this._cfg.cost_entity||"sensor.dte_variable_energy_cost"), peak=this._state(this._cfg.peak_cost_entity||"sensor.dte_peak_energy_cost"), off=this._state(this._cfg.off_peak_cost_entity||"sensor.dte_off_peak_energy_cost");
       var titles=["CONSUMPTION","MYSTERY WATTS","COST"], subs=["Current attributed power","Known vs. unexplained power",""], body=this._view===0?this._pareto(devices):this._view===1?this._mystery(home,known,mystery):this._cost(total,peak,off),costMoney=this._costHistory&&this._costHistory.total!=null?"$"+Number(this._costHistory.total).toFixed(2):"—",costLabel=this._costPeriod==="week"?"TOTAL THIS WEEK":this._costPeriod==="month"?"TOTAL THIS MONTH":"TOTAL TODAY",headExtra=this._view===2?'<div class="cost-head-total"><span>'+costLabel+'</span><strong>'+costMoney+'</strong></div>':"";
-      this.innerHTML='<style>'+this._css()+'</style><ha-card><div class="pad"><div class="head '+(this._view===2?"cost-view":"")+'"><div class="card-title-wrap"><div class="card-icon" aria-hidden="true"><img src="/energyiq-brand/icon.png?v=31441" alt=""></div><div><div class="eyebrow">ENERGYIQ</div><div class="title">'+titles[this._view]+'</div><div class="sub">'+subs[this._view]+'</div></div></div>'+headExtra+'<div class="head-actions"><button class="active-shortcut" data-active-loads aria-label="Show active loads">⚡</button><button class="open-shortcut" data-open-energyiq aria-label="Open EnergyIQ">↗</button><button data-next aria-label="Next view">→</button></div></div><div class="body">'+body+'</div><div class="dots"><i class="'+(this._view===0?'on':'')+'"></i><i class="'+(this._view===1?'on':'')+'"></i><i class="'+(this._view===2?'on':'')+'"></i></div></div></ha-card>';
+      this.innerHTML='<style>'+this._css()+'</style><ha-card><div class="pad"><div class="head '+(this._view===2?"cost-view":"")+'"><div class="card-title-wrap"><div class="card-icon" aria-hidden="true"><img src="/energyiq-brand/icon.png?v=31442" alt=""></div><div><div class="eyebrow">ENERGYIQ</div><div class="title">'+titles[this._view]+'</div><div class="sub">'+subs[this._view]+'</div></div></div>'+headExtra+'<div class="head-actions"><button class="active-shortcut" data-active-loads aria-label="Show active loads">⚡</button><button class="open-shortcut" data-open-energyiq aria-label="Open EnergyIQ">↗</button><button data-next aria-label="Next view">→</button></div></div><div class="body">'+body+'</div><div class="dots"><i class="'+(this._view===0?'on':'')+'"></i><i class="'+(this._view===1?'on':'')+'"></i><i class="'+(this._view===2?'on':'')+'"></i></div></div></ha-card>';
       if(this._view===2)this._bindCostSwipe();
     }
     _pareto(a){
