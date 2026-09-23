@@ -213,8 +213,8 @@ if (!customElements.get(TAG)) {
       const currentStart=this._periodStart(period,0,now),currentEnd=this._periodEnd(period,currentStart);
       const elapsed=Math.max(0,Math.min(now.getTime(),currentEnd.getTime())-currentStart.getTime());
       const sampleEnd=currentStart.getTime()+elapsed;
-      const currentHistory=this._periodCost(historyStates,currentStart,currentEnd,new Date(sampleEnd));
       const currentStats=this._statisticsPeriodCost(statRows,currentStart.getTime(),sampleEnd);
+      const currentHistory=this._periodCost(historyStates,currentStart,currentEnd,new Date(sampleEnd));
       const current=currentStats!=null?currentStats:currentHistory;
       const samples=[];
       for(let i=1;i<=30;i++){
@@ -241,8 +241,8 @@ if (!customElements.get(TAG)) {
           this._ws({type:"recorder/statistics_during_period",start_time:oldest.toISOString(),end_time:now.toISOString(),statistic_ids:ids,period:"hour",types:["sum"]}).catch(()=>({})),
           this._ws({type:"history/history_during_period",start_time:oldest.toISOString(),end_time:now.toISOString(),entity_ids:ids,include_start_time_state:true,significant_changes_only:false,minimal_response:true,no_attributes:true}).catch(()=>({}))
         ]);
-        const peakStates=peakId?(history?.[peakId]||[]):[],offStates=offId?(history?.[offId]||[]):[];
         const peakStats=peakId?(stats?.[peakId]||[]):[],offStats=offId?(stats?.[offId]||[]):[];
+        const peakStates=peakId?(history?.[peakId]||[]):[],offStates=offId?(history?.[offId]||[]):[];
         const peak=this._buildLearned(period,now,peakStats,peakStates),off=this._buildLearned(period,now,offStats,offStates);
         if(peak.current==null&&off.current==null)throw new Error("Cost sensors returned no usable values for the selected period.");
         this._costHistory={peak:peak.current,off:off.current,total:(peak.current||0)+(off.current||0)};
@@ -251,6 +251,82 @@ if (!customElements.get(TAG)) {
         console.error("EnergyIQ cost history",e);this._costHistory=null;this._costLearned=null;this._costError=e?.message||String(e);this._costHistoryAt=Date.now();
       }
       this._render();
+    }
+    _state(id){return this._num(this._hass&&this._hass.states&&this._hass.states[id]&&this._hass.states[id].state);}
+    _brandIcon(){return '<ha-icon class="energyiq-brand-icon" icon="mdi:home-lightning-bolt-outline"></ha-icon>';}
+    _next(e){if(!e.target.closest||!e.target.closest("[data-next]"))return;e.stopPropagation();this._view=(this._view+1)%3;if(this._view===2&&Date.now()-this._costHistoryAt>30000)this._loadCostHistory();this._render();}
+    _handleClick(e){this._next(e);const costNav=e.target.closest&&e.target.closest("[data-cost-period]");if(costNav&&this._view===2){const periods=["day","week","month"],index=periods.indexOf(this._costPeriod),dir=costNav.getAttribute("data-cost-period")==="next"?1:-1,nextIndex=Math.max(0,Math.min(periods.length-1,index+dir));if(nextIndex!==index){this._costPeriod=periods[nextIndex];this._costHistory=null;this._costHistoryAt=0;this._render();this._loadCostHistory();}return;}const active=e.target.closest&&e.target.closest("[data-active-loads]");if(active){e.stopPropagation();this._showActiveLoads();return;}const open=e.target.closest&&e.target.closest("[data-open-energyiq]");if(open){e.stopPropagation();this._openEnergyIQ();return;}const close=e.target.closest&&e.target.closest("[data-close-active]");if(close){e.stopPropagation();this._closeActiveLoads();return;}}
+    _bindCostSwipe(){
+      const el=this.querySelector(".cost-swipe");
+      if(!el)return;
+      el.addEventListener("touchstart",event=>{
+        const touch=event.touches?.[0];
+        if(!touch)return;
+        this._costSwipeStartX=touch.clientX;
+        this._costSwipeStartY=touch.clientY;
+        this._costSwipeActive=false;
+      },{passive:true});
+      el.addEventListener("touchmove",event=>{
+        const touch=event.touches?.[0];
+        if(!touch)return;
+        const dx=touch.clientX-this._costSwipeStartX;
+        const dy=touch.clientY-this._costSwipeStartY;
+        if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>10){
+          this._costSwipeActive=true;
+          if(event.cancelable)event.preventDefault();
+          event.stopPropagation();
+        }
+      },{passive:false});
+      el.addEventListener("touchend",event=>{
+        if(!this._costSwipeActive)return;
+        const touch=event.changedTouches?.[0];
+        if(!touch)return;
+        const dx=touch.clientX-this._costSwipeStartX;
+        const periods=["day","week","month"],index=periods.indexOf(this._costPeriod);
+        const nextIndex=dx<0?Math.min(periods.length-1,index+1):Math.max(0,index-1);
+        this._costSwipeActive=false;
+        event.stopPropagation();
+        if(nextIndex!==index){
+          this._costPeriod=periods[nextIndex];
+          this._costHistory=null;
+          this._costHistoryAt=0;
+          this._render();
+          this._loadCostHistory();
+        }
+      },{passive:true});
+      el.addEventListener("touchcancel",()=>{this._costSwipeActive=false;},{passive:true});
+    }
+    _openEnergyIQ(){if(this._hass&&typeof this._hass.navigate==="function"){this._hass.navigate("/energyiq");return;}window.history.pushState({}, "", "/energyiq");window.dispatchEvent(new Event("location-changed"));}
+    _closeActiveLoads(){const modal=this.querySelector(".active-loads-backdrop");if(modal)modal.remove();}
+    _showActiveLoads(){this._closeActiveLoads();const d=this._data||{},home=this._num(d.whole_home_power),trained=Math.max(0,this._num(d.trained_live_power_w)||0),mystery=home==null?null:Math.max(0,home-trained);const active=(d.devices||[]).filter(x=>x.classification==="monitor").map(x=>Object.assign({},x,{w:Math.max(0,Number(x.current_power)||0)})).filter(x=>x.w>0).sort((a,b)=>b.w-a.w);const known=active.reduce((s,x)=>s+x.w,0);const rows=active.length?active.map(x=>`<div class="active-load-row"><span>${this._esc(x.name||x.device_id)}</span><strong>${x.w.toFixed(0)} W</strong></div>`).join(""):`<div class="active-load-empty">No active attributed loads right now.</div>`;const fmt=v=>Number.isFinite(v)?`${v.toFixed(0)} W`:"—";this.insertAdjacentHTML("beforeend",`<div class="active-loads-backdrop" role="presentation"><div class="active-loads" role="dialog" aria-modal="true" aria-label="Active EnergyIQ loads"><div class="active-loads-head"><div><div class="eyebrow">ENERGYIQ</div><div class="active-loads-title">Active Loads</div><div class="sub">${active.length} currently consuming</div></div><button data-close-active aria-label="Close">×</button></div><div class="active-load-list">${rows}</div><div class="active-load-summary"><div><span>Known</span><strong>${fmt(known)}</strong></div><div><span>Unattributed</span><strong>${fmt(mystery)}</strong></div><div><span>House total</span><strong>${fmt(home)}</strong></div></div></div></div>`);}
+
+    _esc(v){return String(v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];});}
+    _loading(){this.innerHTML='<ha-card><div class="pad"><b>EnergyIQ</b> <span>Loading...</span></div></ha-card>';}
+    _error(m){this.innerHTML='<ha-card><div class="pad"><b>EnergyIQ</b><div class="err">'+this._esc(m)+'</div></div></ha-card>';}
+    _render(){
+      var d=this._data||{},home=this._num(d.whole_home_power),trained=Math.max(0,this._num(d.trained_live_power_w)||0),known=home==null?null:Math.min(home,trained),mystery=home==null?null:Math.max(0,home-trained);
+      var devices=(d.devices||[]).filter(function(x){return x.classification==="monitor";}).map(function(x){return Object.assign({},x,{w:Math.max(0,Number(x.current_power)||0)});}).filter(function(x){return x.w>0;}).sort(function(a,b){return b.w-a.w;});
+      var total=this._state(this._cfg.cost_entity||"sensor.dte_variable_energy_cost"),peak=this._state(this._cfg.peak_cost_entity||"sensor.dte_peak_energy_cost"),off=this._state(this._cfg.off_peak_cost_entity||"sensor.dte_off_peak_energy_cost");
+      var titles=["CONSUMPTION","MYSTERY WATTS","COST"],subs=["Current attributed power","Known vs. unexplained power",""],body=this._view===0?this._pareto(devices):this._view===1?this._mystery(home,known,mystery):this._cost(total,peak,off);
+      const costTotal=this._costHistory&&this._costHistory.total!=null?this._costHistory.total:total;
+      const costMoney=Number.isFinite(Number(costTotal))?"$"+Number(costTotal).toFixed(2):"—";
+      const costLabel=this._costPeriod==="week"?"TOTAL THIS WEEK":this._costPeriod==="month"?"TOTAL THIS MONTH":"TOTAL TODAY";
+      const headExtra=this._view===2?'<div class="cost-head-total"><span>'+costLabel+'</span><strong>'+costMoney+'</strong></div>':"";
+      this.innerHTML='<style>'+this._css()+'</style><ha-card><div class="pad"><div class="head '+(this._view===2?"cost-view":"")+'"><div class="card-title-wrap"><div class="card-icon">'+this._brandIcon()+'</div><div><div class="eyebrow">ENERGYIQ</div><div class="title">'+titles[this._view]+'</div><div class="sub">'+subs[this._view]+'</div></div></div>'+headExtra+'<div class="head-actions"><button class="active-shortcut" data-active-loads aria-label="Show active loads">⚡</button><button class="open-shortcut" data-open-energyiq aria-label="Open EnergyIQ">↗</button><button data-next aria-label="Next view">→</button></div></div><div class="body">'+body+'</div></div></ha-card>';
+      if(this._view===2)this._bindCostSwipe();
+    }
+    _pareto(a){
+      if(!a.length)return '<div class="empty">No active attributed loads right now.</div>';
+      var top=a.slice(0,6), other=a.slice(6).reduce(function(s,x){return s+x.w;},0); if(other)top.push({name:"Other",w:other});
+      var total=top.reduce(function(s,x){return s+x.w;},0), max=Math.max.apply(null,top.map(function(x){return x.w;})), W=640,H=205,L=34,R=18,T=14,B=48, slot=(W-L-R)/top.length,bw=Math.min(56,slot*.62),ch=H-T-B,cum=0,bars=[];
+      top.forEach(function(x,i){var xx=L+slot*i+(slot-bw)/2,bh=Math.max(2,x.w/max*ch),y=T+ch-bh;cum+=x.w;bars.push({x:xx,cx:xx+bw/2,y:y,bh:bh,cy:T+ch-(cum/total)*ch,w:x.w,n:x.name.length>12?x.name.slice(0,11)+"...":x.name});});
+      var points=bars.map(function(x){return x.cx+","+x.cy;}).join(" "), svg='<svg viewBox="0 0 '+W+' '+H+'"><line x1="'+L+'" y1="'+(T+ch)+'" x2="'+(W-R)+'" y2="'+(T+ch)+'" class="axis"/><polyline points="'+points+'" class="line"/>';
+      bars.forEach(function(x,i){svg+='<rect x="'+x.x+'" y="'+x.y+'" width="'+bw+'" height="'+x.bh+'" rx="7" class="c'+(i%5)+'"/><text x="'+x.cx+'" y="'+(x.y-5)+'" text-anchor="middle" class="v">'+Math.round(x.w)+'W</text><text x="'+x.cx+'" y="'+(T+ch+20)+'" text-anchor="middle" class="x">'+this._esc(x.n)+'</text><circle cx="'+x.cx+'" cy="'+x.cy+'" r="3.5" class="dotline"/>';},this); svg+='</svg>';
+      return '<div class="chart"><div class="summary"><b>'+Math.round(total)+' W</b><span>attributed now</span></div>'+svg+'</div>';
+    }
+    _mystery(home,known,mystery){
+      if(home==null)return '<div class="empty">Whole-home power is unavailable.</div>'; var kp=home?Math.min(100,known/home*100):0, up=100-kp;
+      return '<div class="myst"><div class="big">'+Math.round(mystery)+' <span>W</span></div><div class="status"><span>Unexplained right now</span><b>'+up.toFixed(0)+'%</b></div><div class="stack"><div class="known" style="width:'+kp+'%"></div><div class="unknown" style="width:'+up+'%"></div></div><div class="legend"><span><i class="kd"></i>Known <b>'+Math.round(known)+' W</b></span><span><i class="ud"></i>Unknown <b>'+Math.round(mystery)+' W</b></span></div><div class="total">Whole-home power <b>'+Math.round(home)+' W</b></div></div>';
     }
     _cost(total,peak,off){
       const h=this._costHistory, learned=this._costLearned;
