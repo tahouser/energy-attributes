@@ -16,7 +16,7 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31444"
+FRONTEND_VERSION = "31445"
 CARD_URL = f"{URL_BASE}/energyiq-card.js?v={FRONTEND_VERSION}"
 
 
@@ -28,8 +28,15 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
     if resources is not None and hasattr(resources, "async_create_item"):
         try:
             await resources.async_get_info()
-            if any(item.get("url") == CARD_URL for item in resources.async_items()):
-                return
+            card_path = f"{URL_BASE}/energyiq-card.js"
+            for item in resources.async_items():
+                if str(item.get("url", "")).split("?")[0] == card_path:
+                    if item.get("url") != CARD_URL:
+                        await resources.async_update_item(item["id"], {
+                            "url": CARD_URL,
+                            "res_type": "module",
+                        })
+                    return
             await resources.async_create_item({
                 "url": CARD_URL,
                 "res_type": "module",
@@ -73,7 +80,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v339",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.171",
+            sidebar_title="EnergyIQ • v3.1.172",
             sidebar_icon="mdi:home-lightning-bolt-outline",
             require_admin=False,
         )
