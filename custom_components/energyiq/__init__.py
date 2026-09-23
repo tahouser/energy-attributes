@@ -16,8 +16,9 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31445"
-CARD_URL = f"{URL_BASE}/energyiq-card.js?v={FRONTEND_VERSION}"
+FRONTEND_VERSION = "31446"
+CARD_PATH = f"{URL_BASE}/energyiq-card-3.1.173.js"
+CARD_URL = f"{CARD_PATH}?v={FRONTEND_VERSION}"
 
 
 async def _async_register_card_resource(hass: HomeAssistant) -> None:
@@ -28,19 +29,19 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
     if resources is not None and hasattr(resources, "async_create_item"):
         try:
             await resources.async_get_info()
-            card_path = f"{URL_BASE}/energyiq-card.js"
-            for item in resources.async_items():
-                if str(item.get("url", "")).split("?")[0] == card_path:
-                    if item.get("url") != CARD_URL:
-                        await resources.async_update_item(item["id"], {
-                            "url": CARD_URL,
-                            "res_type": "module",
-                        })
-                    return
-            await resources.async_create_item({
-                "url": CARD_URL,
-                "res_type": "module",
-            })
+            # Remove every older EnergyIQ card resource. A custom element can only
+            # be defined once, so leaving an older card resource registered can make
+            # the browser execute the old implementation before this one.
+            old_prefix = f"{URL_BASE}/energyiq-card"
+            for item in list(resources.async_items()):
+                url = str(item.get("url", "")).split("?")[0]
+                if url.startswith(old_prefix) and url != CARD_PATH:
+                    await resources.async_delete_item(item["id"])
+            if not any(str(item.get("url", "")).split("?")[0] == CARD_PATH for item in resources.async_items()):
+                await resources.async_create_item({
+                    "url": CARD_URL,
+                    "res_type": "module",
+                })
             return
         except Exception:
             # Fall through to the legacy extra-JS loader for YAML-mode/older HA.
@@ -80,7 +81,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v339",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.172",
+            sidebar_title="EnergyIQ • v3.1.173",
             sidebar_icon="mdi:home-lightning-bolt-outline",
             require_admin=False,
         )
