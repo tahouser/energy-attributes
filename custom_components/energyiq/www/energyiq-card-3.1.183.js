@@ -281,10 +281,6 @@ if (!customElements.get(TAG)) {
       const sampleEnd=new Date(currentStart.getTime()+elapsed);
       let currentValue=current;
       if(currentValue==null)currentValue=this._periodCost(historyStates,currentStart,currentEnd,sampleEnd);
-      if(currentValue==null){
-        const state=this._state(this._costEntity(null,[],[]));
-        if(Number.isFinite(state))currentValue=Math.max(0,state);
-      }
       let samples=this._historicalSamples(statRows,period,now,30);
       if(samples.length===0){
         const elapsedSamples=[];
@@ -318,7 +314,7 @@ if (!customElements.get(TAG)) {
             start_time:oldest.toISOString(),
             end_time:now.toISOString(),
             statistic_ids:ids,
-            period:"hour",
+            period:period==="day"?"5minute":"hour",
             types:["change"]
           }).catch(()=>({})),
           this._ws({
