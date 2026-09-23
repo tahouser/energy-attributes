@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.183 */
+/* EnergyIQ dashboard card — 3.1.184 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -302,13 +302,17 @@ if (!customElements.get(TAG)) {
       try{
         const period=this._costPeriod,now=new Date(),oldest=this._periodStart(period,-30,now);
         const currentStart=this._periodStart(period,0,now),currentEnd=new Date(now);
+        // Cost view is intentionally tied to the user's configured DTE cost
+        // sensors. Do not substitute the DTE House Energy sensors here.
         const peakId=this._costEntity(this._cfg.peak_cost_entity,["sensor.dte_peak_energy_cost"],["dte","peak","cost"]);
         const offId=this._costEntity(this._cfg.off_peak_cost_entity,["sensor.dte_off_peak_energy_cost"],["dte","off","peak","cost"]);
         if(!peakId&&!offId)throw new Error("EnergyIQ could not find the Peak and Off-Peak cost sensors.");
         const ids=[peakId,offId].filter(Boolean);
-        const currentPromises=ids.map(id=>this._statChangeForPeriod(id,currentStart,currentEnd));
-        const [currentValues,stats,history]=await Promise.all([
-          Promise.all(currentPromises),
+
+        // Read raw recorder history first. This is the authoritative fallback for
+        // the current partial period, and prevents a zero statistics result from
+        // masking real cost history.
+        const [stats,history]=await Promise.all([
           this._ws({
             type:"recorder/statistics_during_period",
             start_time:oldest.toISOString(),
@@ -328,12 +332,28 @@ if (!customElements.get(TAG)) {
             no_attributes:true
           }).catch(()=>({}))
         ]);
-        const peakCurrent=peakId?currentValues[ids.indexOf(peakId)]:null;
-        const offCurrent=offId?currentValues[ids.indexOf(offId)]:null;
-        const peakStats=peakId?(stats?.[peakId]||[]):[],offStats=offId?(stats?.[offId]||[]):[];
-        const peakStates=peakId?(history?.[peakId]||[]):[],offStates=offId?(history?.[offId]||[]):[];
+
+        const peakStates=peakId?(history?.[peakId]||[]):[];
+        const offStates=offId?(history?.[offId]||[]);
+
+        // Prefer recorder history for the current period. The singular statistics
+        // call is only a fallback when history is unavailable, not the primary
+        // source. A valid zero is therefore never mistaken for "no data".
+        const peakHistoryCurrent=peakId?this._periodCost(peakStates,currentStart,currentEnd,currentEnd):null;
+        const offHistoryCurrent=offId?this._periodCost(offStates,currentStart,currentEnd,currentEnd):null;
+
+        const peakStatCurrent=peakId?await this._statChangeForPeriod(peakId,currentStart,currentEnd):null;
+        const offStatCurrent=offId?await this._statChangeForPeriod(offId,currentStart,currentEnd):null;
+
+        const peakCurrent=peakHistoryCurrent!=null?peakHistoryCurrent:peakStatCurrent;
+        const offCurrent=offHistoryCurrent!=null?offHistoryCurrent:offStatCurrent;
+
+        const peakStats=peakId?(stats?.[peakId]||[]):[];
+        const offStats=offId?(stats?.[offId]||[]);
+
         const peak=this._buildLearned(period,now,peakCurrent,peakStats,peakStates);
         const off=this._buildLearned(period,now,offCurrent,offStats,offStates);
+
         if(peak.current==null&&off.current==null)throw new Error("Cost sensors returned no usable values for the selected period.");
         this._costHistory={peak:peak.current,off:off.current,total:(peak.current||0)+(off.current||0)};
         this._costLearned={peak,off};
