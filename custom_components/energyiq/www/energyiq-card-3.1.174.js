@@ -167,7 +167,7 @@ if (!customElements.get(TAG)) {
     }
     _timelineHtml(){
       const timeline=this._costTimeline;
-      if(!timeline)return '<div class="cost-timeline-loading">Learning today's consumption pattern…</div>';
+      if(!timeline)return '<div class="cost-timeline-loading">Learning today\'s consumption pattern…</div>';
       const segs=timeline.segments||[];
       const cells=segs.map((seg,i)=>{
         const progress=Math.max(0,Math.min(1,Number(seg.progress)||0));
