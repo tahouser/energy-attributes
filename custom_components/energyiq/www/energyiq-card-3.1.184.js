@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.184 */
+/* EnergyIQ dashboard card — 3.1.185 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -336,17 +336,37 @@ if (!customElements.get(TAG)) {
         const peakStates=peakId?(history?.[peakId]||[]):[];
         const offStates=offId?(history?.[offId]||[]):[];
 
-        // Prefer recorder history for the current period. The singular statistics
-        // call is only a fallback when history is unavailable, not the primary
-        // source. A valid zero is therefore never mistaken for "no data".
+        // These DTE cost helpers are already accumulated-period values
+        // (for example, today's peak energy multiplied by the peak rate).
+        // A newly created/reloaded helper may have no history at midnight, so
+        // reconstructing today's value from recorder deltas can undercount it.
+        // For the current day, the live entity state is authoritative.
+        // For week/month, add today's live value to the history accumulated
+        // through the start of today.
+        const peakLive=peakId?this._state(peakId):null;
+        const offLive=offId?this._state(offId):null;
+        const todayStart=this._periodStart("day",0,now);
+        const currentPeriodFromLive=(states,live)=>{
+          if(live==null||!Number.isFinite(live))return null;
+          if(currentStart.getTime()>=todayStart.getTime())return live;
+          const beforeToday=this._periodAccumulatedCost(
+            states,
+            currentStart.getTime(),
+            Math.min(todayStart.getTime(),currentEnd.getTime())
+          );
+          return Math.max(0,(beforeToday||0)+live);
+        };
+
         const peakHistoryCurrent=peakId?this._periodCost(peakStates,currentStart,currentEnd,currentEnd):null;
         const offHistoryCurrent=offId?this._periodCost(offStates,currentStart,currentEnd,currentEnd):null;
 
         const peakStatCurrent=peakId?await this._statChangeForPeriod(peakId,currentStart,currentEnd):null;
         const offStatCurrent=offId?await this._statChangeForPeriod(offId,currentStart,currentEnd):null;
 
-        const peakCurrent=peakHistoryCurrent!=null?peakHistoryCurrent:peakStatCurrent;
-        const offCurrent=offHistoryCurrent!=null?offHistoryCurrent:offStatCurrent;
+        const peakLiveCurrent=currentPeriodFromLive(peakStates,peakLive);
+        const offLiveCurrent=currentPeriodFromLive(offStates,offLive);
+        const peakCurrent=peakLiveCurrent!=null?peakLiveCurrent:(peakHistoryCurrent!=null?peakHistoryCurrent:peakStatCurrent);
+        const offCurrent=offLiveCurrent!=null?offLiveCurrent:(offHistoryCurrent!=null?offHistoryCurrent:offStatCurrent);
 
         const peakStats=peakId?(stats?.[peakId]||[]):[];
         const offStats=offId?(stats?.[offId]||[]):[];
