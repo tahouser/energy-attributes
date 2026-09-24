@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.187 */
+/* EnergyIQ dashboard card — 3.1.188 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -368,9 +368,12 @@ if (!customElements.get(TAG)) {
           if(live==null||!Number.isFinite(live))return null;
           const baseline=this._historyNumberAt(states,currentStart.getTime(),false);
           if(Number.isFinite(baseline))return Math.max(0,live-baseline);
-          const historyCurrent=this._periodCost(states,currentStart,currentEnd,currentEnd);
-          if(historyCurrent!=null)return historyCurrent;
-          return null;
+          // If the cumulative cost sensor did not exist at the selected
+          // period start, its first valid value is already the meter's
+          // accumulated value since its reset/creation. Do not reconstruct
+          // the period by summing state changes: rate changes or helper
+          // initialization can otherwise introduce a false amount.
+          return live;
         };
 
         const peakHistoryCurrent=peakId?this._periodCost(peakStates,currentStart,currentEnd,currentEnd):null;
