@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.186 */
+/* EnergyIQ dashboard card — 3.1.187 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -275,7 +275,7 @@ if (!customElements.get(TAG)) {
     _periodCost(states,start,end,sampleEnd=end){
       return this._periodAccumulatedCost(states,start.getTime(),Math.min(end.getTime(),sampleEnd.getTime()));
     }
-    _buildLearned(period,now,current,statRows,historyStates){
+    _buildLearned(period,now,current,statRows,historyStates,colorFallback=null){
       const currentStart=this._periodStart(period,0,now),currentEnd=this._periodEnd(period,currentStart);
       const elapsed=Math.max(0,Math.min(now.getTime(),currentEnd.getTime())-currentStart.getTime());
       const sampleEnd=new Date(currentStart.getTime()+elapsed);
@@ -291,8 +291,14 @@ if (!customElements.get(TAG)) {
         }
         samples=elapsedSamples;
       }
+      let colorCurrent=currentValue,colorSamples=samples;
+      if((colorSamples.length===0||colorCurrent==null)&&colorFallback){
+        colorCurrent=colorFallback.current;
+        colorSamples=colorFallback.samples||[];
+      }
       const average=samples.length?samples.reduce((a,b)=>a+b,0)/samples.length:null;
-      const ratio=average>0&&currentValue!=null?currentValue/average:null;
+      const colorAverage=colorSamples.length?colorSamples.reduce((a,b)=>a+b,0)/colorSamples.length:null;
+      const ratio=colorAverage>0&&colorCurrent!=null?colorCurrent/colorAverage:null;
       const color=ratio==null?"neutral":ratio>1.10?"red":ratio>=0.90?"yellow":"green";
       return {current:currentValue,average,max:Math.max(currentValue||0,...samples,0),ratio,color,samples:samples.length};
     }
@@ -312,7 +318,8 @@ if (!customElements.get(TAG)) {
         // Read raw recorder history first. This is the authoritative fallback for
         // the current partial period, and prevents a zero statistics result from
         // masking real cost history.
-        const [stats,history]=await Promise.all([
+        const peakColorEntity=peakId==="sensor.dte_peak_energy_cost"?"sensor.dte_house_energy_peak":null;
+        const [stats,history,peakColorHistory]=await Promise.all([
           this._ws({
             type:"recorder/statistics_during_period",
             start_time:oldest.toISOString(),
@@ -330,11 +337,22 @@ if (!customElements.get(TAG)) {
             significant_changes_only:false,
             minimal_response:true,
             no_attributes:true
-          }).catch(()=>({}))
+          }).catch(()=>({})),
+          peakColorEntity?this._ws({
+            type:"history/history_during_period",
+            start_time:oldest.toISOString(),
+            end_time:now.toISOString(),
+            entity_ids:[peakColorEntity],
+            include_start_time_state:true,
+            significant_changes_only:false,
+            minimal_response:true,
+            no_attributes:true
+          }).catch(()=>({})):Promise.resolve({})
         ]);
 
         const peakStates=peakId?(history?.[peakId]||[]):[];
         const offStates=offId?(history?.[offId]||[]):[];
+        const peakColorStates=peakColorEntity?(peakColorHistory?.[peakColorEntity]||[]):[];
 
         // The configured DTE cost helpers are Utility-Meter-derived
         // cumulative cost values, not "today" values. Their live state is the
@@ -369,7 +387,13 @@ if (!customElements.get(TAG)) {
         const peakStats=peakId?(stats?.[peakId]||[]):[];
         const offStats=offId?(stats?.[offId]||[]):[];
 
-        const peak=this._buildLearned(period,now,peakCurrent,peakStats,peakStates);
+        let peakColorFallback=null;
+        if(peakColorStates.length){
+          const currentEnergy=this._periodCost(peakColorStates,currentStart,currentEnd,currentEnd);
+          const samples=this._historicalMovingDeltas(peakColorStates,period,currentStart,currentEnd,30);
+          if(Number.isFinite(currentEnergy)&&samples.length)peakColorFallback={current:currentEnergy,samples};
+        }
+        const peak=this._buildLearned(period,now,peakCurrent,peakStats,peakStates,peakColorFallback);
         const off=this._buildLearned(period,now,offCurrent,offStats,offStates);
 
         if(peak.current==null&&off.current==null)throw new Error("Cost sensors returned no usable values for the selected period.");
