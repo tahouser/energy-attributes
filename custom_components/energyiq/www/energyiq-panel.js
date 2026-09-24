@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v339";
-  const VERSION = "31426";
-  const UI_VERSION = "3.1.151";
+  const VERSION = "31427";
+  const UI_VERSION = "3.1.152";
 
   if (customElements.get(TAG)) return;
 
@@ -365,15 +365,9 @@ hasPendingChanges() {
         this.showToast("This EnergyIQ device has no Home Assistant entity to show.", true);
         return;
       }
-      const event = new Event("hass-action", { bubbles: true, composed: true });
-      event.detail = {
-        config: {
-          entity: entityId,
-          tap_action: { action: "more-info" },
-        },
-        action: "tap",
-      };
-      this.dispatchEvent(event);
+      const url = new URL(window.location.href);
+      url.searchParams.set("more-info-entity-id", entityId);
+      window.location.assign(url.toString());
     }
 
     bindSummaryActions() {
