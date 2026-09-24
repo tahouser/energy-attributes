@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.185 */
+/* EnergyIQ dashboard card — 3.1.186 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -336,25 +336,23 @@ if (!customElements.get(TAG)) {
         const peakStates=peakId?(history?.[peakId]||[]):[];
         const offStates=offId?(history?.[offId]||[]):[];
 
-        // These DTE cost helpers are already accumulated-period values
-        // (for example, today's peak energy multiplied by the peak rate).
-        // A newly created/reloaded helper may have no history at midnight, so
-        // reconstructing today's value from recorder deltas can undercount it.
-        // For the current day, the live entity state is authoritative.
-        // For week/month, add today's live value to the history accumulated
-        // through the start of today.
+        // The configured DTE cost helpers are Utility-Meter-derived
+        // cumulative cost values, not "today" values. Their live state is the
+        // accumulated cost since the meter cycle reset. For a DAY or WEEK view,
+        // subtract the cumulative value at the selected period start. For MONTH,
+        // use the same rule when a baseline exists; if the meter was created
+        // part-way through the calendar month, history from its first valid
+        // state becomes the month baseline instead. This keeps EnergyIQ aligned
+        // with the helper's actual cumulative semantics.
         const peakLive=peakId?this._state(peakId):null;
         const offLive=offId?this._state(offId):null;
-        const todayStart=this._periodStart("day",0,now);
         const currentPeriodFromLive=(states,live)=>{
           if(live==null||!Number.isFinite(live))return null;
-          if(currentStart.getTime()>=todayStart.getTime())return live;
-          const beforeToday=this._periodAccumulatedCost(
-            states,
-            currentStart.getTime(),
-            Math.min(todayStart.getTime(),currentEnd.getTime())
-          );
-          return Math.max(0,(beforeToday||0)+live);
+          const baseline=this._historyNumberAt(states,currentStart.getTime(),false);
+          if(Number.isFinite(baseline))return Math.max(0,live-baseline);
+          const historyCurrent=this._periodCost(states,currentStart,currentEnd,currentEnd);
+          if(historyCurrent!=null)return historyCurrent;
+          return null;
         };
 
         const peakHistoryCurrent=peakId?this._periodCost(peakStates,currentStart,currentEnd,currentEnd):null;
