@@ -413,6 +413,7 @@ hasPendingChanges() {
       this.querySelector("#excluded")?.addEventListener("click",()=>{this.view="excluded";this.page=1;this.render();});
       this.querySelector("#device-search")?.addEventListener("input",event=>{this.searchTerm=event.currentTarget.value;this.page=1;this.render();requestAnimationFrame(()=>{const el=this.querySelector("#device-search");if(el){el.focus();el.setSelectionRange(this.searchTerm.length,this.searchTerm.length);}});});
       this.querySelectorAll("[data-select]").forEach(box=>box.addEventListener("change",event=>{const list=this.querySelector(".table-scroll"),top=list?.scrollTop||0,left=list?.scrollLeft||0,id=event.currentTarget.dataset.select;if(event.currentTarget.checked)this.selectedIds.add(id);else this.selectedIds.delete(id);this.render();requestAnimationFrame(()=>{const next=this.querySelector(".table-scroll");if(next){next.scrollTop=top;next.scrollLeft=left;}});}));
+      this.querySelectorAll("[data-history-device]").forEach(button=>button.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();this.showEntityHistory(event.currentTarget.dataset.historyDevice);}));
       this.querySelector("#include")?.addEventListener("click",()=>this.applyClassification("include"));
       this.querySelector("#exclude")?.addEventListener("click",()=>this.applyClassification("exclude"));
       this.querySelector("#remove-excluded")?.addEventListener("click",()=>this.removeExcluded(this.selectedIds));
