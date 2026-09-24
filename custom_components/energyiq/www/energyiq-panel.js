@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v339";
-  const VERSION = "31435";
-  const UI_VERSION = "3.1.160";
+  const VERSION = "31436";
+  const UI_VERSION = "3.1.161";
 
   if (customElements.get(TAG)) return;
 
@@ -375,32 +375,8 @@ ${selected ? `<div class="selection-bar"><div class="selection-count"><span clas
     }
 
     bindTableScrollTouch() {
-      const scroller = this.querySelector(".table-scroll");
-      if (!scroller) return;
-      let startX = 0;
-      let startY = 0;
-      scroller.addEventListener("touchstart", event => {
-        const touch = event.touches?.[0];
-        if (!touch) return;
-        startX = touch.clientX;
-        startY = touch.clientY;
-      }, { passive: true });
-      scroller.addEventListener("touchmove", event => {
-        const touch = event.touches?.[0];
-        if (!touch || !event.cancelable) return;
-        const dx = touch.clientX - startX;
-        const dy = touch.clientY - startY;
-        const horizontal = Math.abs(dx) > Math.abs(dy);
-        if (horizontal) {
-          const atLeft = scroller.scrollLeft <= 0;
-          const atRight = scroller.scrollLeft + scroller.clientWidth >= scroller.scrollWidth - 1;
-          if ((atLeft && dx > 0) || (atRight && dx < 0)) event.preventDefault();
-          return;
-        }
-        const atTop = scroller.scrollTop <= 0;
-        const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
-        if ((atTop && dy > 0) || (atBottom && dy < 0)) event.preventDefault();
-      }, { passive: false });
+      // Let Home Assistant/iOS own the scroll gesture. The previous edge-prevention
+      // handler could consume a follow-up touch after momentum stopped.
     }
 
     bind() {
