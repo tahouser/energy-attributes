@@ -1,0 +1,612 @@
+/* EnergyIQ dashboard card — 3.1.191 */
+const TAG = "energyiq-card";
+if (!customElements.get(TAG)) {
+  class EnergyIQCard extends HTMLElement {
+    constructor() { super(); this._hass=null; this._cfg={}; this._data=null; this._entryId=null; this._view=0; this._timer=null; this._busy=false; this._ro=null; this._click=this._handleClick.bind(this); this._activeLoadsOpen=false; this._costPeriod="day"; this._costHistory=null; this._costHistoryAt=0; this._costLearned=null; this._costSwipeStartX=0; this._costSwipeStartY=0; this._costSwipeActive=false; }
+    static getConfigForm() {
+      return {
+        schema: [
+          {
+            name: "cost_entity",
+            selector: { entity: { domain: "sensor" } },
+          },
+          {
+            name: "peak_cost_entity",
+            selector: { entity: { domain: "sensor" } },
+          },
+          {
+            name: "off_peak_cost_entity",
+            selector: { entity: { domain: "sensor" } },
+          },
+        ],
+        computeLabel: (schema) => ({
+          cost_entity: "Total energy cost sensor",
+          peak_cost_entity: "Peak energy cost sensor",
+          off_peak_cost_entity: "Off-peak energy cost sensor",
+        }[schema?.name]),
+        computeHelper: (schema) => ({
+          cost_entity: "Optional. Used by the COST view.",
+          peak_cost_entity: "Optional. Used for the Peak breakdown.",
+          off_peak_cost_entity: "Optional. Used for the Off-peak breakdown.",
+        }[schema?.name]),
+      };
+    }
+
+    static getStubConfig() {
+      return {};
+    }
+
+    static getConfigElement() {
+      return document.createElement("energyiq-card-editor");
+    }
+
+    setConfig(c){ this._cfg=c||{}; if(this.isConnected)this._start(); }
+    set hass(h){ this._hass=h; if(!this._busy&&!this._data)this._start(); else if(this._data)this._render(); }
+    connectedCallback(){ this.addEventListener("click",this._click); this._loading(); this._observeSize(); if(this._hass)this._start(); }
+    disconnectedCallback(){ if(this._timer)clearInterval(this._timer); if(this._ro)this._ro.disconnect(); this.removeEventListener("click",this._click); }
+    getCardSize(){return 4;}
+    getGridOptions(){return {columns:"full",rows:4,min_rows:4};}
+    async _ws(m){return this._hass.connection.sendMessagePromise(m);}
+    _observeSize(){
+      if(typeof ResizeObserver==="undefined"||this._ro)return;
+      this._ro=new ResizeObserver(entries=>{
+        const r=entries[0]&&entries[0].contentRect; if(!r)return;
+        const w=r.width,h=r.height;
+        this.dataset.size=w<360||h<230?"compact":w>700&&h>300?"large":"standard";
+      });
+      this._ro.observe(this);
+    }
+    async _start(){
+      if(this._busy||!this._hass)return; this._busy=true;
+      try{ let id=this._cfg.entry_id; if(!id){let r=await this._ws({type:"energy_attribution/list_entries"});id=r.entries&&r.entries[0]&&r.entries[0].entry_id;}
+        if(!id)throw new Error("EnergyIQ is not configured."); this._entryId=id; await this._refresh(); if(this._timer)clearInterval(this._timer); this._timer=setInterval(()=>this._refresh(),2000);
+      }catch(e){this._error(e.message||e);} finally{this._busy=false;}
+    }
+    async _refresh(){try{this._data=await this._ws({type:"energy_attribution/workspace",entry_id:this._entryId});if(this._view===2&&Date.now()-this._costHistoryAt>30000)await this._loadCostHistory();this._render();}catch(e){console.error("EnergyIQ card",e);}}
+    _num(v){v=Number(v);return Number.isFinite(v)?v:null;}
+    _periodBounds(period){
+      const now=new Date(), start=new Date(now);
+      if(period==="hour"){start.setMinutes(0,0,0);}
+      else if(period==="month"){start.setDate(1);start.setHours(0,0,0,0);}
+      else if(period==="week"){start.setHours(0,0,0,0);start.setDate(start.getDate()-start.getDay());}
+      else {start.setHours(0,0,0,0);}
+      return {start,end:now};
+    }
+    _costLearningSpec(period){
+      return {count:30};
+    }
+    _shiftPeriodStart(start,period,amount){
+      const d=new Date(start);
+      if(period==="week")d.setDate(d.getDate()-7*amount);
+      else if(period==="month")d.setMonth(d.getMonth()-amount);
+      else d.setDate(d.getDate()-amount);
+      return d;
+    }
+    _periodEnd(start,period){
+      const d=new Date(start);
+      if(period==="week")d.setDate(d.getDate()+7);
+      else if(period==="month")d.setMonth(d.getMonth()+1);
+      else d.setDate(d.getDate()+1);
+      return d;
+    }
+    _historyNumberAt(states,time,preferAfter){
+      let best=null,bestDelta=Infinity;
+      for(const item of states||[]){
+        const rawTime=item.lc??item.lu??item.last_changed??item.last_updated;
+        let t=typeof rawTime==="number"?rawTime:(Date.parse(rawTime||""));
+        if(Number.isFinite(t)&&t<1e12)t*=1000;
+        const v=Number(item.s??item.state);
+        if(!Number.isFinite(t)||!Number.isFinite(v))continue;
+        const delta=t-time;        if(preferAfter ? delta>=0 : delta<=0){          const distance=Math.abs(delta);
+          if(distance<bestDelta){best=item;bestDelta=distance;}
+        }
+      }
+      return best?Number(best.s??best.state):null;
+    }
+    _historicalMovingDeltas(states,period,currentStart,currentEnd,count){
+      // Compare each prior period at the same elapsed point as the current period.
+      const values=[];
+      const elapsed=Math.max(0,currentEnd.getTime()-currentStart.getTime());
+      for(let i=1;i<=count;i++){
+        const pStart=this._shiftPeriodStart(currentStart,period,i);
+        const pAt=new Date(pStart.getTime()+elapsed);
+        const before=this._historyNumberAt(states,pStart.getTime(),false);
+        const at=this._historyNumberAt(states,pAt.getTime(),true)??this._historyNumberAt(states,pAt.getTime(),false);
+        if(Number.isFinite(before)&&Number.isFinite(at)&&at>=before)values.push(at-before);
+      }
+      return values;
+    }
+    _periodStart(period,offset=0,from=new Date()){
+      const d=new Date(from); d.setHours(0,0,0,0);
+      if(period==="week"){d.setDate(d.getDate()-d.getDay()+offset*7);}
+      else if(period==="month"){d.setDate(1);d.setMonth(d.getMonth()+offset);}
+      else {d.setDate(d.getDate()+offset);}
+      return d;
+    }
+    _periodEnd(period,start){const d=new Date(start);if(period==="week")d.setDate(d.getDate()+7);else if(period==="month")d.setMonth(d.getMonth()+1);else d.setDate(d.getDate()+1);return d;}
+    _costEntity(preferred,exact,patterns){
+      if(preferred&&this._hass?.states?.[preferred])return preferred;
+      for(const id of exact||[])if(this._hass?.states?.[id])return id;
+      const scored=[];
+      for(const [id,obj] of Object.entries(this._hass?.states||{})){
+        if(!id.startsWith("sensor."))continue;
+        const text=(id+" "+String(obj?.attributes?.friendly_name||"")).toLowerCase();
+        let score=0;
+        for(const p of patterns||[])if(text.includes(p))score++;
+        if(score===(patterns||[]).length&&score>0)scored.push(id);
+      }
+      return scored.sort()[0]||null;
+    }
+    _historyEntries(states){
+      return (states||[]).map(item=>{
+        const raw=item.lu??item.last_updated??item.last_changed;
+        let t=typeof raw==="number"?raw:Date.parse(raw||"");
+        if(Number.isFinite(t)&&t<1e12)t*=1000;
+        const v=Number(item.s??item.state);
+        return {t,v};
+      }).filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.v)).sort((a,b)=>a.t-b.t);
+    }
+    _periodAccumulatedCost(states,startMs,endMs){
+      const entries=this._historyEntries(states);
+      if(!entries.length)return null;
+      let previous=null,total=0,started=false;
+      for(const e of entries){
+        if(e.t<startMs){
+          previous=e.v;
+          continue;
+        }
+        if(e.t>endMs)break;
+        if(!started){
+          if(previous==null)total=Math.max(0,e.v);
+          started=true;
+          previous=e.v;
+          continue;
+        }
+        if(e.v>=previous)total+=e.v-previous;
+        else total+=Math.max(0,e.v);
+        previous=e.v;
+      }
+      return started?Math.max(0,total):null;
+    }
+    _periodCost(states,start,end,sampleEnd=end){
+      return this._periodAccumulatedCost(states,start.getTime(),Math.min(end.getTime(),sampleEnd.getTime()));
+    }
+    _learnCost(states,period,now,periodCount=30){
+      const currentStart=this._periodStart(period,0,now);
+      const currentEnd=this._periodEnd(period,currentStart);
+      const elapsed=Math.max(0,Math.min(now.getTime(),currentEnd.getTime())-currentStart.getTime());
+      const sampleEnd=new Date(currentStart.getTime()+elapsed);
+      const current=this._periodCost(states,currentStart,currentEnd,sampleEnd);
+      const samples=[];
+      for(let i=1;i<=periodCount;i++){
+        const s=this._periodStart(period,-i,now);
+        const e=this._periodEnd(period,s);
+        const se=new Date(s.getTime()+elapsed);
+        const v=this._periodCost(states,s,e,se);
+        if(v!=null&&Number.isFinite(v)&&v>=0)samples.push(v);
+      }
+      const average=samples.length?samples.reduce((a,b)=>a+b,0)/samples.length:null;
+      const max=Math.max(current||0,...samples,0);
+      const ratio=average>0&&current!=null?current/average:null;
+      const color=ratio==null?"neutral":ratio>1.10?"red":ratio>=0.90?"yellow":"green";
+      return {current,average,max,ratio,color,samples:samples.length};
+    }
+    _statChangeValue(result){
+      const n=Number(result?.change);
+      return Number.isFinite(n)?Math.max(0,n):null;
+    }
+    async _statChangeForPeriod(statisticId,start,end){      if(!statisticId||!start||!end)return null;
+      try{        const result=await this._ws({
+          type:"recorder/statistic_during_period",
+          statistic_id:statisticId,
+          fixed_period:{start_time:start.toISOString(),end_time:end.toISOString()},
+          types:["change"]
+        });
+        return this._statChangeValue(result);
+      }catch(e){
+        console.debug("EnergyIQ cost period statistic unavailable",statisticId,e);
+        return null;
+      }
+    }
+    _statisticsRowTime(row,key){
+      const raw=row?.[key];
+      const t=typeof raw==="number"?(raw<1e12?raw*1000:raw):Date.parse(raw||"");
+      return Number.isFinite(t)?t:null;
+    }
+    _historicalStatisticChange(rows,startMs,endMs){
+      let total=0,seen=false;
+      for(const row of (rows||[])){
+        const rs=this._statisticsRowTime(row,"start"),re=this._statisticsRowTime(row,"end");
+        if(rs==null||re==null)continue;
+        if(re<=startMs)continue;
+        if(rs>=endMs)break;
+        // Only use complete statistics intervals. The current period is queried
+        // separately with statistic_during_period so partial hours stay exact.
+        if(rs>=startMs&&re<=endMs){
+          const n=Number(row.change);
+          if(Number.isFinite(n)){total+=Math.max(0,n);seen=true;}
+        }
+      }
+      return seen?Math.max(0,total):null;
+    }
+    _historicalSamples(rows,period,now,count=30){
+      const currentStart=this._periodStart(period,0,now);
+      const elapsed=Math.max(0,Math.min(now.getTime(),this._periodEnd(period,currentStart).getTime())-currentStart.getTime());
+      const values=[];
+      for(let i=1;i<=count;i++){
+        const s=this._periodStart(period,-i,now);
+        const e=this._periodEnd(period,s);
+        const sampleEnd=new Date(s.getTime()+elapsed);
+        const v=this._historicalStatisticChange(rows,s.getTime(),Math.min(sampleEnd.getTime(),e.getTime()));
+        if(v!=null&&Number.isFinite(v)&&v>=0)values.push(v);
+      }
+      return values;
+    }
+    _historyEntries(states){
+      return (states||[]).map(item=>{
+        const raw=item.lu??item.last_updated??item.last_changed;
+        let t=typeof raw==="number"?raw:Date.parse(raw||"");
+        if(Number.isFinite(t)&&t<1e12)t*=1000;
+        const v=Number(item.s??item.state);
+        return {t,v};
+      }).filter(x=>Number.isFinite(x.t)&&Number.isFinite(x.v)).sort((a,b)=>a.t-b.t);
+    }
+    _periodAccumulatedCost(states,startMs,endMs){
+      const entries=this._historyEntries(states);
+      if(!entries.length)return null;
+      let previous=null,total=0,started=false;
+      for(const e of entries){
+        if(e.t<startMs){previous=e.v;continue;}
+        if(e.t>endMs)break;
+        if(!started){
+          if(previous==null)total=Math.max(0,e.v);
+          started=true;previous=e.v;continue;
+        }
+        if(e.v>=previous)total+=e.v-previous;
+        else total+=Math.max(0,e.v);
+        previous=e.v;
+      }
+      return started?Math.max(0,total):null;
+    }
+    _periodCost(states,start,end,sampleEnd=end){
+      return this._periodAccumulatedCost(states,start.getTime(),Math.min(end.getTime(),sampleEnd.getTime()));
+    }
+    _segmentColor(ratio,current,visible){
+      // Future segments remain neutral. Any elapsed segment with confirmed
+      // zero/near-zero cost is green even when there is not enough history
+      // to calculate a ratio. If it has consumption but no usable history,
+      // use green as the neutral "known good" baseline rather than gray.
+      if(!visible)return "neutral";
+      if(Number.isFinite(current)&&current<=0.000001)return "green";
+      if(ratio==null)return "green";
+      return ratio>1.10?"red":ratio>=0.90?"yellow":"green";
+    }
+    _segmentWindows(period,start,end){
+      const windows=[],step=2*60*60*1000;
+      for(let s=start.getTime();s<end.getTime();s+=step){
+        const a=new Date(s),b=new Date(Math.min(s+step,end.getTime()));
+        windows.push({start:a,end:b});
+      }
+      return windows;
+    }
+    _segmentHistoricalSamples(states,period,currentPeriodStart,segmentStart,segmentEnd,now,count=30){
+      const samples=[],segmentMs=segmentEnd.getTime()-segmentStart.getTime();
+      const offset=segmentStart.getTime()-currentPeriodStart.getTime();
+      for(let i=1;i<=count;i++){
+        const priorStart=this._periodStart(period,-i,now),priorEnd=this._periodEnd(period,priorStart);
+        const a=new Date(priorStart.getTime()+offset);
+        const b=new Date(Math.min(a.getTime()+segmentMs,priorEnd.getTime()));        if(a>=priorEnd||b<=a)continue;
+        const v=this._periodCost(states,a,b,b);
+        if(v!=null&&Number.isFinite(v)&&v>=0)samples.push(v);
+      }
+      if(!samples.length){        const clockMinutes=segmentStart.getHours()*60+segmentStart.getMinutes();
+        for(let d=1;d<=30;d++){
+          const dayStart=this._periodStart("day",-d,now);
+          const a=new Date(dayStart);
+          a.setHours(Math.floor(clockMinutes/60),clockMinutes%60,0,0);
+          const b=new Date(a.getTime()+segmentMs);
+          if(a>=dayStart&&b>dayStart){
+            const v=this._periodCost(states,a,b,b);
+            if(v!=null&&Number.isFinite(v)&&v>=0)samples.push(v);
+          }
+          if(samples.length>=count)break;
+        }
+      }
+      return samples;
+    }
+    _buildSegmentProfile(states,period,now,count=30){
+      const periodStart=this._periodStart(period,0,now),periodEnd=this._periodEnd(period,periodStart);
+      const windows=this._segmentWindows(period,periodStart,periodEnd);
+      const elapsedEnd=new Date(Math.min(now.getTime(),periodEnd.getTime()));
+      const segments=windows.map((w,index)=>{
+        const visibleEnd=new Date(Math.min(w.end.getTime(),elapsedEnd.getTime()));
+        const visibleMs=Math.max(0,visibleEnd.getTime()-w.start.getTime());
+        let current=null,samples=[];
+        if(visibleMs>0){
+          current=this._periodCost(states,w.start,w.end,visibleEnd);
+          samples=this._segmentHistoricalSamples(states,period,periodStart,w.start,w.end,now,count);
+        }
+        const average=samples.length?samples.reduce((a,b)=>a+b,0)/samples.length:null;
+        const ratio=average>0&&current!=null?current/average:null;
+        const visible=visibleMs>0;
+        return {index,start:w.start,end:w.end,current,average,ratio,color:this._segmentColor(ratio,current,visible),samples:samples.length,visible,visibleFraction:Math.max(0,Math.min(1,visibleMs/Math.max(1,w.end.getTime()-w.start.getTime())))};
+      });
+      return {period,start:periodStart,end:periodEnd,segments};
+    }
+
+    _buildLearned(period,now,current,statRows,historyStates,colorFallback=null){
+      const currentStart=this._periodStart(period,0,now),currentEnd=this._periodEnd(period,currentStart);
+      const elapsed=Math.max(0,Math.min(now.getTime(),currentEnd.getTime())-currentStart.getTime());
+      const sampleEnd=new Date(currentStart.getTime()+elapsed);
+      let currentValue=current;
+      if(currentValue==null)currentValue=this._periodCost(historyStates,currentStart,currentEnd,sampleEnd);
+      let samples=this._historicalSamples(statRows,period,now,30);
+      if(samples.length===0){
+        const elapsedSamples=[];
+        for(let i=1;i<=30;i++){
+          const s=this._periodStart(period,-i,now),e=this._periodEnd(period,s),se=new Date(s.getTime()+elapsed);
+          const v=this._periodCost(historyStates,s,e,se);
+          if(v!=null&&Number.isFinite(v)&&v>=0)elapsedSamples.push(v);
+        }
+        samples=elapsedSamples;
+      }
+      let colorCurrent=currentValue,colorSamples=samples;
+      if((colorSamples.length===0||colorCurrent==null)&&colorFallback){
+        colorCurrent=colorFallback.current;
+        colorSamples=colorFallback.samples||[];
+      }
+      const average=samples.length?samples.reduce((a,b)=>a+b,0)/samples.length:null;
+      const colorAverage=colorSamples.length?colorSamples.reduce((a,b)=>a+b,0)/colorSamples.length:null;
+      const ratio=colorAverage>0&&colorCurrent!=null?colorCurrent/colorAverage:null;
+      const color=ratio==null?"neutral":ratio>1.10?"red":ratio>=0.90?"yellow":"green";
+      return {current:currentValue,average,max:Math.max(currentValue||0,...samples,0),ratio,color,samples:samples.length};
+    }
+    async _loadCostHistory(){
+      if(!this._hass||!this._data)return;
+      this._costError=null;
+      try{
+        const period=this._costPeriod,now=new Date(),oldest=this._periodStart(period,-30,now);
+        const currentStart=this._periodStart(period,0,now),currentEnd=new Date(now);
+        // Cost view is intentionally tied to the user's configured DTE cost
+        // sensors. Do not substitute the DTE House Energy sensors here.
+        const peakId=this._costEntity(this._cfg.peak_cost_entity,["sensor.dte_peak_energy_cost"],["dte","peak","cost"]);
+        const offId=this._costEntity(this._cfg.off_peak_cost_entity,["sensor.dte_off_peak_energy_cost"],["dte","off","peak","cost"]);
+        if(!peakId&&!offId)throw new Error("EnergyIQ could not find the Peak and Off-Peak cost sensors.");
+        const ids=[peakId,offId].filter(Boolean);
+
+        // Read raw recorder history first. This is the authoritative fallback for
+        // the current partial period, and prevents a zero statistics result from
+        // masking real cost history.
+        const peakColorEntity=peakId==="sensor.dte_peak_energy_cost"?"sensor.dte_house_energy_peak":null;
+        const [stats,history,peakColorHistory]=await Promise.all([
+          this._ws({
+            type:"recorder/statistics_during_period",
+            start_time:oldest.toISOString(),
+            end_time:now.toISOString(),
+            statistic_ids:ids,
+            period:period==="day"?"5minute":"hour",
+            types:["change"]
+          }).catch(()=>({})),
+          this._ws({
+            type:"history/history_during_period",
+            start_time:oldest.toISOString(),
+            end_time:now.toISOString(),
+            entity_ids:ids,
+            include_start_time_state:true,
+            significant_changes_only:false,
+            minimal_response:true,            no_attributes:true
+          }).catch(()=>({})),
+          peakColorEntity?this._ws({
+            type:"history/history_during_period",
+            start_time:oldest.toISOString(),            end_time:now.toISOString(),
+            entity_ids:[peakColorEntity],
+            include_start_time_state:true,
+            significant_changes_only:false,
+            minimal_response:true,
+            no_attributes:true
+          }).catch(()=>({})):Promise.resolve({})
+        ]);
+
+        const peakStates=peakId?(history?.[peakId]||[]):[];
+        const offStates=offId?(history?.[offId]||[]):[];
+        const peakColorStates=peakColorEntity?(peakColorHistory?.[peakColorEntity]||[]):[];
+
+        // The configured DTE cost helpers are Utility-Meter-derived
+        // cumulative cost values, not "today" values. Their live state is the
+        // accumulated cost since the meter cycle reset. For a DAY or WEEK view,
+        // subtract the cumulative value at the selected period start. For MONTH,
+        // use the same rule when a baseline exists; if the meter was created
+        // part-way through the calendar month, history from its first valid
+        // state becomes the month baseline instead. This keeps EnergyIQ aligned
+        // with the helper's actual cumulative semantics.
+        const peakLive=peakId?this._state(peakId):null;
+        const offLive=offId?this._state(offId):null;
+        const currentPeriodFromLive=(states,live)=>{
+          if(live==null||!Number.isFinite(live))return null;
+          const baseline=this._historyNumberAt(states,currentStart.getTime(),false);
+          if(Number.isFinite(baseline))return Math.max(0,live-baseline);
+          // If the cumulative cost sensor did not exist at the selected
+          // period start, its first valid value is already the meter's
+          // accumulated value since its reset/creation. Do not reconstruct
+          // the period by summing state changes: rate changes or helper
+          // initialization can otherwise introduce a false amount.
+          return live;
+        };
+
+        const peakHistoryCurrent=peakId?this._periodCost(peakStates,currentStart,currentEnd,currentEnd):null;
+        const offHistoryCurrent=offId?this._periodCost(offStates,currentStart,currentEnd,currentEnd):null;
+
+        const peakStatCurrent=peakId?await this._statChangeForPeriod(peakId,currentStart,currentEnd):null;
+        const offStatCurrent=offId?await this._statChangeForPeriod(offId,currentStart,currentEnd):null;
+
+        const peakLiveCurrent=currentPeriodFromLive(peakStates,peakLive);
+        const offLiveCurrent=currentPeriodFromLive(offStates,offLive);
+        const peakCurrent=peakLiveCurrent!=null?peakLiveCurrent:(peakHistoryCurrent!=null?peakHistoryCurrent:peakStatCurrent);
+        const offCurrent=offLiveCurrent!=null?offLiveCurrent:(offHistoryCurrent!=null?offHistoryCurrent:offStatCurrent);
+
+        const peakStats=peakId?(stats?.[peakId]||[]):[];
+        const offStats=offId?(stats?.[offId]||[]):[];
+
+        let peakColorFallback=null;
+        if(peakColorStates.length){
+          const currentEnergy=this._periodCost(peakColorStates,currentStart,currentEnd,currentEnd);
+          const samples=this._historicalMovingDeltas(peakColorStates,period,currentStart,currentEnd,30);
+          if(Number.isFinite(currentEnergy)&&samples.length)peakColorFallback={current:currentEnergy,samples};
+        }
+        const peak=this._buildLearned(period,now,peakCurrent,peakStats,peakStates,peakColorFallback);
+        const off=this._buildLearned(period,now,offCurrent,offStats,offStates);
+
+        // Cost calculation is complete and remains untouched. Color is a
+        // separate subsystem: every visible 2-hour segment is classified
+        // independently against matching historical segments.
+        peak.segments=this._buildSegmentProfile(peakStates,period,now,30).segments;
+        off.segments=this._buildSegmentProfile(offStates,period,now,30).segments;
+        peak.color="segment";
+        off.color="segment";
+
+        if(peak.current==null&&off.current==null)throw new Error("Cost sensors returned no usable values for the selected period.");
+        this._costHistory={peak:peak.current,off:off.current,total:(peak.current||0)+(off.current||0)};
+        this._costLearned={peak,off};
+        this._costHistoryAt=Date.now();
+      }catch(e){
+        console.error("EnergyIQ cost history",e);
+        this._costHistory=null;this._costLearned=null;this._costError=e?.message||String(e);this._costHistoryAt=Date.now();
+      }
+      this._render();
+    }
+    _state(id){return this._num(this._hass&&this._hass.states&&this._hass.states[id]&&this._hass.states[id].state);}
+    _brandIcon(){return '<ha-icon class="energyiq-brand-icon" icon="mdi:home-lightning-bolt-outline"></ha-icon>';}
+    _next(e){if(!e.target.closest||!e.target.closest("[data-next]"))return;e.stopPropagation();this._view=(this._view+1)%3;if(this._view===2&&Date.now()-this._costHistoryAt>30000)this._loadCostHistory();this._render();}
+    _handleClick(e){this._next(e);const costNav=e.target.closest&&e.target.closest("[data-cost-period]");if(costNav&&this._view===2){const periods=["day","week","month"],index=periods.indexOf(this._costPeriod),dir=costNav.getAttribute("data-cost-period")==="next"?1:-1,nextIndex=Math.max(0,Math.min(periods.length-1,index+dir));if(nextIndex!==index){this._costPeriod=periods[nextIndex];this._costHistory=null;this._costHistoryAt=0;this._render();this._loadCostHistory();}return;}const active=e.target.closest&&e.target.closest("[data-active-loads]");if(active){e.stopPropagation();this._showActiveLoads();return;}const open=e.target.closest&&e.target.closest("[data-open-energyiq]");if(open){e.stopPropagation();this._openEnergyIQ();return;}const close=e.target.closest&&e.target.closest("[data-close-active]");if(close){e.stopPropagation();this._closeActiveLoads();return;}}
+    _bindCostSwipe(){
+      const el=this.querySelector(".cost-swipe");
+      if(!el)return;
+      el.addEventListener("touchstart",event=>{
+        const touch=event.touches?.[0];
+        if(!touch)return;
+        this._costSwipeStartX=touch.clientX;
+        this._costSwipeStartY=touch.clientY;
+        this._costSwipeActive=false;
+      },{passive:true});
+      el.addEventListener("touchmove",event=>{
+        const touch=event.touches?.[0];
+        if(!touch)return;
+        const dx=touch.clientX-this._costSwipeStartX;
+        const dy=touch.clientY-this._costSwipeStartY;
+        if(Math.abs(dx)>Math.abs(dy)&&Math.abs(dx)>10){          this._costSwipeActive=true;
+          if(event.cancelable)event.preventDefault();
+          event.stopPropagation();
+        }      },{passive:false});
+      el.addEventListener("touchend",event=>{
+        if(!this._costSwipeActive)return;
+        const touch=event.changedTouches?.[0];
+        if(!touch)return;
+        const dx=touch.clientX-this._costSwipeStartX;
+        const periods=["day","week","month"],index=periods.indexOf(this._costPeriod);
+        const nextIndex=dx<0?Math.min(periods.length-1,index+1):Math.max(0,index-1);
+        this._costSwipeActive=false;
+        event.stopPropagation();
+        if(nextIndex!==index){
+          this._costPeriod=periods[nextIndex];
+          this._costHistory=null;
+          this._costHistoryAt=0;
+          this._render();
+          this._loadCostHistory();
+        }
+      },{passive:true});
+      el.addEventListener("touchcancel",()=>{this._costSwipeActive=false;},{passive:true});
+    }
+    _openEnergyIQ(){if(this._hass&&typeof this._hass.navigate==="function"){this._hass.navigate("/energyiq");return;}window.history.pushState({}, "", "/energyiq");window.dispatchEvent(new Event("location-changed"));}
+    _closeActiveLoads(){const modal=this.querySelector(".active-loads-backdrop");if(modal)modal.remove();this._activeLoadsOpen=false;}
+    _showActiveLoads(){this._closeActiveLoads();this._activeLoadsOpen=true;const d=this._data||{},home=this._num(d.whole_home_power),trained=Math.max(0,this._num(d.trained_live_power_w)||0),mystery=home==null?null:Math.max(0,home-trained);const active=(d.devices||[]).filter(x=>x.classification==="monitor").map(x=>Object.assign({},x,{w:Math.max(0,Number(x.current_power)||0)})).filter(x=>x.w>0).sort((a,b)=>b.w-a.w);const known=active.reduce((s,x)=>s+x.w,0);const rows=active.length?active.map(x=>`<div class="active-load-row"><span>${this._esc(x.name||x.device_id)}</span><strong>${x.w.toFixed(0)} W</strong></div>`).join(""):`<div class="active-load-empty">No active attributed loads right now.</div>`;const fmt=v=>Number.isFinite(v)?`${v.toFixed(0)} W`:"—";this.insertAdjacentHTML("beforeend",`<div class="active-loads-backdrop" role="presentation"><div class="active-loads" role="dialog" aria-modal="true" aria-label="Active EnergyIQ loads"><div class="active-loads-head"><div><div class="eyebrow">ENERGYIQ</div><div class="active-loads-title">Active Loads</div><div class="sub">${active.length} currently consuming</div></div><button data-close-active aria-label="Close">×</button></div><div class="active-load-list">${rows}</div><div class="active-load-summary"><div><span>Known</span><strong>${fmt(known)}</strong></div><div><span>Unattributed</span><strong>${fmt(mystery)}</strong></div><div><span>House total</span><strong>${fmt(home)}</strong></div></div></div></div>`);}
+
+    _esc(v){return String(v).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];});}
+    _loading(){this.innerHTML='<ha-card><div class="pad"><b>EnergyIQ</b> <span>Loading...</span></div></ha-card>';}
+    _error(m){this.innerHTML='<ha-card><div class="pad"><b>EnergyIQ</b><div class="err">'+this._esc(m)+'</div></div></ha-card>';}
+    _render(){
+      if(this._activeLoadsOpen&&this.querySelector(".active-loads-backdrop"))return;
+      var d=this._data||{},home=this._num(d.whole_home_power),trained=Math.max(0,this._num(d.trained_live_power_w)||0),known=home==null?null:Math.min(home,trained),mystery=home==null?null:Math.max(0,home-trained);
+      var devices=(d.devices||[]).filter(function(x){return x.classification==="monitor";}).map(function(x){return Object.assign({},x,{w:Math.max(0,Number(x.current_power)||0)});}).filter(function(x){return x.w>0;}).sort(function(a,b){return b.w-a.w;});
+      var total=this._state(this._cfg.cost_entity||"sensor.dte_variable_energy_cost"),peak=this._state(this._cfg.peak_cost_entity||"sensor.dte_peak_energy_cost"),off=this._state(this._cfg.off_peak_cost_entity||"sensor.dte_off_peak_energy_cost");
+      var titles=["CONSUMPTION","MYSTERY WATTS","COST"],subs=["Current attributed power","Known vs. unexplained power",""],body=this._view===0?this._pareto(devices):this._view===1?this._mystery(home,known,mystery):this._cost(total,peak,off);
+      const costTotal=this._costHistory&&this._costHistory.total!=null?this._costHistory.total:total;
+      const costMoney=Number.isFinite(Number(costTotal))?"$"+Number(costTotal).toFixed(2):"—";
+      const costLabel=this._costPeriod==="week"?"TOTAL THIS WEEK":this._costPeriod==="month"?"TOTAL THIS MONTH":"TOTAL TODAY";
+      const headExtra=this._view===2?'<div class="cost-head-total"><span>'+costLabel+'</span><strong>'+costMoney+'</strong></div>':"";
+      this.innerHTML='<style>'+this._css()+'</style><ha-card><div class="pad"><div class="head '+(this._view===2?"cost-view":"")+'"><div class="card-title-wrap"><div class="card-icon">'+this._brandIcon()+'</div><div><div class="eyebrow">ENERGYIQ</div><div class="title">'+titles[this._view]+'</div><div class="sub">'+subs[this._view]+'</div></div></div>'+headExtra+'<div class="head-actions"><button class="active-shortcut" data-active-loads aria-label="Show active loads">⚡</button><button class="open-shortcut" data-open-energyiq aria-label="Open EnergyIQ">↗</button><button data-next aria-label="Next view">→</button></div></div><div class="body">'+body+'</div></div></ha-card>';
+      if(this._view===2)this._bindCostSwipe();
+    }
+    _pareto(a){
+      if(!a.length)return '<div class="empty">No active attributed loads right now.</div>';
+      var top=a.slice(0,6), other=a.slice(6).reduce(function(s,x){return s+x.w;},0); if(other)top.push({name:"Other",w:other});
+      var total=top.reduce(function(s,x){return s+x.w;},0), max=Math.max.apply(null,top.map(function(x){return x.w;})), W=640,H=205,L=34,R=18,T=14,B=48, slot=(W-L-R)/top.length,bw=Math.min(56,slot*.62),ch=H-T-B,cum=0,bars=[];
+      top.forEach(function(x,i){var xx=L+slot*i+(slot-bw)/2,bh=Math.max(2,x.w/max*ch),y=T+ch-bh;cum+=x.w;bars.push({x:xx,cx:xx+bw/2,y:y,bh:bh,cy:T+ch-(cum/total)*ch,w:x.w,n:x.name.length>12?x.name.slice(0,11)+"...":x.name});});
+      var points=bars.map(function(x){return x.cx+","+x.cy;}).join(" "), svg='<svg viewBox="0 0 '+W+' '+H+'"><line x1="'+L+'" y1="'+(T+ch)+'" x2="'+(W-R)+'" y2="'+(T+ch)+'" class="axis"/><polyline points="'+points+'" class="line"/>';
+      bars.forEach(function(x,i){svg+='<rect x="'+x.x+'" y="'+x.y+'" width="'+bw+'" height="'+x.bh+'" rx="7" class="c'+(i%5)+'"/><text x="'+x.cx+'" y="'+(x.y-5)+'" text-anchor="middle" class="v">'+Math.round(x.w)+'W</text><text x="'+x.cx+'" y="'+(T+ch+20)+'" text-anchor="middle" class="x">'+this._esc(x.n)+'</text><circle cx="'+x.cx+'" cy="'+x.cy+'" r="3.5" class="dotline"/>';},this); svg+='</svg>';
+      return '<div class="chart"><div class="summary"><b>'+Math.round(total)+' W</b><span>attributed now</span></div>'+svg+'</div>';
+    }
+    _mystery(home,known,mystery){
+      if(home==null)return '<div class="empty">Whole-home power is unavailable.</div>'; var kp=home?Math.min(100,known/home*100):0, up=100-kp;
+      return '<div class="myst"><div class="big">'+Math.round(mystery)+' <span>W</span></div><div class="status"><span>Unexplained right now</span><b>'+up.toFixed(0)+'%</b></div><div class="stack"><div class="known" style="width:'+kp+'%"></div><div class="unknown" style="width:'+up+'%"></div></div><div class="legend"><span><i class="kd"></i>Known <b>'+Math.round(known)+' W</b></span><span><i class="ud"></i>Unknown <b>'+Math.round(mystery)+' W</b></span></div><div class="total">Whole-home power <b>'+Math.round(home)+' W</b></div></div>';
+    }
+    _cost(total,peak,off){
+      const h=this._costHistory, learned=this._costLearned;
+      if(this._costError)return '<div class="cost-error">'+this._esc(this._costError)+'</div>';
+      if(!h||!learned)return '<div class="cost-loading">Loading cost history…</div>';
+      const labels={day:"DAY",week:"WEEK",month:"MONTH"},periodLabel=labels[this._costPeriod]||"DAY";
+      const money=v=>"$"+Number(v||0).toFixed(2);
+      const bar=(label,item)=>{
+        const value=Number(item?.current)||0;
+        const now=new Date(),start=this._periodStart(this._costPeriod,0,now),end=this._periodEnd(this._costPeriod,start);
+        const duration=Math.max(1,end.getTime()-start.getTime());
+        const elapsed=Math.max(0,Math.min(now.getTime(),end.getTime())-start.getTime());
+        const width=Math.max(0,Math.min(100,elapsed/duration*100));
+        const segments=item?.segments||[];
+        const segmentHtml=segments.map(seg=>'<div class="cost-bar-segment '+(seg.color||"neutral")+'"></div>').join("");
+        return '<div class="cost-bar-row"><div class="cost-bar-head"><span>'+label+'</span><strong>'+money(value)+'</strong></div><div class="cost-bar-track"><div class="cost-bar-segments">'+segmentHtml+'</div><div class="cost-bar-future" style="left:'+width.toFixed(2)+'%"></div></div></div>';
+      };
+      return '<div class="cost-swipe" role="group" aria-label="Cost period '+periodLabel+'. Swipe left or right to change period."><div class="cost-bars">'+bar("Peak",learned.peak)+bar("Off-Peak",learned.off)+'</div><div class="cost-period-nav"><button type="button" data-cost-period="prev" aria-label="Previous cost period">‹</button><strong>'+periodLabel+'</strong><button type="button" data-cost-period="next" aria-label="Next cost period">›</button></div></div>';
+    }
+    _css(){return ':host{display:block;width:100%;min-width:0;max-width:100%;height:auto;box-sizing:border-box;container-type:inline-size;container-name:energyiq-card}.pad{padding:clamp(10px,2.2cqw,16px) clamp(10px,2.4cqw,16px) clamp(8px,1.7cqw,10px);color:var(--primary-text-color);min-width:0;width:100%;height:auto;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column}ha-card{display:flex;flex-direction:column;width:100%;height:auto;max-width:100%;box-sizing:border-box;overflow:hidden}.head{display:flex;justify-content:space-between;align-items:flex-start;gap:clamp(6px,1.5cqw,10px);flex:0 0 auto}.card-title-wrap{display:flex;align-items:center;gap:clamp(6px,1.5cqw,9px);min-width:0}.energyiq-brand-icon{--mdc-icon-size:28px;color:#e7ecef}.card-icon{width:clamp(28px,5.5cqw,34px);height:clamp(28px,5.5cqw,34px);flex:none;display:grid;place-items:center;border-radius:clamp(8px,1.7cqw,10px);background:rgba(28,205,255,.12);border:1px solid rgba(28,205,255,.28);overflow:hidden}.card-icon svg{width:88%;height:88%;display:block}.head-actions{display:flex;align-items:center;gap:clamp(3px,1cqw,6px);flex:none}.eyebrow{font-size:clamp(.62rem,1.9cqw,.72rem);letter-spacing:.12em;font-weight:700;color:var(--secondary-text-color)}.title{font-size:clamp(.98rem,3.2cqw,1.2rem);font-weight:700;line-height:1.15}.cost-view .title{font-size:clamp(1.18rem,4.2cqw,1.58rem);font-weight:800}.sub{font-size:clamp(.68rem,2cqw,.78rem);color:var(--secondary-text-color);line-height:1.2}.head-actions button{width:clamp(30px,5.8cqw,36px);height:clamp(30px,5.8cqw,36px);padding:0}button{width:clamp(34px,6.5cqw,40px);height:clamp(34px,6.5cqw,40px);border:0;border-radius:50%;background:var(--primary-color,#03a9f4);color:#fff;font-size:clamp(1.15rem,3.5cqw,1.5rem);cursor:pointer}.active-shortcut{background:rgba(20,242,184,.14);color:#35e7b0;border:1px solid rgba(20,242,184,.35)}.open-shortcut{background:rgba(28,205,255,.12);color:#36c8ff;border:1px solid rgba(28,205,255,.28)}.body{min-height:0;flex:1;display:flex;align-items:center;min-width:0;width:100%;overflow:hidden}.dots{display:flex;justify-content:center;gap:6px;flex:0 0 auto;padding-top:4px}.dots i{width:6px;height:6px;border-radius:50%;background:var(--divider-color)}.dots i.on{background:var(--primary-color)}.chart{width:100%;min-width:0;overflow:hidden}.summary{display:flex;gap:7px;align-items:baseline;margin:4px}.summary b,.big{font-size:clamp(1.65rem,5.5cqw,2.1rem);line-height:1.05}.summary span,.sub{color:var(--secondary-text-color);font-size:clamp(.68rem,2cqw,.76rem)}svg{display:block;width:100%;max-width:100%;height:min(175px,30cqw);min-height:105px;overflow:hidden}.axis{stroke:var(--divider-color)}.line{fill:none;stroke:var(--primary-color);stroke-width:3;stroke-linecap:round}.dotline{fill:var(--primary-color);stroke:var(--ha-card-background,#1c1c1c);stroke-width:2}.v{fill:var(--primary-text-color);font-size:clamp(9px,1.8cqw,11px);font-weight:700}.x{fill:var(--secondary-text-color);font-size:clamp(8px,1.8cqw,11px)}.c0{fill:#2196f3}.c1{fill:#42a5f5}.c2{fill:#26a69a}.c3{fill:#ffb300}.c4{fill:#ef5350}.myst,.cost{width:100%;padding:0;box-sizing:border-box;min-width:0}.cost-swipe{width:100%;min-width:0;touch-action:pan-y}.cost-bars{display:flex;flex-direction:column;gap:18px;width:100%;padding:6px 0 12px}.cost-bar-row{width:100%}.cost-bar-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:7px}.cost-bar-head span{font-size:clamp(1rem,3cqw,1.18rem);font-weight:800;letter-spacing:.02em}.cost-bar-head strong{font-size:clamp(1.1rem,3.8cqw,1.45rem);font-weight:800;font-variant-numeric:tabular-nums}.cost-bar-track{position:relative;width:100%;height:24px;border-radius:8px;overflow:hidden;background:var(--secondary-background-color);border:1px solid var(--divider-color);box-sizing:border-box}.cost-bar-segments{position:absolute;inset:0;display:flex;width:100%;height:100%;overflow:hidden}.cost-bar-segment{flex:1 1 0;height:100%;min-width:0;border-right:1px solid rgba(0,0,0,.10);box-sizing:border-box}.cost-bar-segment:last-child{border-right:0}.cost-bar-segment.green{background:#43d85b}.cost-bar-segment.yellow{background:#f2c21f}.cost-bar-segment.red{background:#e8453c}.cost-bar-segment.neutral{background:#70757a}.cost-bar-future{position:absolute;top:0;bottom:0;right:0;background:var(--secondary-background-color);border-left:1px solid var(--divider-color);z-index:2;transition:left .35s ease}.cost-bar-fill{display:none}.cost-bar-fill.green{background:#43d85b}.cost-bar-fill.yellow{background:#f2c21f}.cost-bar-fill.red{background:#e8453c}.cost-bar-fill.neutral{background:#70757a}.cost-period-nav{display:flex;align-items:center;justify-content:center;gap:10px;margin:4px 0 0}.cost-period-nav strong{font-size:clamp(1rem,3.2cqw,1.25rem);letter-spacing:.08em;font-weight:800}.cost-period-nav button{width:30px;height:30px;font-size:1.35rem;line-height:1;background:transparent;color:var(--primary-text-color);border:1px solid var(--divider-color);cursor:pointer;display:grid;place-items:center}.cost-period-nav button:hover{background:var(--secondary-background-color);border-color:var(--primary-color)}.cost-head-total{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;min-width:68px;margin-left:auto;margin-right:clamp(4px,1.5cqw,10px);padding-top:0}.cost-head-total span{font-size:clamp(.52rem,1.5cqw,.62rem);letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}.cost-head-total strong{font-size:clamp(1rem,3cqw,1.28rem);line-height:1.05;font-variant-numeric:tabular-nums;white-space:nowrap}.cost-loading,.cost-error{width:100%;text-align:center;color:var(--secondary-text-color);padding:22px 10px}.cost-error{color:var(--error-color)}@container energyiq-card (max-width:420px){.cost-period-nav{gap:7px;margin-top:8px;margin-bottom:0}.cost-bars{gap:8px}.cost-track{height:21px}.cost-bar-main{grid-template-columns:minmax(0,1fr) 68px;gap:6px}.cost-total{font-size:.9rem}.cost-view .title{font-size:1.3rem}}@container energyiq-card (max-width:420px){.pad{padding:9px 10px 7px}.head-actions button{width:29px;height:29px}.active-shortcut{font-size:0}.active-shortcut::before{content:"⚡";font-size:1rem}.title{font-size:1rem}.sub{font-size:.67rem}.summary{margin:2px}.summary b,.big{font-size:1.7rem}svg{height:120px;min-height:100px}.legend{gap:5px}.break{gap:6px}}@container energyiq-card (max-height:240px){.pad{padding-top:8px;padding-bottom:6px}.body{overflow:hidden}.sub{display:none}.dots{padding-top:2px}.track{margin-top:8px}.break{margin-top:7px}}@container energyiq-card (min-width:700px){.body{padding-left:4px;padding-right:4px}.summary{margin-left:0}.chart svg{height:min(185px,28cqw)}}.empty{width:100%;text-align:center;color:var(--secondary-text-color);font-size:clamp(.78rem,2.3cqw,.9rem);padding:10px}.err{margin-top:10px;color:var(--error-color)}.active-loads-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center;padding:16px}.active-loads{width:min(430px,100%);max-height:82vh;overflow:auto;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:14px;box-shadow:var(--ha-card-box-shadow);padding:16px;box-sizing:border-box}.active-loads-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.active-loads-title{font-size:1.25rem;font-weight:800}.active-loads-head button{width:38px;height:38px;padding:0}.active-load-list{margin-top:12px}.active-load-row{display:flex;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid var(--divider-color)}.active-load-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.active-load-row strong{white-space:nowrap;font-variant-numeric:tabular-nums}.active-load-empty{text-align:center;padding:22px;color:var(--secondary-text-color)}.active-load-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}.active-load-summary div{padding:9px;border-radius:9px;background:var(--secondary-background-color);border:1px solid var(--divider-color)}.active-load-summary span{display:block;font-size:9px;text-transform:uppercase;color:var(--secondary-text-color)}.active-load-summary strong{display:block;margin-top:3px;font-size:14px;font-variant-numeric:tabular-nums}@media(max-width:500px){.active-loads-backdrop{padding:10px}.active-loads{max-height:88vh;padding:14px}.active-load-summary{grid-template-columns:1fr 1fr}.active-load-summary div:last-child{grid-column:1/-1}}';}
+  }
+  class EnergyIQCardEditor extends HTMLElement {
+    constructor() {
+      super();
+      this._config = {};
+      this._hass = null;
+      this._form = null;
+    }
+    setConfig(config) {
+      this._config = Object.assign({}, config || {});
+      this._render();
+    }
+    set hass(hass) {
+      this._hass = hass;
+      if (this._form) this._form.hass = hass;
+      else this._render();
+    }
+    _render() {
+      if (!this._hass || this._form) return;
+      const spec = EnergyIQCard.getConfigForm();
+      const form = document.createElement("ha-form");
+      form.hass = this._hass;
+      form.schema = spec.schema;
+      form.data = this._config;
+      form.computeLabel = spec.computeLabel;
+      form.computeHelper = spec.computeHelper;      form.addEventListener("value-changed", (ev) => {
+        this._config = Object.assign({}, this._config, ev.detail.value || {});
+        this.dispatchEvent(new CustomEvent("config-changed", {          bubbles: true,
+          composed: true,
+          detail: { config: this._config },
+        }));
+      });
+      this.innerHTML = "";
+      this.appendChild(form);
+      this._form = form;
+    }
+  }
+  if (!customElements.get("energyiq-card-editor")) {
+    customElements.define("energyiq-card-editor", EnergyIQCardEditor);
+  }
+  customElements.define(TAG,EnergyIQCard); window.customCards=window.customCards||[]; window.customCards.push({type:TAG,name:"EnergyIQ",description:"EnergyIQ dashboard card for whole-home power attribution, Mystery Watts, and cost.",preview:true,documentationURL:"https://github.com/tahouser/energy-attributes",configurable:true});
+}
