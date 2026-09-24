@@ -16,7 +16,7 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31624"
+FRONTEND_VERSION = "31625"
 CARD_PATH = f"{URL_BASE}/energyiq-card-3.1.193.js"
 CARD_URL = f"{CARD_PATH}?v={FRONTEND_VERSION}"
 
