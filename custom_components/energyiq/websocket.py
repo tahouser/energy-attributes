@@ -218,6 +218,9 @@ def _save_options(coordinator, **updates) -> None:
         coordinator.entry,
         options=options,
     )
+    coordinator.hass.async_create_task(
+        coordinator.async_persist_owned_state(options=options)
+    )
 
 
 def _coordinator(hass: HomeAssistant, entry_id: str):
