@@ -547,7 +547,7 @@ this.querySelector("#begin-training")?.addEventListener("click",()=>this.beginSe
     renderTrainingDetail(device) {
       const training = device.training || {}, method = training.method || "quick", result = training.result || {};
       const baseline = Number(training.baseline_w), live = Number(training.live_delta_w), stable = Number(result.stable_load_w ?? training.stable_load_w), range = Number(result.stability_range_w ?? training.stability_range_w), elapsed = Number(training.duration_s);
-      const valid = result.capture_valid === true || training.capture_valid === true, active = training.status === "active", complete = training.status === "complete", phase = String(training.phase || ""), legacyFullCycle = training.method === "full_cycle";
+      const valid = result.capture_valid === true || training.capture_valid === true, active = training.status === "active" && Number.isFinite(Number(training.live_delta_w)) && Math.abs(Number(training.live_delta_w)) > 0, complete = training.status === "complete", phase = String(training.phase || ""), legacyFullCycle = training.method === "full_cycle";
       const instruction = training.instruction || this.defaultInstruction(method, phase, device), fmt = value => Number.isFinite(value) ? `${value.toFixed(0)} W` : "—";
       const elapsedText = Number.isFinite(elapsed) ? `${elapsed.toFixed(1)} s` : "—", stableClass = valid ? "valid" : "";
       const shownLoad = valid ? stable : complete ? Number(training.learned_signature?.load_w) : live;
