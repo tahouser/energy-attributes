@@ -363,11 +363,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             # "Start fresh" is explicit and intentionally replaces the
             # canonical store during the new entry's first setup.
+            self._candidates = _build_candidates(self.hass, self._power_entity)
             return self.async_create_entry(
                 title="EnergyIQ",
                 data={
                     CONF_POWER_ENTITY: self._power_entity,
-                    "candidate_devices": {},
+                    "candidate_devices": {c["device_id"]: c for c in self._candidates},
                     CONF_MONITORED_ENTITIES: [],
                     "device_classifications": {},
                     "commissioned_devices": {},
