@@ -6,7 +6,8 @@
         "title": "Choose whole-home meter",
         "description": "Select the HA power sensor that represents total whole-home consumption. Commissioning is available later from Configure.",
         "data": {
-          "power_entity": "Whole-home power sensor"
+          "power_entity": "Whole-home power sensor",
+          "restore_existing": "Restore existing EnergyIQ data"
         }
       }
     }
