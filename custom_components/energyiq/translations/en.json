@@ -4,9 +4,10 @@
     "step": {
       "user": {
         "title": "Choose whole-home meter",
-        "description": "Select the HA power sensor that represents total whole-home consumption. Commissioning is available later from Configure.",
+        "description": "Select the HA power sensor that represents total whole-home consumption. If saved EnergyIQ data is detected, keep Restore existing EnergyIQ data enabled to recover it, or turn it off to start fresh. Commissioning is available later from Configure.",
         "data": {
-          "power_entity": "Whole-home power sensor"
+          "power_entity": "Whole-home power sensor",
+          "restore_existing": "Restore existing EnergyIQ data"
         }
       }
     }
