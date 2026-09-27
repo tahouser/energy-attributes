@@ -236,6 +236,27 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         await self._persist(force=True)
         self._persistent_loaded = True
 
+    async def async_delete_owned_data(self) -> None:
+        """Delete EnergyIQ-owned persistent data and reset the workspace."""
+        await self._store.async_remove()
+        await self._legacy_training_store.async_remove()
+        self.candidate_devices = {}
+        self.device_classifications = {}
+        self.commissioned_devices = {}
+        self.monitored_entities = []
+        self.training_state = {}
+        self.training_samples = {}
+        self.last_training_device_id = None
+        self._training_engine = None
+        self._training_device = None
+        self._training_task = None
+        self._entry_options_override = {}
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={CONF_POWER_ENTITY: self.power_entity},
+            options={},
+        )
+
     async def async_persist_owned_state(self, *, options: dict[str, Any] | None = None) -> None:
         """Persist all EnergyIQ-owned state independently of the config entry."""
         if options is not None:
