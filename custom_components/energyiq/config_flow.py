@@ -447,6 +447,9 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                     self.config_entry.data.get("training_samples", {}),
                 )),
             })
+            coordinator = self.config_entry.runtime_data
+            if coordinator is not None and hasattr(coordinator, "async_persist_owned_state"):
+                await coordinator.async_persist_owned_state(options=options)
             return self.async_create_entry(data=options)
 
         schema = vol.Schema({
