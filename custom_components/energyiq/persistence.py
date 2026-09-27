@@ -70,6 +70,16 @@ def build_entry_data(snapshot: dict[str, Any], power_entity: str | None = None) 
     }
 
 
+def validate_import_snapshot(saved: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalize an externally supplied EnergyIQ snapshot."""
+    snapshot = migrate_snapshot(saved)
+    if snapshot is None:
+        raise ValueError("EnergyIQ backup is empty or invalid.")
+    if not has_saved_data(snapshot):
+        raise ValueError("EnergyIQ backup contains no saved workspace data.")
+    return snapshot
+
+
 def has_saved_data(snapshot: dict[str, Any] | None) -> bool:
     """Return True when the store contains a meaningful EnergyIQ workspace."""
     if not snapshot:
