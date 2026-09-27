@@ -35,7 +35,6 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.device_classifications=entry.options.get("device_classifications", entry.data.get("device_classifications", {}))
         self.commissioned_devices=entry.options.get("commissioned_devices", entry.data.get("commissioned_devices", {}))
         self.candidate_devices=entry.options.get("candidate_devices", entry.data.get("candidate_devices", {}))
-        self._remove_shelly_energy_meter_candidates()
         self.training_state=entry.options.get("training_state", entry.data.get("training_state", {}))
         self.training_samples=entry.options.get("training_samples", entry.data.get("training_samples", {}))
         self._store=get_store(hass)
@@ -98,14 +97,15 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 for entity_id in [measurement.get("entity_id")]
                 if entity_id
             ]
+            options = {
+                **self.entry.options,
+                "candidate_devices": self.candidate_devices,
+                "device_classifications": self.device_classifications,
+                "monitored_entities": self.monitored_entities,
+            }
             self.hass.config_entries.async_update_entry(
                 self.entry,
-                options={
-                    **self.entry.options,
-                    "candidate_devices": self.candidate_devices,
-                    "device_classifications": self.device_classifications,
-                    "monitored_entities": self.monitored_entities,
-                },
+                options=options,
             )
 
     def refresh_ha_metadata(self) -> bool:
@@ -229,6 +229,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
 
         # Inventory cleanup must happen after canonical state is loaded.
         self._remove_shelly_energy_meter_candidates()
+        await self._persist(force=True)
         self._persistent_loaded = True
 
     async def async_persist_owned_state(self, *, options: dict[str, Any] | None = None) -> None:
