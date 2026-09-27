@@ -155,12 +155,16 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         changed = True
 
         if changed:
+            options = {
+                **self.entry.options,
+                "candidate_devices": self.candidate_devices,
+            }
             self.hass.config_entries.async_update_entry(
                 self.entry,
-                options={
-                    **self.entry.options,
-                    "candidate_devices": self.candidate_devices,
-                },
+                options=options,
+            )
+            self.hass.async_create_task(
+                self.async_persist_owned_state(options=options)
             )
         return changed
 
