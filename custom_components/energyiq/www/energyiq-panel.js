@@ -8,7 +8,7 @@
 (() => {
   const TAG = "energyiq-panel-v339";
   const VERSION = "31440";
-  const UI_VERSION = "3.1.165";
+  const UI_VERSION = "3.1.166";
 
   if (customElements.get(TAG)) return;
 
@@ -495,7 +495,7 @@ this.querySelector("#begin-training")?.addEventListener("click",()=>this.beginSe
       const instruction = training.instruction || this.defaultInstruction(method, phase, device), fmt = value => Number.isFinite(value) ? `${value.toFixed(0)} W` : "—";
       const elapsedText = Number.isFinite(elapsed) ? `${elapsed.toFixed(1)} s` : "—", stableClass = valid ? "valid" : "";
       const shownLoad = valid ? stable : complete ? Number(training.learned_signature?.load_w) : live;
-      return `<div class="training-grid"><div class="training-main"><div class="method-picker"><span class="method-label">Training method</span><div class="method-options"><label><input type="checkbox" class="training-method-choice" data-method="quick" ${method === "quick" ? "checked" : ""} ${active ? "disabled" : ""}> Quick ON/OFF</label><label><input type="checkbox" class="training-method-choice" data-method="manual" ${method === "manual" ? "checked" : ""} ${active ? "disabled" : ""}> Manual</label></div>${legacyFullCycle ? `<p class="legacy-method-note">This device has an existing Full Cycle session. Stop it without saving to choose Quick ON/OFF or Manual.</p>` : ""}</div><div class="instruction-card"><span class="eyebrow">Instructions</span><strong>${this.escape(instruction)}</strong></div><div class="capture-grid"><div><span>Baseline</span><strong>${fmt(baseline)}</strong></div><div class="capture-value ${stableClass}"><span>Learned / live</span><strong>${fmt(shownLoad)}</strong></div><div><span>Stability range</span><strong>${fmt(range)}</strong></div><div><span>Elapsed</span><strong>${elapsedText}</strong></div></div><div class="capture-state ${valid ? "valid" : ""}"><span class="status-light ${valid ? "green" : active ? "amber" : complete ? "green" : "red"}"></span><strong>${valid ? "Capture valid — you may Stop & Save" : complete ? "Training saved" : active ? (phase || "Training in progress") : "Ready to train"}</strong></div><div class="training-actions">${this.renderTrainingActions(device, method, active, complete, valid, legacyFullCycle)}</div>${complete ? this.renderCompletedResult(device) : ""}</div><aside class="training-info"><span class="eyebrow">Selected device</span><h3>${this.escape(device.name || device.device_id)}</h3><p>${this.escape(device.area || "No area assigned")}</p><dl><dt>Source</dt><dd>${String(device.source || "").toLowerCase() === "manual" ? "Manual" : "Home Assistant"}</dd><dt>Method</dt><dd>${this.escape(training.method || method)}</dd><dt>Status</dt><dd>${complete ? "Trained" : active ? "In progress" : "Not trained"}</dd></dl></aside></div>`;
+      return `<div class="training-grid"><div class="training-main"><div class="method-picker"><span class="method-label">Training method</span><div class="method-options"><label><input type="radio" name="training-method" class="training-method-choice" data-method="quick" ${method === "quick" ? "checked" : ""} ${active ? "disabled" : ""}> Quick ON/OFF</label><label><input type="radio" name="training-method" class="training-method-choice" data-method="manual" ${method === "manual" ? "checked" : ""} ${active ? "disabled" : ""}> Manual</label></div>${legacyFullCycle ? `<p class="legacy-method-note">This device has an existing Full Cycle session. Stop it without saving to choose Quick ON/OFF or Manual.</p>` : ""}</div><div class="instruction-card"><span class="eyebrow">Instructions</span><strong>${this.escape(instruction)}</strong></div><div class="capture-grid"><div><span>Baseline</span><strong>${fmt(baseline)}</strong></div><div class="capture-value ${stableClass}"><span>Learned / live</span><strong>${fmt(shownLoad)}</strong></div><div><span>Stability range</span><strong>${fmt(range)}</strong></div><div><span>Elapsed</span><strong>${elapsedText}</strong></div></div><div class="capture-state ${valid ? "valid" : ""}"><span class="status-light ${valid ? "green" : active ? "amber" : complete ? "green" : "red"}"></span><strong>${valid ? "Capture valid — you may Stop & Save" : complete ? "Training saved" : active ? (phase || "Training in progress") : "Ready to train"}</strong></div><div class="training-actions">${this.renderTrainingActions(device, method, active, complete, valid, legacyFullCycle)}</div>${complete ? this.renderCompletedResult(device) : ""}</div><aside class="training-info"><span class="eyebrow">Selected device</span><h3>${this.escape(device.name || device.device_id)}</h3><p>${this.escape(device.area || "No area assigned")}</p><dl><dt>Source</dt><dd>${String(device.source || "").toLowerCase() === "manual" ? "Manual" : "Home Assistant"}</dd><dt>Method</dt><dd>${this.escape(training.method || method)}</dd><dt>Status</dt><dd>${complete ? "Trained" : active ? "In progress" : "Not trained"}</dd></dl></aside></div>`;
     }
 
     renderTrainingActions(device, method, active, complete, valid, legacyFullCycle = false) {
@@ -512,19 +512,14 @@ this.querySelector("#begin-training")?.addEventListener("click",()=>this.beginSe
     }
 
     defaultInstruction(method, phase, device) {
-      if (method === "manual") return "Enter the electrical load information supplied by your measurement process.";
+      if (method === "manual") return "First establish the baseline, then turn the load ON yourself. Leave it running until the load is stable, then turn it OFF. EnergyIQ will detect the change and capture the load signature.";
       return `EnergyIQ will automatically cycle “${device.name || device.device_id}” ON and OFF.`;
     }
 
     bindTrainingWorkspace() {
       this.querySelector("[data-training-close]")?.addEventListener("click", () => this.closeTrainingWorkspace());
       this.querySelectorAll(".training-method-choice").forEach(box => box.addEventListener("change", event => {
-        if (event.currentTarget.checked) {
-          this.querySelectorAll(".training-method-choice").forEach(other => { if (other !== event.currentTarget) other.checked = false; });
-        } else if (!this.querySelector(".training-method-choice:checked")) {
-          event.currentTarget.checked = true;
-        }
-        this.renderTrainingDetailInPlace();
+        if (event.currentTarget.checked) this.renderTrainingDetailInPlace();
       }));
       this.querySelector("[data-training-start]")?.addEventListener("click", () => this.startWorkspaceTraining());
       this.querySelector("[data-training-stop]")?.addEventListener("click", () => this.stopWorkspaceTraining());
