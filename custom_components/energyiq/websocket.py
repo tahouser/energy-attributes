@@ -235,6 +235,40 @@ def _coordinator(hass: HomeAssistant, entry_id: str):
     return coordinator
 
 
+@websocket_api.websocket_command({vol.Required("type"): "energy_attribution/export_data"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_export_data(hass, connection, msg):
+    """Return the canonical EnergyIQ backup snapshot."""
+    snapshot = await get_store(hass).async_load()
+    if not isinstance(snapshot, dict):
+        raise ValueError("No EnergyIQ data is currently saved.")
+    connection.send_result(msg["id"], {"snapshot": snapshot, "version": _MANIFEST_VERSION})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/import_data",
+    vol.Required("snapshot"): dict,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_import_data(hass, connection, msg):
+    """Validate and replace the canonical EnergyIQ backup snapshot."""
+    snapshot = validate_import_snapshot(msg["snapshot"])
+    await get_store(hass).async_save(snapshot)
+    connection.send_result(msg["id"], {"imported": True, "schema_version": snapshot["schema_version"]})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "energy_attribution/delete_data"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_delete_data(hass, connection, msg):
+    """Explicitly delete EnergyIQ-owned learned/configuration data."""
+    coordinator = _coordinator(hass, msg["entry_id"])
+    await coordinator.async_delete_owned_data()
+    connection.send_result(msg["id"], {"deleted": True})
+
+
 @websocket_api.websocket_command({vol.Required("type"): "energy_attribution/list_entries"})
 @websocket_api.require_admin
 @websocket_api.async_response
