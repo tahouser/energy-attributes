@@ -210,6 +210,10 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self.last_training_device_id = saved.get(
                 "last_training_device_id", self.last_training_device_id
             )
+            for state in self.training_state.values():
+                if isinstance(state, dict) and state.get("status") == "active":
+                    state["status"] = "interrupted"
+                    state["phase"] = "interrupted"
 
         # An existing installation is migrated into the stable store on first
         # startup of this release. A deliberate fresh install instead replaces
