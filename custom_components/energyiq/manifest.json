@@ -1,12 +1,16 @@
 {
   "domain": "energyiq",
   "name": "EnergyIQ",
-  "version": "3.1.213",
+  "version": "3.1.214",
   "documentation": "https://github.com/tahouser/energy-attributes",
   "issue_tracker": "https://github.com/tahouser/energy-attributes/issues",
-  "codeowners": ["@tahouser"],
+  "codeowners": [
+    "@tahouser"
+  ],
   "config_flow": true,
   "iot_class": "local_polling",
   "integration_type": "hub",
-  "after_dependencies": ["lovelace"]
+  "after_dependencies": [
+    "lovelace"
+  ]
 }
