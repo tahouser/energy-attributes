@@ -84,6 +84,10 @@ def has_saved_data(snapshot: dict[str, Any] | None) -> bool:
     """Return True when the store contains a meaningful EnergyIQ workspace."""
     if not snapshot:
         return False
+    if snapshot.get("power_entity"):
+        return True
+    if snapshot.get("options"):
+        return True
     return any(
         snapshot.get(key)
         for key in (
