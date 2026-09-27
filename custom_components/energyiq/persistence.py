@@ -1,4 +1,7 @@
-"""Persistent EnergyIQ-owned data independent of config-entry identity."""
+"""Persistent EnergyIQ-owned data independent of config-entry identity.
+
+The canonical store is deliberately independent of the Home Assistant config-entry ID.
+"""
 from __future__ import annotations
 
 from copy import deepcopy
