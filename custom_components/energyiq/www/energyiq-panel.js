@@ -334,7 +334,7 @@ hasPendingChanges() {
           ${this.renderMeters()}
         </div>
         ${this.trainingWorkspaceOpen?`<div id="training-area">${this.renderTrainingWorkspace()}</div>`:""}
-        <div class="toolbar"><div class="views"><button id="all" class="${this.view==="all"?"selected":""}">All <span>${devices.length}</span></button><button id="trained" class="${this.view==="trained"?"selected":""}">Trained <span>${trainedCount}</span></button><button id="excluded" class="${this.view==="excluded"?"selected":""}">Excluded <span>${excludedCount}</span></button></div><div class="toolbar-actions">${this.view === "excluded" ? `<button id="empty-excluded" class="action-exclude" ${excludedCount ? "" : "disabled"}>Empty Excluded</button>` : ""}<button id="add">＋ Add Device / Entity</button><button id="save" class="primary" ${dirty?"":"disabled"}>Save Changes</button></div></div>
+        <div class="toolbar"><div class="views"><button id="all" class="${this.view==="all"?"selected":""}">All <span>${devices.length}</span></button><button id="trained" class="${this.view==="trained"?"selected":""}">Trained <span>${trainedCount}</span></button><button id="excluded" class="${this.view==="excluded"?"selected":""}">Excluded <span>${excludedCount}</span></button></div><div class="toolbar-actions"><button id="data-management">Data</button>${this.view === "excluded" ? `<button id="empty-excluded" class="action-exclude" ${excludedCount ? "" : "disabled"}>Empty Excluded</button>` : ""}<button id="add">＋ Add Device / Entity</button><button id="save" class="primary" ${dirty?"":"disabled"}>Save Changes</button></div></div>
         <div class="list-tools"><label class="search-box"><span>⌕</span><input id="device-search" type="search" value="${this.escape(this.searchTerm)}" placeholder="Search devices, areas, entities…" autocomplete="off"></label></div>
 ${selected ? `<div class="selection-bar"><div class="selection-count"><span class="selection-box">☐</span><strong>${selected}</strong> selected</div><div class="selection-actions">${selected ? `<button id="begin-training" class="action-training" ${canTrain?"":"disabled"}>Begin Training</button>` : ""}<button id="include" class="action-include" ${selected?"":"disabled"}>Include</button>${this.view === "excluded" ? `<button id="remove-excluded" class="action-exclude" ${selected?"":"disabled"}>Remove Selected</button>` : `<button id="exclude" class="action-exclude" ${selected?"":"disabled"}>Exclude</button>`}<button id="clear-selection" ${selected?"":"disabled"}>Clear Selection</button></div></div>` : ""}\n        <div class="table-scroll"><table><thead><tr><th class="select-col">☐</th>${this.sortHeader("name","Device")}${this.sortHeader("area","Area")}${this.sortHeader("source","Source")}${this.sortHeader("live","Live Watts")}${this.sortHeader("trained","Trained Watts")}${this.sortHeader("state","State")}${this.sortHeader("training","Training")}${this.sortHeader("method","Method")}</tr></thead><tbody>${rows.length?rows.map(d=>this.row(d)).join(""):`<tr><td colspan="9" class="empty">No devices match this view.</td></tr>`}</tbody></table></div>
       </div>`;
@@ -379,10 +379,66 @@ ${selected ? `<div class="selection-bar"><div class="selection-count"><span clas
       // handler could consume a follow-up touch after momentum stopped.
     }
 
+    async openDataManagement() {
+      const backdrop = document.createElement("div");
+      backdrop.className = "modal-backdrop";
+      backdrop.innerHTML = `<div class="modal small" role="dialog" aria-modal="true">
+        <div class="modal-head"><div><span class="eyebrow">EnergyIQ data</span><h2>Data management</h2><p>EnergyIQ keeps learned data independent of the Home Assistant config-entry ID.</p></div><button id="data-close" aria-label="Close">×</button></div>
+        <div class="ownership"><strong>Update behavior:</strong> HACS updates, reloads, and normal Home Assistant restarts retain EnergyIQ data. Removing the integration also retains it until you explicitly delete it.</div>
+        <div class="modal-actions"><button id="data-export">Export backup</button><span></span><button id="data-import">Import backup</button><button id="data-delete" class="action-exclude">Delete EnergyIQ data</button></div>
+        <input id="data-file" type="file" accept="application/json,.json" hidden>
+      </div>`;
+      this.appendChild(backdrop);
+      const close = () => backdrop.remove();
+      backdrop.querySelector("#data-close").onclick = close;
+      backdrop.addEventListener("click", event => { if (event.target === backdrop) close(); });
+      backdrop.querySelector("#data-export").onclick = async () => {
+        try {
+          const result = await this.ws({ type: "energy_attribution/export_data" });
+          const blob = new Blob([JSON.stringify(result.snapshot, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `energyiq-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+          link.click();
+          URL.revokeObjectURL(url);
+          this.showToast("EnergyIQ backup exported.");
+        } catch (error) { this.showToast(error?.message || "Unable to export EnergyIQ data.", true); }
+      };
+      const fileInput = backdrop.querySelector("#data-file");
+      backdrop.querySelector("#data-import").onclick = () => fileInput.click();
+      fileInput.onchange = async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        try {
+          const snapshot = JSON.parse(await file.text());
+          if (!window.confirm("Import this EnergyIQ backup? The current EnergyIQ persistent data will be replaced.")) return;
+          await this.ws({ type: "energy_attribution/import_data", snapshot });
+          close();
+          this.showToast("Backup imported. Reloading EnergyIQ…");
+          setTimeout(() => window.location.reload(), 800);
+        } catch (error) { this.showToast(error?.message || "Unable to import EnergyIQ backup.", true); }
+      };
+      backdrop.querySelector("#data-delete").onclick = async () => {
+        const confirmed = window.confirm("Delete all EnergyIQ learned/configuration data? This removes training signatures, classifications, commissioning selections, samples, and EnergyIQ-owned settings. This cannot be undone unless you have an exported backup.");
+        if (!confirmed) return;
+        try {
+          await this.ws({ type: "energy_attribution/delete_data", entry_id: this.entryId });
+          close();
+          this.pendingIncluded = null;
+          this.selectedIds.clear();
+          this.workspace = null;
+          this.showToast("EnergyIQ data deleted. Reloading a fresh workspace…");
+          setTimeout(() => window.location.reload(), 800);
+        } catch (error) { this.showToast(error?.message || "Unable to delete EnergyIQ data.", true); }
+      };
+    }
+
     bind() {
       this.bindTableScrollTouch();
       this.querySelector("#back")?.addEventListener("click",()=>{if(window.history.length>1)window.history.back();else window.location.href="/";});
       this.querySelector("#save")?.addEventListener("click",()=>this.saveChanges());
+      this.querySelector("#data-management")?.addEventListener("click",()=>this.openDataManagement());
       this.bindSummaryActions();
       this.querySelector("#toggle-upper-sections")?.addEventListener("click",()=>this.toggleUpperSections());
       this.querySelector("#add")?.addEventListener("click",()=>this.openAddDialog());
