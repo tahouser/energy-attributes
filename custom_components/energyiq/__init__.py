@@ -111,5 +111,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if coordinator.training_state[device_id].get("status") == "active":
                 await coordinator.async_stop_training(device_id)
 
+    await coordinator.async_persist_owned_state()
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     return ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Keep EnergyIQ data when the config entry is removed.
+
+    Persistent EnergyIQ data intentionally lives outside the config entry so a
+    HACS update, reload, or reinstall does not erase learned state. Explicit
+    deletion of that store is a separate user action.
+    """
+    return
