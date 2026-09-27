@@ -18,6 +18,9 @@ jobs:
       - name: Validate Python syntax
         run: python -m compileall -q custom_components/energyiq tests
 
+      - name: Validate persistence contract
+        run: python tests/test_persistence_standalone.py
+
       - name: Validate frontend JavaScript syntax
         run: |
           node --check custom_components/energyiq/www/energyiq-panel.js

@@ -19,6 +19,7 @@ from homeassistant.helpers.selector import BooleanSelector
 from homeassistant.helpers.selector import SelectOptionDict, SelectSelector, SelectSelectorConfig, SelectSelectorMode
 
 from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN, TRAINING_SESSION
+from .persistence import build_entry_data, get_store, has_saved_data, migrate_snapshot
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -330,13 +331,39 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._power_entity: str | None = None
         self._candidates: list[dict[str, Any]] = []
+        self._saved_snapshot: dict[str, Any] | None = None
 
     async def async_step_user(self, user_input=None):
-        """Select the whole-home power sensor; commissioning happens later."""
+        """Select the whole-home power sensor and optionally restore saved data."""
+        if self._saved_snapshot is None:
+            self._saved_snapshot = migrate_snapshot(
+                await get_store(self.hass).async_load()
+            )
+
         if user_input is not None:
             self._power_entity = user_input[CONF_POWER_ENTITY]
-            self._candidates = _build_candidates(self.hass, self._power_entity)
+            restore = bool(user_input.get("restore_existing", False))
 
+            if restore and has_saved_data(self._saved_snapshot):
+                snapshot = self._saved_snapshot
+                data = build_entry_data(snapshot, self._power_entity)
+                data["_restore_persistent_data"] = True
+                options = dict(snapshot.get("options") or {})
+                options.update({
+                    CONF_MONITORED_ENTITIES: data[CONF_MONITORED_ENTITIES],
+                    "candidate_devices": data["candidate_devices"],
+                    "device_classifications": data["device_classifications"],
+                    "commissioned_devices": data["commissioned_devices"],
+                })
+                return self.async_create_entry(
+                    title="EnergyIQ",
+                    data=data,
+                    options=options,
+                )
+
+            # "Start fresh" is explicit and intentionally replaces the
+            # canonical store during the new entry's first setup.
+            self._candidates = _build_candidates(self.hass, self._power_entity)
             return self.async_create_entry(
                 title="EnergyIQ",
                 data={
@@ -345,10 +372,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_MONITORED_ENTITIES: [],
                     "device_classifications": {},
                     "commissioned_devices": {},
+                    "_restore_persistent_data": False,
                 },
             )
 
-        schema = vol.Schema({
+        schema_fields = {
             vol.Required(CONF_POWER_ENTITY): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="sensor",
@@ -356,7 +384,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     multiple=False,
                 )
             )
-        })
+        }
+        if has_saved_data(self._saved_snapshot):
+            schema_fields[vol.Optional("restore_existing", default=True)] = bool
+
+        schema = vol.Schema(schema_fields)
         return self.async_show_form(step_id="user", data_schema=schema)
 
     @staticmethod
@@ -415,6 +447,9 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                     self.config_entry.data.get("training_samples", {}),
                 )),
             })
+            coordinator = self.config_entry.runtime_data
+            if coordinator is not None and hasattr(coordinator, "async_persist_owned_state"):
+                await coordinator.async_persist_owned_state(options=options)
             return self.async_create_entry(data=options)
 
         schema = vol.Schema({

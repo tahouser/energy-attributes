@@ -22,6 +22,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN
 from .training import TrainingEngine
+from .persistence import build_snapshot, get_store, migrate_snapshot
 
 _LOGGER=logging.getLogger(__name__)
 
@@ -34,10 +35,12 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.device_classifications=entry.options.get("device_classifications", entry.data.get("device_classifications", {}))
         self.commissioned_devices=entry.options.get("commissioned_devices", entry.data.get("commissioned_devices", {}))
         self.candidate_devices=entry.options.get("candidate_devices", entry.data.get("candidate_devices", {}))
-        self._remove_shelly_energy_meter_candidates()
         self.training_state=entry.options.get("training_state", entry.data.get("training_state", {}))
         self.training_samples=entry.options.get("training_samples", entry.data.get("training_samples", {}))
-        self._store=Store(hass, 1, f"{DOMAIN}.training.{entry.entry_id}", private=True)
+        self._store=get_store(hass)
+        self._legacy_training_store=Store(hass, 1, f"{DOMAIN}.training.{entry.entry_id}", private=True)
+        self._persistent_loaded=False
+        self._data_deleted=False
         self._training_engine: TrainingEngine|None=None
         self._training_device: str|None=None
         self.last_training_device_id: str|None=None
@@ -95,14 +98,15 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 for entity_id in [measurement.get("entity_id")]
                 if entity_id
             ]
+            options = {
+                **self.entry.options,
+                "candidate_devices": self.candidate_devices,
+                "device_classifications": self.device_classifications,
+                "monitored_entities": self.monitored_entities,
+            }
             self.hass.config_entries.async_update_entry(
                 self.entry,
-                options={
-                    **self.entry.options,
-                    "candidate_devices": self.candidate_devices,
-                    "device_classifications": self.device_classifications,
-                    "monitored_entities": self.monitored_entities,
-                },
+                options=options,
             )
 
     def refresh_ha_metadata(self) -> bool:
@@ -152,12 +156,16 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                         changed = True
 
         if changed:
+            options = {
+                **self.entry.options,
+                "candidate_devices": self.candidate_devices,
+            }
             self.hass.config_entries.async_update_entry(
                 self.entry,
-                options={
-                    **self.entry.options,
-                    "candidate_devices": self.candidate_devices,
-                },
+                options=options,
+            )
+            self.hass.async_create_task(
+                self.async_persist_owned_state(options=options)
             )
         return changed
 
@@ -168,28 +176,113 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         return entity.name or entity.original_name or entity.entity_id
 
     async def async_load_training(self):
-        saved=await self._store.async_load()
+        """Load canonical persistent data and migrate the legacy entry-keyed store."""
+        restore = self.entry.data.get("_restore_persistent_data", True)
+        saved = migrate_snapshot(await self._store.async_load()) if restore else None
+        migrated_from_legacy = False
+
+        if restore and saved is None:
+            legacy = await self._legacy_training_store.async_load()
+            if isinstance(legacy, dict):
+                saved = {
+                    "schema_version": 1,
+                    "training_state": legacy.get("training_state", {}),
+                    "training_samples": legacy.get("training_samples", {}),
+                    "last_training_device_id": legacy.get("last_training_device_id"),
+                }
+                migrated_from_legacy = True
+
         if isinstance(saved, dict):
-            self.training_state=saved.get("training_state", self.training_state)
-            self.training_samples=saved.get("training_samples", self.training_samples)
-            self.last_training_device_id=saved.get("last_training_device_id", self.last_training_device_id)
-            active=saved.get("active")
-            if active and active.get("status")=="active":
-                active["status"]="interrupted"
-                self.training_state[active["device_id"]]=active
-                await self._persist()
+            options = dict(saved.get("options") or {})
+            self.monitored_entities = saved.get(
+                "monitored_entities",
+                options.get(CONF_MONITORED_ENTITIES, self.monitored_entities),
+            )
+            self.device_classifications = saved.get(
+                "device_classifications",
+                options.get("device_classifications", self.device_classifications),
+            )
+            self.commissioned_devices = saved.get(
+                "commissioned_devices",
+                options.get("commissioned_devices", self.commissioned_devices),
+            )
+            self.candidate_devices = saved.get(
+                "candidate_devices",
+                options.get("candidate_devices", self.candidate_devices),
+            )
+            self.training_state = saved.get("training_state", self.training_state)
+            self.training_samples = saved.get("training_samples", self.training_samples)
+            self.last_training_device_id = saved.get(
+                "last_training_device_id", self.last_training_device_id
+            )
+            for state in self.training_state.values():
+                if isinstance(state, dict) and state.get("status") == "active":
+                    state["status"] = "interrupted"
+                    state["phase"] = "interrupted"
+
+        # An existing installation is migrated into the stable store on first
+        # startup of this release. A deliberate fresh install instead replaces
+        # the old store with its new empty/current state.
+        if saved is None or migrated_from_legacy:
+            await self._persist(force=True)
+
+        active = self.training_state.get(self._training_device) if self._training_device else None
+        if isinstance(active, dict) and active.get("status") == "active":
+            active["status"] = "interrupted"
+            self.training_state[active["device_id"]] = active
+            await self._persist(force=True)
+
+        # Inventory cleanup must happen after canonical state is loaded.
+        self._remove_shelly_energy_meter_candidates()
+        await self._persist(force=True)
+        self._persistent_loaded = True
+
+    async def async_delete_owned_data(self) -> None:
+        """Delete EnergyIQ-owned persistent data and reset the workspace."""
+        await self._store.async_remove()
+        await self._legacy_training_store.async_remove()
+        self._data_deleted = True
+        self.candidate_devices = {}
+        self.device_classifications = {}
+        self.commissioned_devices = {}
+        self.monitored_entities = []
+        self.training_state = {}
+        self.training_samples = {}
+        self.last_training_device_id = None
+        self._training_engine = None
+        self._training_device = None
+        self._training_task = None
+        self._entry_options_override = {}
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            data={CONF_POWER_ENTITY: self.power_entity},
+            options={},
+        )
+
+    async def async_persist_owned_state(self, *, options: dict[str, Any] | None = None) -> None:
+        """Persist all EnergyIQ-owned state independently of the config entry."""
+        if self._data_deleted:
+            return
+        if options is not None:
+            self._entry_options_override = dict(options)
+        await self._persist(force=True)
 
     async def _persist(self, force: bool = False):
         now = self.hass.loop.time()
         if not force and now - self._last_persist < 5.0:
             return
         self._last_persist = now
-        await self._store.async_save({
-            "training_state":self.training_state,
-            "training_samples":self.training_samples,
-            "last_training_device_id": self.last_training_device_id,
-            "active": self.training_state.get(self._training_device) if self._training_device else None,
+        options = dict(getattr(self, "_entry_options_override", self.entry.options))
+        options.update({
+            CONF_MONITORED_ENTITIES: self.monitored_entities,
+            "device_classifications": self.device_classifications,
+            "commissioned_devices": self.commissioned_devices,
+            "candidate_devices": self.candidate_devices,
         })
+        snapshot = build_snapshot(self)
+        snapshot["options"] = options
+        snapshot["active"] = None
+        await self._store.async_save(snapshot)
 
     async def async_bulk_auto_training(self, device_ids: list[str]) -> dict:
         """Train selected HA/entity devices sequentially using Auto Quick."""
