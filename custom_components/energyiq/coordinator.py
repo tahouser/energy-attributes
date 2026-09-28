@@ -340,6 +340,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             "entity_id", "action", "command_loop", "shelly_host", "rpc_source",
             "rpc_power_w", "rpc_elapsed_ms", "ha_power_w", "ha_last_updated",
             "learned_load_w", "measurement_source", "error",
+            "quick_phase", "quick_on_index", "quick_on_w", "quick_off_index", "quick_off_w", "quick_captured_on_w",
         ]
         new_file = not path.exists()
         with path.open("a", newline="", encoding="utf-8") as fh:
@@ -561,7 +562,32 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                     state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
                     if state.get("live_peak_w") is None or watts > state.get("live_peak_w", watts):
                         state["live_peak_w"] = watts
+                    quick_on_before = len(self._training_engine._on_samples) if method == "quick" else 0
+                    quick_off_before = len(self._training_engine._off_samples) if method == "quick" else 0
                     result = self._training_engine.add_sample(now, watts)
+                    if method == "quick":
+                        quick_on_after = len(self._training_engine._on_samples)
+                        quick_off_after = len(self._training_engine._off_samples)
+                        if quick_on_after > quick_on_before:
+                            await self._response_log(
+                                "quick_on_sample", device_id,
+                                quick_phase=self._training_engine.phase,
+                                quick_on_index=quick_on_after,
+                                quick_on_w=round(watts, 3),
+                            )
+                        if quick_off_after > quick_off_before:
+                            await self._response_log(
+                                "quick_off_sample", device_id,
+                                quick_phase=self._training_engine.phase,
+                                quick_off_index=quick_off_after,
+                                quick_off_w=round(watts, 3),
+                            )
+                        if self._training_engine.phase == "request_off" and self._training_engine._on_capture_w is not None:
+                            await self._response_log(
+                                "quick_on_captured", device_id,
+                                quick_phase=self._training_engine.phase,
+                                quick_captured_on_w=round(self._training_engine._on_capture_w, 3),
+                            )
                     state.update({k: result.get(k) for k in ("phase", "baseline_w", "peak_delta_w", "events_detected", "duration_s", "energy_wh", "cycles_required", "cycles_completed", "capture_valid", "stable_load_w", "stability_range_w", "instruction")})
                     baseline = state.get("baseline_w")
                     state["live_delta_w"] = max(0.0, watts - baseline) if baseline is not None else None
