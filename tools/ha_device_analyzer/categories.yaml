@@ -1,0 +1,67 @@
+# Initial descriptive taxonomy.
+# Categories describe what a device is; measurement capability is tracked separately.
+
+categories:
+  lighting:
+    name: Lighting
+    examples: [lights, dimmers, LED drivers, fixtures]
+  hvac:
+    name: HVAC
+    examples: [furnace, air conditioner, heat pump, air handler, mini-split]
+  water_heating:
+    name: Water Heating
+    examples: [electric water heater, heat-pump water heater]
+  plumbing_pumps:
+    name: Plumbing / Pumps
+    examples: [sump pump, well pump, booster pump, circulation pump]
+  irrigation:
+    name: Irrigation
+    examples: [irrigation pump, irrigation controller, irrigation valve]
+  appliances:
+    name: Appliances
+    examples: [refrigerator, freezer, dishwasher, oven, microwave, disposal]
+  clothing_care:
+    name: Clothing Care
+    examples: [washer, dryer, iron, steamer]
+  kitchen:
+    name: Kitchen
+    examples: [refrigerator, freezer, dishwasher, range, hood, disposal]
+  laundry:
+    name: Laundry
+    examples: [washer, dryer]
+  hot_tub_spa:
+    name: Hot Tub / Spa
+    examples: [heater, circulation pump, jet pump, controls]
+  pool:
+    name: Pool
+    examples: [pool pump, pool heater, chlorinator, lighting]
+  steam_sauna:
+    name: Steam / Sauna
+    examples: [steam generator, sauna heater, ventilation]
+  ventilation:
+    name: Ventilation
+    examples: [bathroom fan, whole-house fan, ERV, HRV]
+  entertainment:
+    name: Entertainment
+    examples: [TV, audio, gaming, media equipment]
+  computing_network:
+    name: Computing / Network
+    examples: [computer, server, NAS, router, switch, access point]
+  security:
+    name: Security
+    examples: [camera, NVR, alarm equipment]
+  garage_workshop:
+    name: Garage / Workshop
+    examples: [garage door, compressor, tool, charger]
+  outdoor:
+    name: Outdoor
+    examples: [landscape lighting, fountain, outdoor heater]
+  ev_charging:
+    name: EV / Vehicle Charging
+    examples: [EVSE, vehicle charger]
+  battery_solar:
+    name: Battery / Solar
+    examples: [battery, inverter, solar equipment]
+  miscellaneous:
+    name: Miscellaneous
+    examples: []
