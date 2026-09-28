@@ -1,76 +1,82 @@
-# HA Device Intelligence Analyzer
+# HA Device Intelligence Analyzer — V1
 
-Standalone, read-only tooling for inspecting a Home Assistant installation's devices and entities.
+Standalone, read-only tooling for inspecting a Home Assistant installation.
 
-## Purpose
+## V1 scope
 
-Determine what Home Assistant actually exposes for each device before EnergyIQ adopts any discovery or auto-training rules.
+V1 is independent of EnergyIQ. It can be executed from a Home Assistant environment or another machine that can reach the HA API.
 
-This tool is intentionally separate from the EnergyIQ runtime. It must not modify devices, entities, registries, helpers, or EnergyIQ persistent data.
+It collects:
 
-## First objective
+- Device Registry
+- Entity Registry
+- Area Registry
+- Current entity states
+- Electrical measurement candidates
+- Historical behavior for electrical candidates
 
-Build an evidence-based inventory of:
+It records evidence such as:
 
-- devices and device relationships
-- all associated entities
-- entity domain and metadata
+- measurement class
+- unit, device class, state class
+- sample count
+- minimum and maximum
+- zero percentage
+- identical-reading percentage
+- distinct values
+- longest observed gap
+- median update interval
+- unavailable and unknown counts
+- possible low-resolution or rounding signal
+
+V1 does not decide that a device is safe for EnergyIQ Auto-Train. It supplies the evidence for that later decision.
+
+## Run
+
+No third-party Python package is required.
+
+Create a Home Assistant long-lived access token, then run:
+
+    export HA_URL="http://homeassistant.local:8123"
+    export HA_TOKEN="YOUR_TOKEN"
+    python3 ha_device_analyzer.py --hours 24 --out ha-device-analyzer-v1.json
+
+Or pass the values directly:
+
+    python3 ha_device_analyzer.py --url "http://homeassistant.local:8123" --token "YOUR_TOKEN" --hours 24
+
+The token is used only for read-only API calls. The analyzer never writes to Home Assistant.
+
+## Output
+
+The JSON report contains:
+
+- schema and generation time
+- analyzer scope
+- device summary
+- complete device inventory
+- complete entity inventory
 - electrical measurement candidates
-- measurement behavior and data quality
-- category/subcategory candidates
-- reasons a device may or may not be suitable for EnergyIQ direct-measurement commissioning
+- historical evidence for those candidates
 
-The analyzer must report evidence before making eligibility decisions.
+## Important HA 2026.9 behavior
 
-## Core output model
+Home Assistant 2026.9 includes child devices in the device registry. V1 recognizes parent_device_id and falls back to the parent's area when a child has no area of its own.
 
-Each device will eventually produce:
+Current devices use config_entry_id and config_subentry_id. V1 uses those current fields and does not depend on the deprecated multi-config-entry properties.
 
-1. Identity
-2. Category
-3. Entity inventory
-4. Measurement candidates
-5. Observed behavior
-6. Data-quality findings
-7. Ambiguities
-8. EnergyIQ-oriented assessment
+## Design boundary
 
-## Initial categories
+V1 is evidence collection, not EnergyIQ.
 
-See categories.yaml.
+It does not:
 
-Categories are descriptive only. Measurement capability is tracked separately so a lighting device, HVAC device, or appliance can all have the same electrical measurement classifications.
+- install or import EnergyIQ
+- modify Home Assistant
+- modify registries, entities, or helpers
+- create EnergyIQ entities
+- perform attribution calculations
+- train or commission devices
+- automatically adopt devices
 
-## Design rule
-
-Do not assume that an entity named "power" is trustworthy power.
-
-Home Assistant metadata such as device class, state class, unit, availability, and device/entity relationships are evidence. Runtime history is additional evidence. The analyzer should preserve both.
-
-## Planned phases
-
-### Phase 1 — Static inventory
-Read-only collection of device registry, entity registry, and current states.
-
-### Phase 2 — Electrical classification
-Identify power, energy, current, voltage, apparent power, reactive power, and related candidates using HA metadata first.
-
-### Phase 3 — Behavioral analysis
-Inspect historical/current state behavior: update intervals, gaps, unavailable/unknown periods, range, resolution, resets, flatlines, and other anomalies.
-
-### Phase 4 — Device/category classification
-Classify devices using manufacturer/model/domain/entity evidence. Do not make category classification depend solely on entity names.
-
-### Phase 5 — Evidence report
-Produce a human-readable report and machine-readable dataset.
-
-### Phase 6 — EnergyIQ rules
-Only after the analyzer has been exercised against real installations should we define "Eligible Auto-Train" rules.
-
-## Non-goals
-
-- No EnergyIQ attribution calculations.
-- No whole-home consumption accounting.
-- No automatic device adoption.
-- No changes to Home Assistant configuration.
-- No changes to EnergyIQ training.
+The next step after V1 is to run it against the real HA installation and inspect what it finds before defining Auto-Train eligibility rules.
