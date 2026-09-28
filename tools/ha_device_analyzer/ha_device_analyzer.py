@@ -146,7 +146,7 @@ def main():
     ap = argparse.ArgumentParser(description="Read-only Home Assistant Device Intelligence Analyzer V1")
     ap.add_argument("--url", default=os.getenv("HA_URL"))
     ap.add_argument("--token", default=os.getenv("HA_TOKEN"))
-    ap.add_argument("--hours", type=float, default=24)
+    ap.add_argument("--hours", type=float, default=0, help="Hours of history to analyze; 0 disables history (default)")
     ap.add_argument("--out", default="ha-device-analyzer-v1.json")
     a = ap.parse_args()
     if not a.url or not a.token: ap.error("Provide --url and --token, or set HA_URL and HA_TOKEN")
