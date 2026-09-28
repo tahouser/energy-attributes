@@ -39,13 +39,13 @@ Create a Home Assistant long-lived access token, then run:
 
     export HA_URL="http://homeassistant.local:8123"
     export HA_TOKEN="YOUR_TOKEN"
-    python3 ha_device_analyzer.py --hours 24 --out ha-device-analyzer-v1.json
+    python3 ha_device_analyzer.py --out ha-device-analyzer-v1.json
 
 Or pass the values directly:
 
     python3 ha_device_analyzer.py --url "http://homeassistant.local:8123" --token "YOUR_TOKEN" --hours 24
 
-The token is used only for read-only API calls. The analyzer never writes to Home Assistant.
+The first run is inventory-only by default: history analysis is disabled unless --hours is explicitly supplied. The token is used only for read-only API calls. The analyzer never writes to Home Assistant.
 
 ## Output
 
