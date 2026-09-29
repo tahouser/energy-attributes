@@ -51,7 +51,8 @@ jobs:
           assert module.is_file(), f'Registered frontend module does not exist: {module_name}'
           assert module_name == 'energyiq-panel.js', 'EnergyIQ must load the panel directly; no legacy loader layer is permitted.'
 
-          assert f'sidebar_title="EnergyIQ • v{version}"' in init
+          assert 'INTEGRATION_VERSION = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))["version"]' in init
+          assert 'sidebar_title=f"EnergyIQ • v{INTEGRATION_VERSION}"' in init
           frontend_match = re.search(r'FRONTEND_VERSION = "([0-9]+)"', init)
           assert frontend_match, 'FRONTEND_VERSION is missing.'
           assert 'URL_BASE = "/energyiq-static"' in init
