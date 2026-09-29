@@ -1,6 +1,9 @@
 """EnergyIQ Home Assistant integration."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.components import panel_custom
 from homeassistant.components.lovelace.const import LOVELACE_DATA
@@ -17,6 +20,9 @@ from .response_migration import migrate_response_log
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
 FRONTEND_VERSION = "31628"
+
+_MANIFEST_PATH = Path(__file__).with_name("manifest.json")
+INTEGRATION_VERSION = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))["version"]
 CARD_PATH = f"{URL_BASE}/energyiq-card-3.1.194.js"
 CARD_URL = f"{CARD_PATH}?v={FRONTEND_VERSION}"
 
@@ -81,7 +87,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             frontend_url_path="energyiq",
             webcomponent_name="energyiq-panel-v339",
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ • v3.1.214",
+            sidebar_title=f"EnergyIQ • v{INTEGRATION_VERSION}",
             sidebar_icon="mdi:home-lightning-bolt-outline",
             require_admin=False,
         )
