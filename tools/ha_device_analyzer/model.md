@@ -1,8 +1,10 @@
-# Analyzer evidence model
+# Analyzer evidence and assessment model
 
-The analyzer should keep these dimensions separate.
+The analyzer keeps these dimensions separate.
 
-## Device identity
+## 1. Raw evidence
+
+### Device identity
 
 - device_id
 - name
@@ -15,14 +17,12 @@ The analyzer should keep these dimensions separate.
 - parent device
 - via device
 
-Home Assistant's device registry groups entities into devices and can represent child-device and hub relationships. Do not infer physical ownership from entity names alone.
-
-## Entity identity
+### Entity identity
 
 - entity_id
 - domain
 - platform/integration
-- unique_id where available
+- unique_id
 - device_id
 - area
 - entity name
@@ -30,19 +30,18 @@ Home Assistant's device registry groups entities into devices and can represent 
 - enabled state
 - availability
 - current state
+- current attributes
 
-## Measurement semantics
-
-Record, where supplied by Home Assistant:
+### Measurement semantics
 
 - device_class
 - state_class
 - unit
 - last_reset
 - precision
-- suggested display precision where available
+- suggested display precision
 
-Electrical classes of particular interest:
+Electrical classes:
 
 - power
 - energy
@@ -53,39 +52,91 @@ Electrical classes of particular interest:
 - power factor
 - reactive energy
 
-## Behavioral evidence
+### Behavioral evidence
 
-Later phases should measure rather than assume:
+When history is requested:
 
 - state update interval
 - state change interval
 - identical-reading percentage
-- min/max observed
+- min/max
 - zero percentage
-- unavailable percentage
-- unknown percentage
-- longest data gap
+- unavailable/unknown percentage
+- longest gap
 - rounding/resolution
-- sudden discontinuities
-- cumulative-meter resets
 - historical availability
 
-## Assessment
+## 2. Whole-home discriminator
 
-Assessment is intentionally downstream from evidence.
+The discriminator does not assume that a whole-home entity is named total_power.
 
-Possible future labels:
+It evaluates:
 
-- direct_measurement_candidate
-- direct_measurement_candidate_review
-- energy_only_candidate
-- ambiguous_measurement
-- no_usable_measurement
+- measurement semantics
+- aggregate wording
+- phase/channel wording
+- device relationships
+- calculated/derived source entities
+- meter-family relationships
+- consumption versus generation/export semantics
 
-These labels are provisional until tested against real Home Assistant installations.
+### Primary targets
 
-## Important distinction
+- whole-home consumption power
+- whole-home consumption energy
 
-"Valid Home Assistant sensor" and "suitable EnergyIQ measurement" are not equivalent.
+### Secondary targets
 
-The analyzer must preserve the evidence that leads to any later EnergyIQ assessment.
+- grid import
+- grid export
+- solar/generation
+- battery/storage
+
+Generation/export information is preserved but does not replace the consumption reference.
+
+## 3. Derived aggregate measurements
+
+Home Assistant can expose calculated sensors that combine several source entities. The analyzer therefore preserves arbitrary current-state attributes and specifically recognizes source lists such as:
+
+- entity_id
+- source_entity_ids
+- source_entities
+
+A derived power entity backed by multiple phase/channel entities from the same meter family is strong evidence for an aggregate measurement.
+
+## 4. Device training discriminator
+
+Technical treatment is separate from user adoption.
+
+- system_meter: whole-home measurement infrastructure
+- auto_train: direct usable power measurement on a load device
+- quick: controllable load with no direct power measurement
+- manual: no direct measurement and no controllable entity
+- review: ambiguous/system-like case
+
+These are technical assessments, not user choices.
+
+## 5. User decision
+
+The eventual EnergyIQ commissioning workflow should retain:
+
+- analyzer assessment
+- supporting evidence
+- user Keep/Exclude decision
+
+The analyzer must never silently delete a device from the inventory because it lacks a power entity.
+
+## 6. Integration boundary
+
+The discriminator is currently pure Python with no Home Assistant or EnergyIQ imports.
+
+That gives EnergyIQ a clean future integration point:
+
+    HA discovery
+        -> normalized evidence
+        -> discriminator
+        -> candidate/measurement/training assessment
+        -> user Keep/Exclude
+        -> EnergyIQ configuration
+
+The discriminator must remain deterministic and explainable. Changes should be validated against real analyzer reports before being incorporated into EnergyIQ.
