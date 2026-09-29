@@ -62,22 +62,10 @@
       throw new Error("Home Assistant WebSocket connection is not ready.");
     }
 
-    async loadBrandUrl() {
-      try {
-        const result = await this.ws({ type: "brands/access_token" });
-        if (result?.token) {
-          this.brandUrl = `/api/brands/integration/energyiq/icon.png?placeholder=no&token=${encodeURIComponent(result.token)}&v=${VERSION}`;
-        }
-      } catch (error) {
-        console.warn("EnergyIQ brand image token unavailable; using local fallback.", error);
-      }
-    }
-
     async load() {
       if (this.loading) return;
       this.loading = true;
       try {
-        await this.loadBrandUrl();
         const result = await this.ws({ type: "energy_attribution/list_entries" });
         if (!result.entries?.length) throw new Error("EnergyIQ is not configured.");
         this.entryId = result.entries[0].entry_id;
