@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  # Release workflow is intentionally path-triggered for manifest updates.
   contents: write
 
 jobs:
