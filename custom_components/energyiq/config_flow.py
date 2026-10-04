@@ -16,7 +16,14 @@ from homeassistant.core import callback
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import selector
 from homeassistant.helpers.selector import BooleanSelector
-from homeassistant.helpers.selector import SelectOptionDict, SelectSelector, SelectSelectorConfig, SelectSelectorMode
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN, TRAINING_SESSION
 from .persistence import build_entry_data, get_store, has_saved_data, migrate_snapshot
@@ -26,6 +33,16 @@ _LOGGER = logging.getLogger(__name__)
 _POWER_CLASSES = {"power"}
 _ENERGY_CLASSES = {"energy"}
 _POWER_UNITS = {"W", "kW", "MW", "w", "kw", "mw"}
+
+# Consumption graph thresholds are per 2-hour segment. They are intentionally
+# user-configurable rather than inferred from reading frequency or history.
+_CONSUMPTION_LIMIT_DEFAULTS = {
+    "peak_expected_kwh": 1.5,
+    "peak_high_kwh": 3.0,
+    "off_peak_expected_kwh": 1.5,
+    "off_peak_high_kwh": 3.0,
+}
+_CONSUMPTION_LIMIT_MAX_KWH = 50.0
 _ENERGY_UNITS = {"Wh", "kWh", "MWh", "GWh", "wh", "kwh", "mwh", "gwh"}
 
 _DERIVED_ENERGY_WORDS = {
@@ -421,36 +438,54 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             c["device_id"] for c in candidates
             if current.get(c["device_id"], "monitor") == "monitor"
         ]
+        existing_limits = dict(_CONSUMPTION_LIMIT_DEFAULTS)
+        existing_limits.update(self.config_entry.options.get("consumption_limits", {}))
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            selected = set(user_input.get("monitored_devices", []))
-            classifications = {
-                c["device_id"]: ("monitor" if c["device_id"] in selected else "ignore")
-                for c in candidates
-            }
-            monitored = _monitored_entities(candidates, selected)
-            options = dict(self.config_entry.options)
-            options.update({
-                CONF_MONITORED_ENTITIES: monitored,
-                "device_classifications": classifications,
-                "candidate_devices": candidates_map,
-                "commissioned_devices": dict(options.get(
-                    "commissioned_devices",
-                    self.config_entry.data.get("commissioned_devices", {}),
-                )),
-                "training_state": dict(options.get(
-                    "training_state",
-                    self.config_entry.data.get("training_state", {}),
-                )),
-                "training_samples": dict(options.get(
-                    "training_samples",
-                    self.config_entry.data.get("training_samples", {}),
-                )),
-            })
-            coordinator = self.config_entry.runtime_data
-            if coordinator is not None and hasattr(coordinator, "async_persist_owned_state"):
-                await coordinator.async_persist_owned_state(options=options)
-            return self.async_create_entry(data=options)
+            peak_expected = float(user_input["peak_expected_kwh"])
+            peak_high = float(user_input["peak_high_kwh"])
+            off_expected = float(user_input["off_peak_expected_kwh"])
+            off_high = float(user_input["off_peak_high_kwh"])
+            if peak_high < peak_expected:
+                errors["peak_high_kwh"] = "high_must_be_at_least_expected"
+            if off_high < off_expected:
+                errors["off_peak_high_kwh"] = "high_must_be_at_least_expected"
+            if not errors:
+                selected = set(user_input.get("monitored_devices", []))
+                classifications = {
+                    c["device_id"]: ("monitor" if c["device_id"] in selected else "ignore")
+                    for c in candidates
+                }
+                monitored = _monitored_entities(candidates, selected)
+                options = dict(self.config_entry.options)
+                options.update({
+                    CONF_MONITORED_ENTITIES: monitored,
+                    "device_classifications": classifications,
+                    "candidate_devices": candidates_map,
+                    "consumption_limits": {
+                        "peak_expected_kwh": peak_expected,
+                        "peak_high_kwh": peak_high,
+                        "off_peak_expected_kwh": off_expected,
+                        "off_peak_high_kwh": off_high,
+                    },
+                    "commissioned_devices": dict(options.get(
+                        "commissioned_devices",
+                        self.config_entry.data.get("commissioned_devices", {}),
+                    )),
+                    "training_state": dict(options.get(
+                        "training_state",
+                        self.config_entry.data.get("training_state", {}),
+                    )),
+                    "training_samples": dict(options.get(
+                        "training_samples",
+                        self.config_entry.data.get("training_samples", {}),
+                    )),
+                })
+                coordinator = self.config_entry.runtime_data
+                if coordinator is not None and hasattr(coordinator, "async_persist_owned_state"):
+                    await coordinator.async_persist_owned_state(options=options)
+                return self.async_create_entry(data=options)
 
         schema = vol.Schema({
             vol.Required("monitored_devices", default=selected_default): SelectSelector(
@@ -460,10 +495,23 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                     mode=SelectSelectorMode.LIST,
                 )
             ),
+            vol.Required("peak_expected_kwh", default=float(existing_limits["peak_expected_kwh"])): NumberSelector(
+                NumberSelectorConfig(min=0, max=_CONSUMPTION_LIMIT_MAX_KWH, step=0.1, mode="box")
+            ),
+            vol.Required("peak_high_kwh", default=float(existing_limits["peak_high_kwh"])): NumberSelector(
+                NumberSelectorConfig(min=0, max=_CONSUMPTION_LIMIT_MAX_KWH, step=0.1, mode="box")
+            ),
+            vol.Required("off_peak_expected_kwh", default=float(existing_limits["off_peak_expected_kwh"])): NumberSelector(
+                NumberSelectorConfig(min=0, max=_CONSUMPTION_LIMIT_MAX_KWH, step=0.1, mode="box")
+            ),
+            vol.Required("off_peak_high_kwh", default=float(existing_limits["off_peak_high_kwh"])): NumberSelector(
+                NumberSelectorConfig(min=0, max=_CONSUMPTION_LIMIT_MAX_KWH, step=0.1, mode="box")
+            ),
         })
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
+            errors=errors,
             description_placeholders={"count": str(len(candidates))},
         )
 
