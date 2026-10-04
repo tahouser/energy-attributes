@@ -1,0 +1,28 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up EnergyIQ",
+        "description": "Select the whole-home power source and, if desired, restore existing EnergyIQ data."
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "EnergyIQ settings",
+        "description": "Set the consumption limits used to color the Consumption graph. Each limit is for one 2-hour segment. Green is at or below Expected, yellow is above Expected through High, and red is above High. These settings do not change EnergyIQ's measured consumption or cost calculations.",
+        "data": {
+          "monitored_devices": "Monitored devices",
+          "peak_expected_kwh": "Peak expected consumption per 2 hours",
+          "peak_high_kwh": "Peak high consumption per 2 hours",
+          "off_peak_expected_kwh": "Off-Peak expected consumption per 2 hours",
+          "off_peak_high_kwh": "Off-Peak high consumption per 2 hours"
+        }
+      }
+    },
+    "error": {
+      "high_must_be_at_least_expected": "High limit must be at least the Expected limit."
+    }
+  }
+}
