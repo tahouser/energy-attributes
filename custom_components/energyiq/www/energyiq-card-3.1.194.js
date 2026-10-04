@@ -156,7 +156,16 @@ if (!customElements.get(TAG)) {
         }
         if(e.t>endMs)break;
         if(!started){
-          if(previous==null)total=Math.max(0,e.v);
+          // A cumulative meter's first in-period state is NOT period
+          // consumption. Only calculate a delta when a pre-period baseline
+          // exists. If no baseline exists, return null so the caller can use
+          // HA statistics instead of inventing a large value.
+          if(previous==null){
+            previous=e.v;
+            continue;
+          }
+          if(e.v>=previous)total+=e.v-previous;
+          else total+=Math.max(0,e.v);
           started=true;
           previous=e.v;
           continue;
@@ -474,36 +483,47 @@ if (!customElements.get(TAG)) {
       if(!this._hass)return;
       try{
         const period=this._costPeriod,now=new Date(),oldest=this._periodStart(period,-30,now);
+        const currentStart=this._periodStart(period,0,now);
         const ids=["sensor.dte_house_energy_peak","sensor.dte_house_energy_off_peak"];
-        const [stats,history]=await Promise.all([
-          this._ws({
-            type:"recorder/statistics_during_period",
-            start_time:oldest.toISOString(),
-            end_time:now.toISOString(),
-            statistic_ids:ids,
-            period:"hour",
-            types:["change"]
-          }).catch(()=>({})),
-          this._ws({
-            type:"history/history_during_period",
-            start_time:oldest.toISOString(),
-            end_time:now.toISOString(),
-            entity_ids:ids,
-            include_start_time_state:true,
-            significant_changes_only:false,
-            minimal_response:true,
-            no_attributes:true
-          }).catch(()=>({}))
-        ]);
+
+        // Long-term statistics are the normal path. They are compact and avoid
+        // pulling 30 days of raw state history every time the card reconnects.
+        const stats=await this._ws({
+          type:"recorder/statistics_during_period",
+          start_time:oldest.toISOString(),
+          end_time:now.toISOString(),
+          statistic_ids:ids,
+          period:"hour",
+          types:["change"]
+        }).catch(()=>({}));
+
         const build=async(id)=>{
           if(!id)return {current:0,average:null,max:0,ratio:null,color:"green",samples:[]};
           const rows=stats?.[id]||[];
-          const states=history?.[id]||[];
-          let current=await this._statChangeForPeriod(id,this._periodStart(period,0,now),now);
-          if(current==null)current=this._periodCost(states,this._periodStart(period,0,now),now,now);
+          let current=await this._statChangeForPeriod(id,currentStart,now);
+
+          // Only use raw history as a fallback when HA statistics cannot provide
+          // the current period. This is deliberately lazy because the raw-history
+          // query is the expensive part of the old implementation.
+          let states=null;
+          if(current==null){
+            const history=await this._ws({
+              type:"history/history_during_period",
+              start_time:oldest.toISOString(),
+              end_time:now.toISOString(),
+              entity_ids:[id],
+              include_start_time_state:true,
+              significant_changes_only:false,
+              minimal_response:true,
+              no_attributes:true
+            }).catch(()=>({}));
+            states=history?.[id]||[];
+            current=this._periodCost(states,currentStart,now,now);
+          }
           if(current==null)current=0;
+
           let samples=this._historicalSamples(rows,period,now,30);
-          if(!samples.length){
+          if(!samples.length&&states){
             for(let i=1;i<=30;i++){
               const s=this._periodStart(period,-i,now),e=this._periodEnd(period,s);
               const v=this._periodCost(states,s,e,e);
@@ -516,7 +536,8 @@ if (!customElements.get(TAG)) {
           const color=ratio==null||current<=0.000001?"green":ratio>1.10?"red":ratio>=0.90?"yellow":"green";
           return {current,average,max,ratio,color,samples};
         };
-        const peak=await build(ids[0]),off=await build(ids[1]);
+
+        const [peak,off]=await Promise.all([build(ids[0]),build(ids[1])]);
         this._dashboardHistory={peak,off,total:(peak.current||0)+(off.current||0)};
         this._dashboardHistoryAt=Date.now();
       }catch(e){
