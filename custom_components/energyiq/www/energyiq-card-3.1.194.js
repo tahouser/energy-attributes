@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.224 */
+/* EnergyIQ dashboard card — 3.1.225 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -513,24 +513,81 @@ if (!customElements.get(TAG)) {
       const m=Math.max(0,Math.min(59,Number(raw[1])||0));
       return h*60+m;
     }
-    _consumptionSegmentColor(value,thresholds,visibleFraction){
+    _consumptionSegmentColor(value,thresholds,visibleFraction=1){
       if(!Number.isFinite(value)||value<=0.000001)return "green";
+      // Complete hourly segments are compared with the full hourly setpoint.
+      // Only the still-forming current hour scales its boundary by elapsed time.
       const fraction=Math.max(0.05,Math.min(1,visibleFraction||1));
-      const yellow=Math.max(0,thresholds.yellow*fraction);
-      const red=Math.max(yellow,thresholds.red*fraction);
+      const partial=fraction<0.999;
+      const yellow=Math.max(0,thresholds.yellow*(partial?fraction:1));
+      const red=Math.max(yellow,thresholds.red*(partial?fraction:1));
       return value<=yellow?"green":value<=red?"yellow":"red";
     }
+    _consumptionStatisticsRows(result,id){
+      const rows=Array.isArray(result?.[id])?result[id]:[];
+      return rows.map(row=>{
+        const start=Number(row?.start);
+        const end=Number(row?.end);
+        const change=Number(row?.change);
+        const sum=Number(row?.sum);
+        return {
+          start:Number.isFinite(start)?start:null,
+          end:Number.isFinite(end)?end:null,
+          change:Number.isFinite(change)?change:null,
+          sum:Number.isFinite(sum)?sum:null
+        };
+      }).filter(row=>row.start!=null&&row.end!=null&&(row.change!=null||row.sum!=null))
+        .sort((a,b)=>a.start-b.start);
+    }
+    _consumptionStatisticsDelta(rows,startMs,endMs){
+      let total=0,seen=false,previousSum=null;
+      for(const row of rows||[]){
+        if(row.end<=startMs)continue;
+        if(row.start>=endMs)break;
+        if(row.change!=null){
+          total+=Math.max(0,row.change);
+          seen=true;
+          continue;
+        }
+        if(row.sum!=null){
+          if(previousSum!=null)total+=Math.max(0,row.sum-previousSum);
+          previousSum=row.sum;
+          seen=true;
+        }
+      }
+      return seen?Math.max(0,total):null;
+    }
+    _consumptionStatisticsSegments(rows,start,end,now,profile){
+      const step=60*60*1000,segments=[];
+      const source=rows||[];
+      for(let t=start.getTime();t<end.getTime();t+=step){
+        const a=new Date(t),b=new Date(Math.min(t+step,end.getTime()));
+        const visibleEnd=new Date(Math.min(b.getTime(),now.getTime()));
+        const visibleMs=Math.max(0,visibleEnd.getTime()-a.getTime());
+        let value=null;
+        if(visibleMs>0){
+          value=this._consumptionStatisticsDelta(source,a.getTime(),visibleEnd.getTime());
+        }
+        const thresholds=this._consumptionThresholds(profile,a);
+        const visible=visibleMs>0&&value!=null;
+        segments.push({
+          start:a,end:b,value:visible?value:null,visible,
+          visibleFraction:Math.max(0,Math.min(1,visibleMs/Math.max(1,b.getTime()-a.getTime()))),
+          thresholds,
+          color:visible?this._consumptionSegmentColor(value,thresholds,visibleMs/Math.max(1,b.getTime()-a.getTime())):"future"
+        });
+      }
+      return segments;
+    }
     _consumptionDelta(states,start,end,liveValue=null){
-      // Consumption sensors are cumulative energy meters. Never use the
-      // Cost-page period calculation here. For a selected period, the first
-      // valid reading is the baseline when the meter did not exist at the
-      // period start. The live state is appended so the current partial
-      // interval is not lost simply because recorder history lags behind it.
+      // Raw recorder history is a secondary fallback only. It must establish
+      // a real period delta; a single cumulative state is never a consumption
+      // value and is therefore never returned as the selected period total.
       const entries=this._historyEntries(states);
-      const endMs=end.getTime();
-      let previous=null,total=0,seen=false,lastTime=0;
+      const startMs=start.getTime(),endMs=end.getTime();
+      let previous=null,total=0,changes=0,lastTime=0;
       for(const e of entries){
-        if(e.t<start.getTime()){
+        if(e.t<startMs){
           previous=e.v;
           continue;
         }
@@ -538,26 +595,18 @@ if (!customElements.get(TAG)) {
         if(previous==null){
           previous=e.v;
           lastTime=e.t;
-          seen=true;
           continue;
         }
-        if(e.v>=previous)total+=e.v-previous;
-        else total+=Math.max(0,e.v);
+        total+=e.v>=previous?e.v-previous:Math.max(0,e.v);
         previous=e.v;
         lastTime=e.t;
-        seen=true;
+        changes++;
       }
-      if(Number.isFinite(liveValue) && liveValue>=0 && endMs>=Date.now()-5*60*1000){
-        if(previous==null){
-          previous=liveValue;
-          seen=true;
-        }else if(lastTime<endMs){
-          if(liveValue>=previous)total+=liveValue-previous;
-          else total+=Math.max(0,liveValue);
-          seen=true;
-        }
+      if(Number.isFinite(liveValue)&&liveValue>=0&&endMs>=Date.now()-5*60*1000&&previous!=null&&lastTime<endMs){
+        total+=liveValue>=previous?liveValue-previous:Math.max(0,liveValue);
+        changes++;
       }
-      return seen?Math.max(0,total):null;
+      return changes>0?Math.max(0,total):null;
     }
     _consumptionSegments(states,start,end,now,profile,liveValue=null){
       const step=60*60*1000,segments=[];
@@ -565,14 +614,14 @@ if (!customElements.get(TAG)) {
         const a=new Date(t),b=new Date(Math.min(t+step,end.getTime()));
         const visibleEnd=new Date(Math.min(b.getTime(),now.getTime()));
         const visibleMs=Math.max(0,visibleEnd.getTime()-a.getTime());
-        let value=0;
+        let value=null;
         if(visibleMs>0){
           const liveForSegment=visibleEnd.getTime()>=now.getTime()-1000?liveValue:null;
           const v=this._consumptionDelta(states,a,visibleEnd,liveForSegment);
           if(v!=null&&Number.isFinite(v))value=Math.max(0,v);
         }
         const thresholds=this._consumptionThresholds(profile,a);
-        const visible=visibleMs>0;
+        const visible=visibleMs>0&&value!=null;
         segments.push({
           start:a,end:b,value:visible?value:null,visible,
           visibleFraction:Math.max(0,Math.min(1,visibleMs/Math.max(1,b.getTime()-a.getTime()))),
@@ -587,8 +636,25 @@ if (!customElements.get(TAG)) {
       try{
         const period=this._costPeriod,now=new Date();
         const start=this._periodStart(period,0,now),end=this._periodEnd(period,start);
-        const historyStart=new Date(start.getTime()-60*60*1000);
         const ids=["sensor.dte_house_energy_peak","sensor.dte_house_energy_off_peak"];
+
+        // Prefer HA recorder statistics for cumulative energy. HA maintains
+        // statistics for TOTAL/TOTAL_INCREASING energy sensors, so this gives
+        // us actual accumulated growth without ever displaying the meter's
+        // absolute state as selected-period consumption.
+        const statistics=await this._ws({
+          type:"recorder/statistics_during_period",
+          start_time:start.toISOString(),
+          end_time:now.toISOString(),
+          statistic_ids:ids,
+          period:"hour",
+          types:["change","sum"]
+        }).catch(()=>({}));
+
+        // Raw history is retained as a fallback for installations where the
+        // energy sensors have no usable statistics yet. Fetch only the selected
+        // period plus a small baseline window; never use a lone cumulative state.
+        const historyStart=new Date(start.getTime()-60*60*1000);
         const history=await this._ws({
           type:"history/history_during_period",
           start_time:historyStart.toISOString(),
@@ -601,12 +667,17 @@ if (!customElements.get(TAG)) {
         }).catch(()=>({}));
 
         const build=async(id,profile)=>{
+          const rows=this._consumptionStatisticsRows(statistics,id);
+          const statCurrent=this._consumptionStatisticsDelta(rows,start.getTime(),now.getTime());
+          const statSegments=this._consumptionStatisticsSegments(rows,start,end,now,profile);
           const states=history?.[id]||[];
           const live=Number(this._hass?.states?.[id]?.state);
           const liveValue=Number.isFinite(live)?live:null;
-          const current=states.length?Math.max(0,this._consumptionDelta(states,start,now,liveValue)||0):0;
-          const segments=this._consumptionSegments(states,start,end,now,profile,liveValue);
-          return {current,segments};
+          const rawCurrent=this._consumptionDelta(states,start,now,liveValue);
+          const current=statCurrent!=null?statCurrent:rawCurrent;
+          const rawSegments=this._consumptionSegments(states,start,end,now,profile,liveValue);
+          const segments=statCurrent!=null?statSegments:rawSegments;
+          return {current,segments,available:current!=null};
         };
         const [peak,off]=await Promise.all([
           build(ids[0],"peak"),
@@ -621,7 +692,6 @@ if (!customElements.get(TAG)) {
       }
       this._render();
     }
-
 
     _periodProgress(period,now=new Date()){
       const start=this._periodStart(period,0,now);
@@ -709,13 +779,16 @@ if (!customElements.get(TAG)) {
       return '<div class="myst"><div class="myst-headline"><div class="big">'+Math.round(mystery)+' <span>W</span></div><div class="myst-now">Unexplained right now</div></div><div class="myst-bar-row"><span>Whole-Home</span><div class="myst-bar-track"><div class="myst-bar-fill" style="width:'+mysteryWidth.toFixed(2)+'%"></div></div><strong>'+Math.round(mystery)+' W</strong></div></div>';
     }
     _consumptionChart(label,item){
-      // Compact time-series area chart. Each hourly segment is one solid
-      // threshold color; the line itself remains continuous across segments.
       const bins=item?.segments||[];
-      const W=640,H=42,base=38,top=3;
-      if(!bins.length)return '<div class="cost-bar-row consumption-bar-row"><div class="cost-bar-head"><span>'+label+'</span><strong>'+Number(item?.current||0).toFixed(1)+' kWh</strong></div></div>';
-      const endTime=bins[bins.length-1].end.getTime();
+      const current=Number(item?.current);
+      const valueLabel=Number.isFinite(current)?current.toFixed(1)+" kWh":"—";
+      const W=640,H=96,base=86,top=8;
+      const head='<div class="cost-bar-head"><span>'+label+'</span><strong>'+valueLabel+'</strong></div>';
+      if(!bins.length||!bins.some(b=>b.visible&&Number.isFinite(Number(b.value)))){
+        return '<div class="cost-bar-row consumption-bar-row">'+head+'<div class="consumption-line-track consumption-unavailable">No meaningful period data</div></div>';
+      }
       const startTime=bins[0].start.getTime();
+      const endTime=bins[bins.length-1].end.getTime();
       const span=Math.max(1,endTime-startTime);
       const visible=bins.filter(b=>b.visible&&Number.isFinite(Number(b.value)));
       const maxValue=Math.max(0,...visible.map(b=>Number(b.value)||0));
@@ -723,21 +796,23 @@ if (!customElements.get(TAG)) {
       const yMax=Math.max(0.25,maxValue,maxThreshold)*1.12;
       const xAt=time=>Math.max(0,Math.min(W,(time-startTime)/span*W));
       const yAt=value=>base-(Math.max(0,Number(value)||0)/yMax)*(base-top);
-      let areas="",points=[],previousValue=0,havePoint=false;
+      let areas="",points=[],previous=null;
       for(const bin of bins){
-        if(!bin.visible)break;
+        if(!bin.visible||!Number.isFinite(Number(bin.value)))break;
         const x0=xAt(bin.start.getTime());
-        const visibleEnd=bin.end.getTime()-(bin.end.getTime()-bin.start.getTime())*(1-(bin.visibleFraction||0));
-        const x1=xAt(visibleEnd);
-        const y0=yAt(previousValue),y1=yAt(bin.value||0);
+        const end=bin.end.getTime();
+        const fraction=Math.max(0,Math.min(1,bin.visibleFraction||1));
+        const x1=xAt(bin.start.getTime()+(end-bin.start.getTime())*fraction);
+        const y1=yAt(bin.value);
+        const y0=yAt(previous==null?0:previous);
         const cls=bin.color==="red"?"red":bin.color==="yellow"?"yellow":"green";
         areas+='<polygon points="'+x0.toFixed(2)+','+base+' '+x0.toFixed(2)+','+y0.toFixed(2)+' '+x1.toFixed(2)+','+y1.toFixed(2)+' '+x1.toFixed(2)+','+base+'" class="cons-area '+cls+'"/>';
-        if(!havePoint){points.push(x0.toFixed(2)+","+y0.toFixed(2));havePoint=true;}
-        points.push(x1.toFixed(2)+","+y1.toFixed(2));
-        previousValue=Number(bin.value)||0;
+        if(!points.length)points.push(x0.toFixed(2)+','+y0.toFixed(2));
+        points.push(x1.toFixed(2)+','+y1.toFixed(2));
+        previous=Number(bin.value)||0;
       }
       const path=points.length>1?'<polyline points="'+points.join(" ")+'" class="cons-line"/>':"";
-      return '<div class="cost-bar-row consumption-bar-row"><div class="cost-bar-head"><span>'+label+'</span><strong>'+Number(item?.current||0).toFixed(1)+' kWh</strong></div><div class="cost-bar-track consumption-line-track" aria-label="'+label+' consumption history"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+areas+path+'</svg></div></div>';
+      return '<div class="cost-bar-row consumption-bar-row">'+head+'<div class="consumption-line-track" aria-label="'+label+' hourly consumption history"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+areas+path+'</svg></div></div>';
     }
     _consumption(){
       const h=this._dashboardHistory;
