@@ -320,6 +320,7 @@ async def ws_workspace(hass, connection, msg):
         "meters": _meter_summary(hass, coordinator),
         "devices": rows,
         "last_training_device_id": getattr(coordinator, "last_training_device_id", None),
+        "consumption_thresholds": coordinator.entry.options.get("consumption_thresholds", {}),
     })
 
 
