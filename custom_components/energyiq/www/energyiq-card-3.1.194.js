@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.220 */
+/* EnergyIQ dashboard card — 3.1.221 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -520,6 +520,36 @@ if (!customElements.get(TAG)) {
       const red=Math.max(yellow,thresholds.red*fraction);
       return value<=yellow?"green":value<=red?"yellow":"red";
     }
+    _consumptionDelta(states,start,end){
+      // Consumption sensors are cumulative energy meters. Never use the
+      // Cost-page period calculation here: cost sensors and energy meters
+      // have different semantics, and the cost implementation intentionally
+      // has its own baseline rules.
+      const entries=this._historyEntries(states);
+      if(!entries.length)return null;
+      const startMs=start.getTime(),endMs=end.getTime();
+      let previous=null,total=0,seen=false;
+      for(const e of entries){
+        if(e.t<startMs){
+          previous=e.v;
+          continue;
+        }
+        if(e.t>endMs)break;
+        if(previous==null){
+          // The first recorder value in a period is the baseline, not
+          // consumption. This is essential when the meter began recording
+          // part-way through a calendar month.
+          previous=e.v;
+          seen=true;
+          continue;
+        }
+        if(e.v>=previous)total+=e.v-previous;
+        else total+=Math.max(0,e.v); // cumulative meter reset
+        previous=e.v;
+        seen=true;
+      }
+      return seen?Math.max(0,total):null;
+    }
     _consumptionSegments(states,start,end,now,profile){
       const step=60*60*1000,segments=[];
       for(let t=start.getTime();t<end.getTime();t+=step){
@@ -528,7 +558,7 @@ if (!customElements.get(TAG)) {
         const visibleMs=Math.max(0,visibleEnd.getTime()-a.getTime());
         let value=0;
         if(visibleMs>0){
-          const v=this._periodCost(states,a,b,visibleEnd);
+          const v=this._consumptionDelta(states,a,visibleEnd);
           if(v!=null&&Number.isFinite(v))value=Math.max(0,v);
         }
         const thresholds=this._consumptionThresholds(profile,a);
@@ -562,7 +592,7 @@ if (!customElements.get(TAG)) {
 
         const build=async(id,profile)=>{
           const states=history?.[id]||[];
-          const current=states.length?Math.max(0,this._periodCost(states,start,now,now)||0):0;
+          const current=states.length?Math.max(0,this._consumptionDelta(states,start,now)||0):0;
           const segments=this._consumptionSegments(states,start,end,now,profile);
           return {current,segments};
         };
@@ -590,7 +620,7 @@ if (!customElements.get(TAG)) {
     }
 
     _state(id){return this._num(this._hass&&this._hass.states&&this._hass.states[id]&&this._hass.states[id].state);}
-    _brandIcon(){return '<img class="energyiq-brand-icon" src="/energyiq-brand/icon@2x.png?v=31800" alt="EnergyIQ">';}
+    _brandIcon(){return '<img class="energyiq-brand-icon" src="/energyiq-brand/icon@2x.png?v=31900" alt="EnergyIQ">';}
     _next(e){if(!e.target.closest||!e.target.closest("[data-next]"))return;e.stopPropagation();this._view=(this._view+1)%3;if(this._view===2&&Date.now()-this._costHistoryAt>30000)this._loadCostHistory();if(this._view===0&&Date.now()-this._dashboardHistoryAt>30000)this._loadConsumptionHistory();this._render();}
     _handleClick(e){this._next(e);const costNav=e.target.closest&&e.target.closest("[data-cost-period]");if(costNav&&(this._view===2||this._view===0)){const periods=["day","week","month"],index=periods.indexOf(this._costPeriod),dir=costNav.getAttribute("data-cost-period")==="next"?1:-1,nextIndex=Math.max(0,Math.min(periods.length-1,index+dir));if(nextIndex!==index){this._costPeriod=periods[nextIndex];this._costHistory=null;this._costHistoryAt=0;this._dashboardHistoryAt=0;this._render();if(this._view===2)this._loadCostHistory();else this._loadConsumptionHistory();}return;}const active=e.target.closest&&e.target.closest("[data-active-loads]");if(active){e.stopPropagation();this._showActiveLoads();return;}const open=e.target.closest&&e.target.closest("[data-open-energyiq]");if(open){e.stopPropagation();this._openEnergyIQ();return;}const close=e.target.closest&&e.target.closest("[data-close-active]");if(close){e.stopPropagation();this._closeActiveLoads();return;}}
     _bindCostSwipe(){
