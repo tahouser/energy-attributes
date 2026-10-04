@@ -16,7 +16,15 @@ from homeassistant.core import callback
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import selector
 from homeassistant.helpers.selector import BooleanSelector
-from homeassistant.helpers.selector import SelectOptionDict, SelectSelector, SelectSelectorConfig, SelectSelectorMode
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN, TRAINING_SESSION
 from .persistence import build_entry_data, get_store, has_saved_data, migrate_snapshot
@@ -32,6 +40,25 @@ _DERIVED_ENERGY_WORDS = {
     "difference", "saved", "cost", "price", "tariff", "rate", "forecast",
     "daily", "weekly", "monthly", "yearly", "yesterday", "today", "last",
 }
+
+# Four time-of-day points define the yellow/red consumption thresholds.
+# Peak and Off-Peak have independent profiles. Thresholds are kWh for the
+# visible one-hour segment; partial current segments are scaled by elapsed time.
+_CONSUMPTION_THRESHOLD_DEFAULTS = {
+    "peak": [
+        {"time": "00:00:00", "yellow": 1.0, "red": 2.0},
+        {"time": "06:00:00", "yellow": 1.0, "red": 2.0},
+        {"time": "12:00:00", "yellow": 1.5, "red": 3.0},
+        {"time": "18:00:00", "yellow": 1.0, "red": 2.0},
+    ],
+    "off_peak": [
+        {"time": "00:00:00", "yellow": 1.0, "red": 2.0},
+        {"time": "06:00:00", "yellow": 1.5, "red": 3.0},
+        {"time": "12:00:00", "yellow": 1.5, "red": 3.0},
+        {"time": "18:00:00", "yellow": 1.0, "red": 2.0},
+    ],
+}
+_CONSUMPTION_THRESHOLD_MAX_KWH = 50.0
 
 
 def _state_class(hass, entity_id: str) -> str | None:
@@ -398,7 +425,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
-    """Persistent commissioning workspace."""
+    """Persistent commissioning workspace and consumption graph settings."""
+
+    def __init__(self) -> None:
+        self._pending_options: dict[str, Any] | None = None
+        self._candidates_map: dict[str, dict[str, Any]] = {}
+        self._candidates: list[dict[str, Any]] = []
 
     async def async_step_init(self, user_input=None):
         discovered = _build_candidates(
@@ -413,6 +445,8 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         if not candidates:
             return self.async_abort(reason="no_candidates")
 
+        self._candidates_map = candidates_map
+        self._candidates = candidates
         current = dict(self.config_entry.options.get(
             "device_classifications",
             self.config_entry.data.get("device_classifications", {}),
@@ -447,10 +481,8 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                     self.config_entry.data.get("training_samples", {}),
                 )),
             })
-            coordinator = self.config_entry.runtime_data
-            if coordinator is not None and hasattr(coordinator, "async_persist_owned_state"):
-                await coordinator.async_persist_owned_state(options=options)
-            return self.async_create_entry(data=options)
+            self._pending_options = options
+            return await self.async_step_consumption_thresholds()
 
         schema = vol.Schema({
             vol.Required("monitored_devices", default=selected_default): SelectSelector(
@@ -465,6 +497,82 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             step_id="init",
             data_schema=schema,
             description_placeholders={"count": str(len(candidates))},
+        )
+
+    async def async_step_consumption_thresholds(self, user_input=None):
+        existing = dict(_CONSUMPTION_THRESHOLD_DEFAULTS)
+        saved = self.config_entry.options.get("consumption_thresholds", {})
+        for profile in ("peak", "off_peak"):
+            if isinstance(saved.get(profile), list) and len(saved[profile]) == 4:
+                existing[profile] = [
+                    {
+                        "time": str(point.get("time", default["time"])),
+                        "yellow": float(point.get("yellow", default["yellow"])),
+                        "red": float(point.get("red", default["red"])),
+                    }
+                    for point, default in zip(saved[profile], _CONSUMPTION_THRESHOLD_DEFAULTS[profile])
+                ]
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            profiles: dict[str, list[dict[str, Any]]] = {"peak": [], "off_peak": []}
+            for profile in ("peak", "off_peak"):
+                for index in range(4):
+                    prefix = f"{profile}_{index + 1}"
+                    time_value = str(user_input[f"{prefix}_time"])
+                    yellow = float(user_input[f"{prefix}_yellow"])
+                    red = float(user_input[f"{prefix}_red"])
+                    profiles[profile].append({
+                        "time": time_value,
+                        "yellow": yellow,
+                        "red": red,
+                    })
+
+                previous_minutes = -1
+                for index, point in enumerate(profiles[profile]):
+                    parts = point["time"].split(":")
+                    minutes = int(parts[0]) * 60 + int(parts[1])
+                    if minutes <= previous_minutes:
+                        errors[f"{profile}_{index + 1}_time"] = "times_must_increase"
+                        break
+                    if point["red"] < point["yellow"]:
+                        errors[f"{profile}_{index + 1}_red"] = "red_must_be_at_least_yellow"
+                    previous_minutes = minutes
+
+            if not errors:
+                options = dict(self._pending_options or self.config_entry.options)
+                options["consumption_thresholds"] = profiles
+                coordinator = self.config_entry.runtime_data
+                if coordinator is not None and hasattr(coordinator, "async_persist_owned_state"):
+                    await coordinator.async_persist_owned_state(options=options)
+                return self.async_create_entry(data=options)
+
+        schema_fields: dict[Any, Any] = {}
+        for profile in ("peak", "off_peak"):
+            for index, point in enumerate(existing[profile], start=1):
+                prefix = f"{profile}_{index}"
+                schema_fields[vol.Required(f"{prefix}_time", default=point["time"])] = selector.TimeSelector()
+                schema_fields[vol.Required(f"{prefix}_yellow", default=float(point["yellow"]))] = NumberSelector(
+                    NumberSelectorConfig(
+                        min=0,
+                        max=_CONSUMPTION_THRESHOLD_MAX_KWH,
+                        step=0.1,
+                        mode=NumberSelectorMode.BOX,
+                    )
+                )
+                schema_fields[vol.Required(f"{prefix}_red", default=float(point["red"]))] = NumberSelector(
+                    NumberSelectorConfig(
+                        min=0,
+                        max=_CONSUMPTION_THRESHOLD_MAX_KWH,
+                        step=0.1,
+                        mode=NumberSelectorMode.BOX,
+                    )
+                )
+
+        return self.async_show_form(
+            step_id="consumption_thresholds",
+            data_schema=vol.Schema(schema_fields),
+            errors=errors,
         )
 
 
