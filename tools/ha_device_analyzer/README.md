@@ -1,73 +1,61 @@
-# HA Device Intelligence Analyzer — V1
+# HA Device Intelligence Analyzer — V2
 
-Standalone, read-only tooling for inspecting a Home Assistant installation.
+Standalone, read-only tooling for inspecting a Home Assistant installation and producing a deterministic evidence-based assessment.
 
-## V1 scope
+## V2 scope
 
-V1 is independent of EnergyIQ. It can be executed from a Home Assistant environment or another machine that can reach the HA API.
-
-It collects:
+The scanner collects:
 
 - Device Registry
 - Entity Registry
 - Area Registry
-- Current entity states
+- Current entity states and attributes
 - Electrical measurement candidates
-- Historical behavior for electrical candidates
+- Optional historical behavior for electrical candidates
 
-It records evidence such as:
+The discriminator then separates **evidence from assessment**.
 
-- measurement class
-- unit, device class, state class
-- sample count
-- minimum and maximum
-- zero percentage
-- identical-reading percentage
-- distinct values
-- longest observed gap
-- median update interval
-- unavailable and unknown counts
-- possible low-resolution or rounding signal
+### Whole-home targets
 
-V1 does not decide that a device is safe for EnergyIQ Auto-Train. It supplies the evidence for that later decision.
+Primary:
 
-## Run
+- whole-home consumption power
+- whole-home consumption energy
 
-No third-party Python package is required.
+Secondary, when present:
 
-Create a Home Assistant long-lived access token, then run:
+- grid import
+- grid export
+- solar/generation
+- battery/storage
 
-    export HA_URL="http://homeassistant.local:8123"
-    export HA_TOKEN="YOUR_TOKEN"
-    python3 ha_device_analyzer.py --out ha-device-analyzer-v1.json
+The primary consumption source is not selected from an entity name alone. V2 considers Home Assistant measurement semantics, device relationships, derived-source relationships, aggregate/phase terminology, and meter-family topology.
 
-Or pass the values directly:
+An important case is a calculated HA entity such as a Min/Max sum sensor whose source list contains multiple phase/channel power entities. Home Assistant documents Min/Max as a calculated sensor that can combine multiple entities, so V2 preserves and evaluates those source relationships rather than treating the calculated entity as an unexplained orphan.
 
-    python3 ha_device_analyzer.py --url "http://homeassistant.local:8123" --token "YOUR_TOKEN" --hours 24
+## Device/training assessment
 
-The first run is inventory-only by default: history analysis is disabled unless --hours is explicitly supplied. The token is used only for read-only API calls. The analyzer never writes to Home Assistant.
+Each device receives a provisional technical assessment:
 
-## Output
+- system_meter — appears to be the whole-home measurement system
+- auto_train — direct usable power measurement associated with the device
+- quick — controllable device without a direct power measurement
+- manual — no direct power measurement and no controllable entity found
+- review — ambiguous/system-like device requiring inspection
 
-The JSON report contains:
+This is **not** the user's commissioning decision.
 
-- schema and generation time
-- analyzer scope
-- device summary
-- complete device inventory
-- complete entity inventory
-- electrical measurement candidates
-- historical evidence for those candidates
+The user still decides:
 
-## Important HA 2026.9 behavior
+- Keep/include
+- Exclude
+- Review
 
-Home Assistant 2026.9 includes child devices in the device registry. V1 recognizes parent_device_id and falls back to the parent's area when a child has no area of its own.
+No device is silently removed from the raw inventory.
 
-Current devices use config_entry_id and config_subentry_id. V1 uses those current fields and does not depend on the deprecated multi-config-entry properties.
+## EnergyIQ boundary
 
-## Design boundary
-
-V1 is evidence collection, not EnergyIQ.
+V2 remains independent of EnergyIQ.
 
 It does not:
 
@@ -79,4 +67,32 @@ It does not:
 - train or commission devices
 - automatically adopt devices
 
-The next step after V1 is to run it against the real HA installation and inspect what it finds before defining Auto-Train eligibility rules.
+The output is intentionally shaped so the discriminator can later become the discovery/decision engine used by EnergyIQ without changing the underlying evidence model.
+
+## Run
+
+The CLI requires a Home Assistant long-lived access token:
+
+    export HA_URL="http://homeassistant.local:8123"
+    export HA_TOKEN="YOUR_TOKEN"
+    python3 ha_device_analyzer.py --out ha-device-analyzer-v2.json
+
+Or:
+
+    python3 ha_device_analyzer.py --url "http://homeassistant.local:8123" --token "YOUR_TOKEN" --hours 24
+
+History is disabled by default. The token is used only for read-only API calls.
+
+## Output
+
+The JSON report contains:
+
+- raw registry evidence
+- raw current-state evidence
+- electrical measurement evidence
+- optional historical evidence
+- assessment.whole_home
+- assessment.secondary_energy_sources
+- assessment.device_assessments
+
+The raw evidence remains in the same report so discriminator rules can be improved and rerun without rescanning HA.
