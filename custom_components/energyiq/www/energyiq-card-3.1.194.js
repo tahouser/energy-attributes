@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.221 */
+/* EnergyIQ dashboard card — 3.1.223 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -697,27 +697,34 @@ if (!customElements.get(TAG)) {
       return '<div class="myst"><div class="myst-headline"><div class="big">'+Math.round(mystery)+' <span>W</span></div><div class="myst-now">Unexplained right now</div></div><div class="myst-bar-row"><span>Whole-Home</span><div class="myst-bar-track"><div class="myst-bar-fill" style="width:'+mysteryWidth.toFixed(2)+'%"></div></div><strong>'+Math.round(mystery)+' W</strong></div></div>';
     }
     _consumptionChart(label,item){
+      // Compact time-series area chart. Each hourly segment is one solid
+      // threshold color; the line itself remains continuous across segments.
       const bins=item?.segments||[];
-      const W=640,H=28,base=25,top=3;
+      const W=640,H=42,base=38,top=3;
+      if(!bins.length)return '<div class="cost-bar-row consumption-bar-row"><div class="cost-bar-head"><span>'+label+'</span><strong>'+Number(item?.current||0).toFixed(1)+' kWh</strong></div></div>';
+      const endTime=bins[bins.length-1].end.getTime();
+      const startTime=bins[0].start.getTime();
+      const span=Math.max(1,endTime-startTime);
       const visible=bins.filter(b=>b.visible&&Number.isFinite(Number(b.value)));
       const maxValue=Math.max(0,...visible.map(b=>Number(b.value)||0));
       const maxThreshold=Math.max(0,...visible.map(b=>Number(b.thresholds?.red)||0));
-      const yMax=Math.max(0.25,maxValue,maxThreshold)*1.08;
-      const xAt=time=>Math.max(0,Math.min(W,(time.getTime()-bins[0].start.getTime())/Math.max(1,(bins[bins.length-1].end.getTime()-bins[0].start.getTime()))*W));
+      const yMax=Math.max(0.25,maxValue,maxThreshold)*1.12;
+      const xAt=time=>Math.max(0,Math.min(W,(time-startTime)/span*W));
       const yAt=value=>base-(Math.max(0,Number(value)||0)/yMax)*(base-top);
-      let areas="",points=[],previousValue=0;
+      let areas="",points=[],previousValue=0,havePoint=false;
       for(const bin of bins){
         if(!bin.visible)break;
-        const x0=xAt(bin.start);
-        const x1=xAt(new Date(bin.start.getTime()+(bin.end.getTime()-bin.start.getTime())*bin.visibleFraction));
+        const x0=xAt(bin.start.getTime());
+        const visibleEnd=bin.end.getTime()-(bin.end.getTime()-bin.start.getTime())*(1-(bin.visibleFraction||0));
+        const x1=xAt(visibleEnd);
         const y0=yAt(previousValue),y1=yAt(bin.value||0);
         const cls=bin.color==="red"?"red":bin.color==="yellow"?"yellow":"green";
         areas+='<polygon points="'+x0.toFixed(2)+','+base+' '+x0.toFixed(2)+','+y0.toFixed(2)+' '+x1.toFixed(2)+','+y1.toFixed(2)+' '+x1.toFixed(2)+','+base+'" class="cons-area '+cls+'"/>';
-        if(!points.length)points.push(x0.toFixed(2)+","+y0.toFixed(2));
+        if(!havePoint){points.push(x0.toFixed(2)+","+y0.toFixed(2));havePoint=true;}
         points.push(x1.toFixed(2)+","+y1.toFixed(2));
         previousValue=Number(bin.value)||0;
       }
-      const path=points.length?'<polyline points="'+points.join(" ")+'" class="cons-line"/>':"";
+      const path=points.length>1?'<polyline points="'+points.join(" ")+'" class="cons-line"/>':"";
       return '<div class="cost-bar-row consumption-bar-row"><div class="cost-bar-head"><span>'+label+'</span><strong>'+Number(item?.current||0).toFixed(1)+' kWh</strong></div><div class="cost-bar-track consumption-line-track" aria-label="'+label+' consumption history"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+areas+path+'</svg></div></div>';
     }
     _consumption(){
