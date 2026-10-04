@@ -16,10 +16,40 @@
     "step": {
       "init": {
         "title": "EnergyIQ — Commissioning",
-        "description": "{count} electrical-load candidates are in the private EnergyIQ environment. Select the devices to monitor. Training state is retained so longer-cycle training can continue in the background.",
+        "description": "{count} electrical-load candidates are in the private EnergyIQ environment. Select the devices to monitor.",
         "data": {
           "monitored_devices": "Devices to monitor",
           "action": "Training / save action"
+        }
+      },
+      "consumption_thresholds": {
+        "title": "Consumption color thresholds",
+        "description": "Set four time-of-day points for Peak and Off-Peak. Each point has a yellow-above and red-above limit in kWh for that hour. Thresholds between points are interpolated. Each elapsed hour is one solid color; there are no gradients.",
+        "data": {
+          "peak_1_time": "Peak point 1 time",
+          "peak_1_yellow": "Peak point 1 yellow above (kWh)",
+          "peak_1_red": "Peak point 1 red above (kWh)",
+          "peak_2_time": "Peak point 2 time",
+          "peak_2_yellow": "Peak point 2 yellow above (kWh)",
+          "peak_2_red": "Peak point 2 red above (kWh)",
+          "peak_3_time": "Peak point 3 time",
+          "peak_3_yellow": "Peak point 3 yellow above (kWh)",
+          "peak_3_red": "Peak point 3 red above (kWh)",
+          "peak_4_time": "Peak point 4 time",
+          "peak_4_yellow": "Peak point 4 yellow above (kWh)",
+          "peak_4_red": "Peak point 4 red above (kWh)",
+          "off_peak_1_time": "Off-Peak point 1 time",
+          "off_peak_1_yellow": "Off-Peak point 1 yellow above (kWh)",
+          "off_peak_1_red": "Off-Peak point 1 red above (kWh)",
+          "off_peak_2_time": "Off-Peak point 2 time",
+          "off_peak_2_yellow": "Off-Peak point 2 yellow above (kWh)",
+          "off_peak_2_red": "Off-Peak point 2 red above (kWh)",
+          "off_peak_3_time": "Off-Peak point 3 time",
+          "off_peak_3_yellow": "Off-Peak point 3 yellow above (kWh)",
+          "off_peak_3_red": "Off-Peak point 3 red above (kWh)",
+          "off_peak_4_time": "Off-Peak point 4 time",
+          "off_peak_4_yellow": "Off-Peak point 4 yellow above (kWh)",
+          "off_peak_4_red": "Off-Peak point 4 red above (kWh)"
         }
       },
       "training_prepare": {
@@ -58,6 +88,10 @@
         }
       }
     }
+  },
+  "error": {
+    "times_must_increase": "Times must be in increasing order.",
+    "red_must_be_at_least_yellow": "Red threshold must be at least the yellow threshold."
   },
   "abort": {
     "no_candidates": "No electrical-load candidates were found after filtering.",

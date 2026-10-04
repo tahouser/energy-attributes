@@ -14,13 +14,6 @@ from homeassistant.core import HomeAssistant, callback
 from .const import DOMAIN
 from .persistence import get_store, validate_import_snapshot
 
-_CONSUMPTION_LIMIT_DEFAULTS = {
-    "peak_expected_kwh": 1.5,
-    "peak_high_kwh": 3.0,
-    "off_peak_expected_kwh": 1.5,
-    "off_peak_high_kwh": 3.0,
-}
-
 _MANIFEST_VERSION = json.loads((Path(__file__).with_name("manifest.json")).read_text(encoding="utf-8"))["version"]
 
 
@@ -327,10 +320,7 @@ async def ws_workspace(hass, connection, msg):
         "meters": _meter_summary(hass, coordinator),
         "devices": rows,
         "last_training_device_id": getattr(coordinator, "last_training_device_id", None),
-        "consumption_limits": {
-            **_CONSUMPTION_LIMIT_DEFAULTS,
-            **dict(coordinator.entry.options.get("consumption_limits", {})),
-        },
+        "consumption_thresholds": coordinator.entry.options.get("consumption_thresholds", {}),
     })
 
 
