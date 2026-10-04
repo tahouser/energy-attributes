@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.223 */
+/* EnergyIQ dashboard card — 3.1.224 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -520,37 +520,46 @@ if (!customElements.get(TAG)) {
       const red=Math.max(yellow,thresholds.red*fraction);
       return value<=yellow?"green":value<=red?"yellow":"red";
     }
-    _consumptionDelta(states,start,end){
+    _consumptionDelta(states,start,end,liveValue=null){
       // Consumption sensors are cumulative energy meters. Never use the
-      // Cost-page period calculation here: cost sensors and energy meters
-      // have different semantics, and the cost implementation intentionally
-      // has its own baseline rules.
+      // Cost-page period calculation here. For a selected period, the first
+      // valid reading is the baseline when the meter did not exist at the
+      // period start. The live state is appended so the current partial
+      // interval is not lost simply because recorder history lags behind it.
       const entries=this._historyEntries(states);
-      if(!entries.length)return null;
-      const startMs=start.getTime(),endMs=end.getTime();
-      let previous=null,total=0,seen=false;
+      const endMs=end.getTime();
+      let previous=null,total=0,seen=false,lastTime=0;
       for(const e of entries){
-        if(e.t<startMs){
+        if(e.t<start.getTime()){
           previous=e.v;
           continue;
         }
         if(e.t>endMs)break;
         if(previous==null){
-          // The first recorder value in a period is the baseline, not
-          // consumption. This is essential when the meter began recording
-          // part-way through a calendar month.
           previous=e.v;
+          lastTime=e.t;
           seen=true;
           continue;
         }
         if(e.v>=previous)total+=e.v-previous;
-        else total+=Math.max(0,e.v); // cumulative meter reset
+        else total+=Math.max(0,e.v);
         previous=e.v;
+        lastTime=e.t;
         seen=true;
+      }
+      if(Number.isFinite(liveValue) && liveValue>=0 && endMs>=Date.now()-5*60*1000){
+        if(previous==null){
+          previous=liveValue;
+          seen=true;
+        }else if(lastTime<endMs){
+          if(liveValue>=previous)total+=liveValue-previous;
+          else total+=Math.max(0,liveValue);
+          seen=true;
+        }
       }
       return seen?Math.max(0,total):null;
     }
-    _consumptionSegments(states,start,end,now,profile){
+    _consumptionSegments(states,start,end,now,profile,liveValue=null){
       const step=60*60*1000,segments=[];
       for(let t=start.getTime();t<end.getTime();t+=step){
         const a=new Date(t),b=new Date(Math.min(t+step,end.getTime()));
@@ -558,7 +567,8 @@ if (!customElements.get(TAG)) {
         const visibleMs=Math.max(0,visibleEnd.getTime()-a.getTime());
         let value=0;
         if(visibleMs>0){
-          const v=this._consumptionDelta(states,a,visibleEnd);
+          const liveForSegment=visibleEnd.getTime()>=now.getTime()-1000?liveValue:null;
+          const v=this._consumptionDelta(states,a,visibleEnd,liveForSegment);
           if(v!=null&&Number.isFinite(v))value=Math.max(0,v);
         }
         const thresholds=this._consumptionThresholds(profile,a);
@@ -592,8 +602,10 @@ if (!customElements.get(TAG)) {
 
         const build=async(id,profile)=>{
           const states=history?.[id]||[];
-          const current=states.length?Math.max(0,this._consumptionDelta(states,start,now)||0):0;
-          const segments=this._consumptionSegments(states,start,end,now,profile);
+          const live=Number(this._hass?.states?.[id]?.state);
+          const liveValue=Number.isFinite(live)?live:null;
+          const current=states.length?Math.max(0,this._consumptionDelta(states,start,now,liveValue)||0):0;
+          const segments=this._consumptionSegments(states,start,end,now,profile,liveValue);
           return {current,segments};
         };
         const [peak,off]=await Promise.all([
