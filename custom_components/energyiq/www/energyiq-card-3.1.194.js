@@ -675,22 +675,20 @@ if (!customElements.get(TAG)) {
       const yMax=Math.max(0.25,maxValue,maxThreshold)*1.08;
       const xAt=time=>Math.max(0,Math.min(W,(time.getTime()-bins[0].start.getTime())/Math.max(1,(bins[bins.length-1].end.getTime()-bins[0].start.getTime()))*W));
       const yAt=value=>base-(Math.max(0,Number(value)||0)/yMax)*(base-top);
-      let areas="",points=[];
+      let areas="",points=[],previousValue=0;
       for(const bin of bins){
         if(!bin.visible)break;
-        const x0=xAt(bin.start),x1=xAt(new Date(bin.start.getTime()+(bin.end.getTime()-bin.start.getTime())*bin.visibleFraction));
-        const y=yAt(bin.value||0);
+        const x0=xAt(bin.start);
+        const x1=xAt(new Date(bin.start.getTime()+(bin.end.getTime()-bin.start.getTime())*bin.visibleFraction));
+        const y0=yAt(previousValue),y1=yAt(bin.value||0);
         const cls=bin.color==="red"?"red":bin.color==="yellow"?"yellow":"green";
-        areas+='<polygon points="'+x0.toFixed(2)+','+base.toFixed(2)+' '+x0.toFixed(2)+','+y.toFixed(2)+' '+x1.toFixed(2)+','+y.toFixed(2)+' '+x1.toFixed(2)+','+base.toFixed(2)+'" class="cons-area '+cls+'"/>';
-        points.push(x0.toFixed(2)+","+y.toFixed(2));
-        points.push(x1.toFixed(2)+","+y.toFixed(2));
+        areas+='<polygon points="'+x0.toFixed(2)+','+base+' '+x0.toFixed(2)+','+y0.toFixed(2)+' '+x1.toFixed(2)+','+y1.toFixed(2)+' '+x1.toFixed(2)+','+base+'" class="cons-area '+cls+'"/>';
+        if(!points.length)points.push(x0.toFixed(2)+","+y0.toFixed(2));
+        points.push(x1.toFixed(2)+","+y1.toFixed(2));
+        previousValue=Number(bin.value)||0;
       }
-      const dedup=[];
-      for(const p of points)if(!dedup.length||dedup[dedup.length-1]!==p)dedup.push(p);
-      const path=dedup.length?'<polyline points="'+dedup.join(" ")+'" class="cons-line"/>':"";
-      const futureX=visible.length?xAt(new Date(Math.min(new Date().getTime(),bins[bins.length-1].end.getTime()))):0;
-      const future=futureX<W-0.5?'<line x1="'+futureX.toFixed(2)+'" y1="'+base+'" x2="'+W+'" y2="'+base+'" class="cons-future"/>':"";
-      return '<div class="cost-bar-row consumption-bar-row"><div class="cost-bar-head"><span>'+label+'</span><strong>'+Number(item?.current||0).toFixed(1)+' kWh</strong></div><div class="cost-bar-track consumption-line-track" aria-label="'+label+' consumption history"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+areas+path+future+'</svg></div></div>';
+      const path=points.length?'<polyline points="'+points.join(" ")+'" class="cons-line"/>':"";
+      return '<div class="cost-bar-row consumption-bar-row"><div class="cost-bar-head"><span>'+label+'</span><strong>'+Number(item?.current||0).toFixed(1)+' kWh</strong></div><div class="cost-bar-track consumption-line-track" aria-label="'+label+' consumption history"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+areas+path+'</svg></div></div>';
     }
     _consumption(){
       const h=this._dashboardHistory;
