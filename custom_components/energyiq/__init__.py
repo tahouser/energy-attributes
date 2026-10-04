@@ -19,7 +19,7 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "31900"
+FRONTEND_VERSION = "32000"
 
 _MANIFEST_PATH = Path(__file__).with_name("manifest.json")
 INTEGRATION_VERSION = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))["version"]
@@ -35,19 +35,19 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
     if resources is not None and hasattr(resources, "async_create_item"):
         try:
             await resources.async_get_info()
-            # Remove every older EnergyIQ card resource. A custom element can only
-            # be defined once, so leaving an older card resource registered can make
-            # the browser execute the old implementation before this one.
+            # Remove every existing EnergyIQ card resource before registering the
+            # current URL. This includes the same card path with an older query
+            # string: HA otherwise keeps serving the already-registered resource
+            # and the browser can continue executing the previous frontend.
             old_prefix = f"{URL_BASE}/energyiq-card"
             for item in list(resources.async_items()):
                 url = str(item.get("url", "")).split("?")[0]
-                if url.startswith(old_prefix) and url != CARD_PATH:
+                if url.startswith(old_prefix):
                     await resources.async_delete_item(item["id"])
-            if not any(str(item.get("url", "")).split("?")[0] == CARD_PATH for item in resources.async_items()):
-                await resources.async_create_item({
-                    "url": CARD_URL,
-                    "res_type": "module",
-                })
+            await resources.async_create_item({
+                "url": CARD_URL,
+                "res_type": "module",
+            })
             return
         except Exception:
             # Fall through to the legacy extra-JS loader for YAML-mode/older HA.
