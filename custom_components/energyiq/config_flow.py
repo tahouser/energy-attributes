@@ -8,6 +8,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.const import UnitOfEnergy
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -19,6 +20,7 @@ from homeassistant.helpers.selector import BooleanSelector
 from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -496,7 +498,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 )
             ),
             vol.Required("peak_expected_kwh", default=float(existing_limits["peak_expected_kwh"])): NumberSelector(
-                NumberSelectorConfig(min=0, max=_CONSUMPTION_LIMIT_MAX_KWH, step=0.1, mode="box")
+                NumberSelectorConfig(min=0, max=_CONSUMPTION_LIMIT_MAX_KWH, step=0.1, unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR, mode=NumberSelectorMode.BOX)
             ),
             vol.Required("peak_high_kwh", default=float(existing_limits["peak_high_kwh"])): NumberSelector(
                 NumberSelectorConfig(min=0, max=_CONSUMPTION_LIMIT_MAX_KWH, step=0.1, mode="box")
