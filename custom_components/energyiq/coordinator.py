@@ -13,7 +13,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
-from homeassistant.components.recorder import statistics as recorder_statistics
+from homeassistant.components.recorder import history as recorder_history
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import area_registry as ar
@@ -183,11 +183,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         return entity.name or entity.original_name or entity.entity_id
 
     def _empty_consumption_accounting(self) -> dict[str, Any]:
-        """Return the statistics-change based Consumption accounting store."""
-        # Schema 3 deliberately replaces the prior cumulative-meter delta model.
-        # EnergyIQ now consumes only HA recorder/statistics ``change`` values;
-        # an absolute meter state is never a Consumption amount.
-        return {"schema_version": 8, "source": "home_assistant_statistics_change_v2", "days": {}, "months": {}, "intervals": []}
+        """Return the Utility Meter history-based Consumption accounting store."""
+        return {"schema_version": 9, "source": "home_assistant_utility_meter_history_v1", "days": {}, "months": {}, "intervals": []}
 
     @staticmethod
     def _consumption_number(value) -> float | None:
@@ -197,85 +194,57 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             return None
         return number if number == number and number not in (float("inf"), float("-inf")) else None
 
-    def _consumption_schedule(self) -> dict[str, Any]:
-        saved = self.entry.options.get("consumption_peak_schedule", {})
-        if not isinstance(saved, dict):
-            saved = {}
-        return {
-            "start": str(saved.get("start", "15:00:00")),
-            "end": str(saved.get("end", "19:00:00")),
-            "days": [int(day) for day in saved.get("days", [1, 2, 3, 4, 5])
-                     if str(day).isdigit() and 0 <= int(day) <= 6],
-        }
-
     @staticmethod
-    def _consumption_minutes(value: str, fallback: int) -> int:
-        try:
-            parts = str(value).split(":")
-            return int(parts[0]) * 60 + int(parts[1])
-        except (TypeError, ValueError, IndexError):
-            return fallback
+    def _consumption_history_time(row) -> float | None:
+        value = row.get("lu") if isinstance(row, dict) else None
+        if value is None and isinstance(row, dict):
+            value = row.get("last_updated")
+        return EnergyAttributionCoordinator._consumption_number(value)
 
-    def _consumption_is_peak(self, when: datetime) -> bool:
-        """Classify a statistics interval using the configured Peak schedule."""
-        local = dt_util.as_local(when)
-        schedule = self._consumption_schedule()
-        configured_days = set(schedule["days"])
-        ha_day = (local.weekday() + 1) % 7
-        if ha_day not in configured_days:
-            return False
-        start_minutes = self._consumption_minutes(schedule["start"], 15 * 60)
-        end_minutes = self._consumption_minutes(schedule["end"], 19 * 60)
-        current_minutes = local.hour * 60 + local.minute
-        if start_minutes < end_minutes:
-            return start_minutes <= current_minutes < end_minutes
-        if start_minutes > end_minutes:
-            return current_minutes >= start_minutes or current_minutes < end_minutes
-        return False
-
-    @staticmethod
-    def _consumption_add_interval(
-        accounting: dict[str, Any],
-        rate: str,
-        when: datetime,
-        end: datetime,
-        change: float,
-    ) -> None:
-        """Add one recorder-statistics delta to the daily ledger and interval history."""
-        if change is None or change <= 0:
+    def _consumption_add_history_delta(self, accounting, rate, start_ts, end_ts, change) -> None:
+        """Add a Utility Meter history delta, splitting it at local midnights."""
+        if change <= 0 or end_ts <= start_ts:
             return
-        local = dt_util.as_local(when)
-        local_end = dt_util.as_local(end)
-        day_key = local.date().isoformat()
-        day = accounting.setdefault("days", {}).setdefault(day_key, {"peak": 0.0, "off_peak": 0.0})
-        day[rate] = round(float(day.get(rate, 0.0)) + float(change), 6)
-        accounting.setdefault("intervals", []).append({
-            "start": local.isoformat(),
-            "end": local_end.isoformat(),
-            "rate": rate,
-            "kwh": round(float(change), 6),
-        })
+        start = dt_util.utc_from_timestamp(start_ts)
+        end = dt_util.utc_from_timestamp(end_ts)
+        total_seconds = max(1.0, end_ts - start_ts)
+        cursor = start
+        while cursor < end:
+            local_cursor = dt_util.as_local(cursor)
+            next_local_day = local_cursor.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+            piece_end = min(end, dt_util.as_utc(next_local_day))
+            fraction = max(0.0, min(1.0, (piece_end - cursor).total_seconds() / total_seconds))
+            piece = change * fraction
+            if piece > 0:
+                self._consumption_add_interval(accounting, rate, cursor, piece_end, piece)
+            cursor = piece_end
 
-    def _consumption_apply_statistics(self, accounting, statistic_rows, entity_id):
-        """Calculate Consumption from adjacent HA Recorder cumulative sums."""
-        previous_sum = None
-        for row in statistic_rows.get(entity_id, []):
-            current_sum = self._consumption_number(row.get("sum"))
-            start_ts = self._consumption_number(row.get("start"))
-            end_ts = self._consumption_number(row.get("end"))
-            if current_sum is None or start_ts is None or end_ts is None:
+    def _consumption_apply_history(self, accounting, history_rows, entity_id, live_value=None, live_time=None) -> None:
+        """Build tariff consumption from the Utility Meter's own state history."""
+        rate = "peak" if entity_id.endswith("_peak") else "off_peak"
+        rows = []
+        for row in history_rows.get(entity_id, []):
+            value = self._consumption_number(row.get("s", row.get("state")))
+            timestamp = self._consumption_history_time(row)
+            if value is not None and timestamp is not None:
+                rows.append((timestamp, value))
+        rows.sort(key=lambda item: item[0])
+        previous_time = None
+        previous_value = None
+        for timestamp, value in rows:
+            if previous_value is None:
+                previous_value = value
+                previous_time = timestamp
                 continue
-            if previous_sum is None:
-                previous_sum = current_sum
-                continue
-            change = current_sum - previous_sum
-            previous_sum = current_sum
-            if change <= 0:
-                continue
-            when = dt_util.utc_from_timestamp(start_ts)
-            interval_end = dt_util.utc_from_timestamp(end_ts)
-            rate = "peak" if self._consumption_is_peak(when) else "off_peak"
-            self._consumption_add_interval(accounting, rate, when, interval_end, change)
+            change = value - previous_value
+            if change > 0:
+                self._consumption_add_history_delta(accounting, rate, previous_time, timestamp, change)
+            previous_value = value
+            previous_time = timestamp
+        if previous_value is not None and previous_time is not None and live_value is not None and live_time is not None and live_time > previous_time:
+            change = live_value - previous_value
+            if change > 0:
+                self._consumption_add_history_delta(accounting, rate, previous_time, live_time, change)
 
     def _consumption_rebuild_month_totals(self, accounting: dict[str, Any]) -> None:
         """Derive month totals exclusively from the daily ledger."""
@@ -291,37 +260,29 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         accounting["months"] = months
 
     async def _async_rebuild_consumption_accounting(self) -> bool:
-        """Rebuild recent Consumption from HA recorder-statistics cumulative sums."""
+        """Rebuild Consumption from the monthly Utility Meter state history."""
         now = dt_util.now()
         local_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        current_hour = now.replace(minute=0, second=0, microsecond=0)
-        # Read cumulative sums and calculate adjacent deltas ourselves. This
-        # avoids Recorder's special ``change`` initialization behavior.
-        baseline_hour = local_month_start - timedelta(hours=1)
-        forming_baseline = current_hour - timedelta(minutes=5)
-        utc_start = dt_util.as_utc(baseline_hour)
-        utc_current_hour = dt_util.as_utc(forming_baseline)
+        utc_start = dt_util.as_utc(local_month_start)
         utc_now = dt_util.as_utc(now)
         ids = {"sensor.dte_house_energy_peak", "sensor.dte_house_energy_off_peak"}
         try:
-            hourly = await self.hass.async_add_executor_job(
-                recorder_statistics.statistics_during_period,
-                self.hass, utc_start, dt_util.as_utc(current_hour), ids, "hour", None, {"sum"},
-            )
-            forming = await self.hass.async_add_executor_job(
-                recorder_statistics.statistics_during_period,
-                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"sum"},
+            history_rows = await self.hass.async_add_executor_job(
+                recorder_history.get_significant_states,
+                self.hass, utc_start, utc_now, list(ids), None, True, False, True, True, True
             )
         except Exception:
-            _LOGGER.exception("Unable to rebuild EnergyIQ consumption from Home Assistant statistics")
+            _LOGGER.exception("Unable to rebuild EnergyIQ Consumption from Utility Meter history")
             return False
-        if not hourly and not forming:
-            _LOGGER.warning("EnergyIQ Consumption statistics unavailable; keeping the existing ledger")
+        if not history_rows:
+            _LOGGER.warning("EnergyIQ Utility Meter history unavailable; keeping the existing ledger")
             return False
         accounting = self._empty_consumption_accounting()
         for entity_id in ids:
-            self._consumption_apply_statistics(accounting, hourly, entity_id)
-            self._consumption_apply_statistics(accounting, forming, entity_id)
+            live_state = self.hass.states.get(entity_id)
+            live_value = self._consumption_number(live_state.state) if live_state is not None else None
+            live_time = live_state.last_updated.timestamp() if live_state is not None and live_state.last_updated is not None else None
+            self._consumption_apply_history(accounting, history_rows, entity_id, live_value, live_time)
         self._consumption_rebuild_month_totals(accounting)
         accounting["seeded_through"] = now.isoformat()
         self.consumption_accounting = accounting
@@ -397,7 +358,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 "last_training_device_id", self.last_training_device_id
             )
             saved_consumption = saved.get("consumption_accounting")
-            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 8 and saved_consumption.get("source") == "home_assistant_statistics_change_v2":
+            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 9 and saved_consumption.get("source") == "home_assistant_utility_meter_history_v1":
                 self.consumption_accounting = saved_consumption
                 self._consumption_seeded = bool(saved_consumption.get("seeded_through"))
             else:
