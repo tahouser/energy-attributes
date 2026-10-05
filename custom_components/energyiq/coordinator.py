@@ -292,7 +292,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         return True
 
     async def _async_update_consumption_accounting(self) -> None:
-        """Refresh Consumption from recorder statistics, never from meter state."""
+        """Refresh Consumption from Utility Meter history, never from Recorder sum."""
         now_loop = self.hass.loop.time()
         if self._consumption_seeded and now_loop - self._consumption_last_refresh < 30:
             return
