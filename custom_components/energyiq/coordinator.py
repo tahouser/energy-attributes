@@ -256,14 +256,23 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         rows.sort(key=lambda item: item[0])
         previous_time = None
         previous_value = None
+        first_delta = True
         for timestamp, value in rows:
             if previous_value is None:
                 previous_value = value
                 previous_time = timestamp
                 continue
             change = value - previous_value
-            if change > 0:
+            # Utility Meter history can contain an initialization jump from a
+            # restored zero to the already-accumulated meter value.  That is
+            # not consumption during the interval and must not become a giant
+            # spike in the monthly ledger.  Only suppress that condition for
+            # the first delta and only when the jump is clearly impossible for
+            # a residential interval.
+            initialization_jump = first_delta and previous_value == 0.0 and change > 100.0
+            if change > 0 and not initialization_jump:
                 self._consumption_add_history_delta(accounting, rate, previous_time, timestamp, change)
+            first_delta = False
             previous_value = value
             previous_time = timestamp
         if previous_value is not None and previous_time is not None and live_value is not None and live_time is not None and live_time > previous_time:
