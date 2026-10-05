@@ -385,7 +385,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 "last_training_device_id", self.last_training_device_id
             )
             saved_consumption = saved.get("consumption_accounting")
-            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 7 and saved_consumption.get("source") == "home_assistant_statistics_state_delta_v2":
+            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 8 and saved_consumption.get("source") == "home_assistant_statistics_change_v2":
                 self.consumption_accounting = saved_consumption
                 self._consumption_seeded = bool(saved_consumption.get("seeded_through"))
             else:
