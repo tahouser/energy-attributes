@@ -312,12 +312,15 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 recorder_statistics.statistics_during_period,
                 self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"sum"},
             )
+        except Exception:
+            _LOGGER.exception("Unable to rebuild EnergyIQ consumption from Home Assistant statistics")
+            return False
         if not hourly and not forming:
             _LOGGER.warning("EnergyIQ Consumption statistics unavailable; keeping the existing ledger")
             return False
         accounting = self._empty_consumption_accounting()
         for entity_id in ids:
-            self._consumption_apply_statistics(accounting, hourly, entity_id, skip_first=True)
+            self._consumption_apply_statistics(accounting, hourly, entity_id)
             self._consumption_apply_statistics(accounting, forming, entity_id)
         self._consumption_rebuild_month_totals(accounting)
         accounting["seeded_through"] = now.isoformat()
