@@ -59,6 +59,11 @@ _CONSUMPTION_THRESHOLD_DEFAULTS = {
     ],
 }
 _CONSUMPTION_THRESHOLD_MAX_KWH = 50.0
+_PEAK_SCHEDULE_DEFAULTS = {
+    "start": "15:00:00",
+    "end": "19:00:00",
+    "days": [1, 2, 3, 4, 5],
+}
 
 
 def _state_class(hass, entity_id: str) -> str | None:
@@ -499,6 +504,61 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             description_placeholders={"count": str(len(candidates))},
         )
 
+    async def async_step_peak_schedule(self, user_input=None):
+        saved = self.config_entry.options.get("consumption_peak_schedule", {})
+        existing = dict(_PEAK_SCHEDULE_DEFAULTS)
+        if isinstance(saved, dict):
+            existing["start"] = str(saved.get("start", existing["start"]))
+            existing["end"] = str(saved.get("end", existing["end"]))
+            days = saved.get("days", existing["days"])
+            if isinstance(days, list):
+                existing["days"] = [int(day) for day in days if str(day).isdigit() and 0 <= int(day) <= 6]
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            start = str(user_input["peak_start"])
+            end = str(user_input["peak_end"])
+            days = [int(day) for day in user_input.get("peak_days", [])]
+            if start == end and days:
+                errors["peak_end"] = "peak_start_end_must_differ"
+            if not errors:
+                options = dict(self._pending_options or self.config_entry.options)
+                options["consumption_peak_schedule"] = {
+                    "start": start,
+                    "end": end,
+                    "days": days,
+                }
+                coordinator = self.config_entry.runtime_data
+                if coordinator is not None and hasattr(coordinator, "async_persist_owned_state"):
+                    await coordinator.async_persist_owned_state(options=options)
+                return self.async_create_entry(data=options)
+
+        weekday_options = [
+            SelectOptionDict(value="0", label="Sunday"),
+            SelectOptionDict(value="1", label="Monday"),
+            SelectOptionDict(value="2", label="Tuesday"),
+            SelectOptionDict(value="3", label="Wednesday"),
+            SelectOptionDict(value="4", label="Thursday"),
+            SelectOptionDict(value="5", label="Friday"),
+            SelectOptionDict(value="6", label="Saturday"),
+        ]
+        schema = vol.Schema({
+            vol.Required("peak_start", default=existing["start"]): selector.TimeSelector(),
+            vol.Required("peak_end", default=existing["end"]): selector.TimeSelector(),
+            vol.Required("peak_days", default=[str(day) for day in existing["days"]]): SelectSelector(
+                SelectSelectorConfig(
+                    options=weekday_options,
+                    multiple=True,
+                    mode=SelectSelectorMode.LIST,
+                )
+            ),
+        })
+        return self.async_show_form(
+            step_id="peak_schedule",
+            data_schema=schema,
+            errors=errors,
+        )
+
     async def async_step_consumption_thresholds(self, user_input=None):
         existing = dict(_CONSUMPTION_THRESHOLD_DEFAULTS)
         saved = self.config_entry.options.get("consumption_thresholds", {})
@@ -542,10 +602,8 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             if not errors:
                 options = dict(self._pending_options or self.config_entry.options)
                 options["consumption_thresholds"] = profiles
-                coordinator = self.config_entry.runtime_data
-                if coordinator is not None and hasattr(coordinator, "async_persist_owned_state"):
-                    await coordinator.async_persist_owned_state(options=options)
-                return self.async_create_entry(data=options)
+                self._pending_options = options
+                return await self.async_step_peak_schedule()
 
         schema_fields: dict[Any, Any] = {}
         for profile in ("peak", "off_peak"):
