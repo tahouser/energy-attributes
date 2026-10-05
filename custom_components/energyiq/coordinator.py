@@ -257,8 +257,12 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         })
 
     def _consumption_apply_statistics(self, accounting, statistic_rows, entity_id):
-        """Use Home Assistant Recorder change values directly."""
-        for row in statistic_rows.get(entity_id, []):
+        """Use Home Assistant Recorder change values, excluding the baseline row."""
+        for index, row in enumerate(statistic_rows.get(entity_id, [])):
+            # The first returned row is the baseline hour immediately before
+            # the month and must not enter the monthly ledger.
+            if index == 0:
+                continue;
             change = self._consumption_number(row.get("change"))
             start_ts = self._consumption_number(row.get("start"))
             end_ts = self._consumption_number(row.get("end"))
@@ -287,7 +291,12 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         now = dt_util.now()
         local_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         current_hour = now.replace(minute=0, second=0, microsecond=0)
-        utc_start = dt_util.as_utc(local_month_start)
+        # Include one complete hour before the month so Home Assistant can
+        # calculate the first in-month hourly change against a real prior sum.
+        # Without this baseline, the first row can be the meter's lifetime
+        # initialization value (14,297.6 kWh in the Peak sensor).
+        baseline_hour = local_month_start - timedelta(hours=1)
+        utc_start = dt_util.as_utc(baseline_hour)
         utc_current_hour = dt_util.as_utc(current_hour)
         utc_now = dt_util.as_utc(now)
         ids = {"sensor.dte_house_energy_peak", "sensor.dte_house_energy_off_peak"}
