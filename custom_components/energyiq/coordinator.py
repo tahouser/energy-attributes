@@ -361,6 +361,10 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             self.last_training_device_id = saved.get(
                 "last_training_device_id", self.last_training_device_id
             )
+            saved_consumption = saved.get("consumption_accounting")
+            if isinstance(saved_consumption, dict):
+                self.consumption_accounting = saved_consumption
+                self._consumption_seeded = bool(saved_consumption.get("seeded_month"))
             for state in self.training_state.values():
                 if isinstance(state, dict) and state.get("status") == "active":
                     state["status"] = "interrupted"
@@ -380,6 +384,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
 
         # Inventory cleanup must happen after canonical state is loaded.
         self._remove_shelly_energy_meter_candidates()
+        await self._async_seed_consumption_accounting()
         await self._persist(force=True)
         self._persistent_loaded = True
 
@@ -395,6 +400,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.training_state = {}
         self.training_samples = {}
         self.last_training_device_id = None
+        self.consumption_accounting = self._empty_consumption_accounting()
+        self._consumption_seeded = False
         self._training_engine = None
         self._training_device = None
         self._training_task = None
