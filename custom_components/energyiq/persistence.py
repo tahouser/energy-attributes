@@ -12,7 +12,7 @@ from homeassistant.helpers.storage import Store
 from .const import DOMAIN
 
 STORAGE_VERSION = 1
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 STORAGE_KEY = f"{DOMAIN}.persistent"
 
 
@@ -35,6 +35,11 @@ def migrate_snapshot(saved: dict[str, Any] | None) -> dict[str, Any] | None:
         snapshot["schema_version"] = SCHEMA_VERSION
         return snapshot
 
+    if version == 1:
+        snapshot.setdefault("consumption_accounting", None)
+        snapshot["schema_version"] = SCHEMA_VERSION
+        return snapshot
+
     if version == SCHEMA_VERSION:
         return snapshot
 
@@ -54,6 +59,7 @@ def build_snapshot(coordinator) -> dict[str, Any]:
         "training_state": deepcopy(coordinator.training_state),
         "training_samples": deepcopy(coordinator.training_samples),
         "last_training_device_id": coordinator.last_training_device_id,
+        "consumption_accounting": deepcopy(getattr(coordinator, "consumption_accounting", None)),
     }
 
 
@@ -96,5 +102,6 @@ def has_saved_data(snapshot: dict[str, Any] | None) -> bool:
             "commissioned_devices",
             "training_state",
             "training_samples",
+            "consumption_accounting",
         )
     )
