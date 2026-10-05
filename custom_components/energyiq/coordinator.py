@@ -187,7 +187,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         # Schema 3 deliberately replaces the prior cumulative-meter delta model.
         # EnergyIQ now consumes only HA recorder/statistics ``change`` values;
         # an absolute meter state is never a Consumption amount.
-        return {"schema_version": 5, "source": "home_assistant_statistics_sum_delta", "days": {}, "months": {}, "intervals": []}
+        return {"schema_version": 6, "source": "home_assistant_statistics_state_delta", "days": {}, "months": {}, "intervals": []}
 
     @staticmethod
     def _consumption_number(value) -> float | None:
@@ -261,34 +261,33 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         accounting: dict[str, Any],
         statistic_rows: dict[str, list[dict[str, Any]]],
         entity_id: str,
-        initial_sum: float | None = None,
+        initial_state: float | None = None,
     ) -> None:
-        """Convert HA cumulative statistics sums into interval consumption.
+        """Convert adjacent HA statistics state samples into interval consumption.
 
-        EnergyIQ never consumes the recorder ``change`` field directly.
-        It calculates each interval as the difference between consecutive
-        cumulative ``sum`` values. The first statistic establishes the
-        baseline and contributes zero unless an earlier statistic already
-        supplied the baseline through ``initial_sum``.
+        The cumulative meter state is never used as Consumption itself. Each
+        interval is only the positive difference between two adjacent recorder
+        statistics state samples. The first sample establishes the baseline.
+        A reset/decrease starts a new baseline and contributes zero.
         """
         rows = []
         for row in statistic_rows.get(entity_id, []):
             start_ts = self._consumption_number(row.get("start"))
             end_ts = self._consumption_number(row.get("end"))
-            sum_value = self._consumption_number(row.get("sum"))
-            if start_ts is None or end_ts is None or sum_value is None:
+            state_value = self._consumption_number(row.get("state"))
+            if start_ts is None or end_ts is None or state_value is None:
                 continue
-            rows.append((start_ts, end_ts, sum_value))
+            rows.append((start_ts, end_ts, state_value))
 
         rows.sort(key=lambda item: item[0])
-        previous_sum = initial_sum
-        for start_ts, end_ts, current_sum in rows:
-            if previous_sum is None:
-                previous_sum = current_sum
+        previous_state = initial_state
+        for start_ts, end_ts, current_state in rows:
+            if previous_state is None:
+                previous_state = current_state
                 continue
 
-            change = current_sum - previous_sum
-            previous_sum = current_sum
+            change = current_state - previous_state
+            previous_state = current_state
             if change <= 0:
                 continue
 
@@ -322,11 +321,11 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         try:
             hourly = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"sum"},
+                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"state"},
             )
             forming = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"sum"},
+                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"state"},
             )
         except Exception:
             _LOGGER.exception("Unable to rebuild EnergyIQ consumption from Home Assistant statistics")
@@ -340,10 +339,10 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             hourly_rows = hourly.get(entity_id, [])
             baseline = None
             for row in reversed(hourly_rows):
-                baseline = self._consumption_number(row.get("sum"))
+                baseline = self._consumption_number(row.get("state"))
                 if baseline is not None:
                     break
-            self._consumption_apply_statistics(accounting, forming, entity_id, initial_sum=baseline)
+            self._consumption_apply_statistics(accounting, forming, entity_id, initial_state=baseline)
         self._consumption_rebuild_month_totals(accounting)
         accounting["seeded_through"] = now.isoformat()
         self.consumption_accounting = accounting
@@ -419,7 +418,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 "last_training_device_id", self.last_training_device_id
             )
             saved_consumption = saved.get("consumption_accounting")
-            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 5 and saved_consumption.get("source") == "home_assistant_statistics_sum_delta":
+            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 6 and saved_consumption.get("source") == "home_assistant_statistics_state_delta":
                 self.consumption_accounting = saved_consumption
                 self._consumption_seeded = bool(saved_consumption.get("seeded_through"))
             else:
