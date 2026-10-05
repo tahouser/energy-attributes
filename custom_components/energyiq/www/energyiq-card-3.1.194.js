@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.227 */
+/* EnergyIQ dashboard card — 3.1.228 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -528,81 +528,125 @@ if (!customElements.get(TAG)) {
       return rows.map(row=>{
         const start=Number(row?.start);
         const end=Number(row?.end);
-        const change=Number(row?.change);
         const sum=Number(row?.sum);
+        const state=Number(row?.state);
         return {
           start:Number.isFinite(start)?start:null,
           end:Number.isFinite(end)?end:null,
-          change:Number.isFinite(change)?change:null,
-          sum:Number.isFinite(sum)?sum:null
+          sum:Number.isFinite(sum)?sum:null,
+          state:Number.isFinite(state)?state:null
         };
-      }).filter(row=>row.start!=null&&row.end!=null&&(row.change!=null||row.sum!=null))
-        .sort((a,b)=>a.start-b.start);
+      }).filter(row=>row.end!=null&&row.sum!=null).sort((a,b)=>a.end-b.end);
     }
-    _consumptionStatisticsDelta(rows,startMs,endMs){
-      // Energy meters are cumulative counters. Use HA's running "sum" as the
-      // canonical source and calculate the selected-period delta from the
-      // counter values. Do not sum API "change" rows: an initialization or
-      // baseline artifact can otherwise appear as thousands of kWh in the
-      // first visible hour.
-      const source=(rows||[]).filter(row=>row?.sum!=null).sort((a,b)=>a.start-b.start);
-      if(!source.length)return null;
-      let baseline=null,last=null,total=0,seen=false;
-      for(const row of source){
-        if(row.end<=startMs){
-          baseline=row.sum;
-          last=row.sum;
-          continue;
-        }
-        if(row.start>=endMs)break;
-        if(baseline==null){
-          baseline=row.sum;
-          last=row.sum;
-          continue;
-        }
-        const delta=Number(row.sum)-Number(last);
-        if(Number.isFinite(delta)){
-          total+=delta>=0?delta:Math.max(0,Number(row.sum));
-          seen=true;
-        }
-        last=row.sum;
+    _consumptionCumulativeAt(rows,timeMs){
+      let best=null;
+      for(const row of rows||[]){
+        if(row.end>timeMs)break;
+        best=row;
       }
-      if(!seen)return null;
-      return Math.max(0,total);
+      return best;
     }
-    _consumptionStatisticsSegments(rows,start,end,now,profile){
-      const step=60*60*1000,segments=[];
-      const source=(rows||[]).filter(row=>row?.sum!=null).sort((a,b)=>a.start-b.start);
-      const byStart=new Map(source.map(row=>[row.start,row]));
-      const previousFor=new Map();
-      let previous=null;
-      for(const row of source){
-        previousFor.set(row.start,previous);
-        previous=row.sum;
+    _consumptionCumulativeAtOrAfter(rows,timeMs){
+      for(const row of rows||[]){
+        if(row.end>=timeMs)return row;
       }
-      for(let t=start.getTime();t<end.getTime();t+=step){
-        const a=new Date(t),b=new Date(Math.min(t+step,end.getTime()));
-        const visibleEnd=new Date(Math.min(b.getTime(),now.getTime()));
-        const visibleMs=Math.max(0,visibleEnd.getTime()-a.getTime());
-        let value=null;
-        if(visibleMs>0){
-          const row=byStart.get(a.getTime());
-          const previousSum=previousFor.get(a.getTime());
-          if(row?.sum!=null&&previousSum!=null){
-            const delta=Number(row.sum)-Number(previousSum);
-            if(Number.isFinite(delta))value=delta>=0?delta:Math.max(0,Number(row.sum));
-          }
+      return null;
+    }
+    _consumptionDeltaBetween(rows,startMs,endMs,liveValue=null,nowMs=Date.now()){
+      if(endMs<=startMs)return null;
+      const before=this._consumptionCumulativeAt(rows,startMs);
+      if(!before)return null;
+
+      let after=this._consumptionCumulativeAt(rows,endMs);
+      if(after&&after.end<=endMs){
+        const delta=Number(after.sum)-Number(before.sum);
+        return Number.isFinite(delta)?Math.max(0,delta):null;
+      }
+
+      // The final interval may still be forming. Convert the live cumulative
+      // sensor state into the same statistics coordinate system using the
+      // most recent statistic's state/sum pair. This never treats the absolute
+      // meter reading as period consumption.
+      if(Number.isFinite(liveValue)&&endMs>=nowMs-2*60*1000){
+        const latest=rows.length?rows[rows.length-1]:null;
+        if(latest&&Number.isFinite(latest.state)&&Number.isFinite(latest.sum)){
+          const liveCumulative=Number(latest.sum)+(liveValue-Number(latest.state));
+          const delta=liveCumulative-Number(before.sum);
+          return Number.isFinite(delta)?Math.max(0,delta):null;
         }
-        const thresholds=this._consumptionThresholds(profile,a);
-        const visible=visibleMs>0&&value!=null;
-        segments.push({
-          start:a,end:b,value:visible?Math.max(0,value):null,visible,
-          visibleFraction:Math.max(0,Math.min(1,visibleMs/Math.max(1,b.getTime()-a.getTime()))),
+      }
+      return null;
+    }
+    _consumptionRateSchedule(){
+      const fallback={start:"15:00:00",end:"19:00:00",days:[1,2,3,4,5]};
+      const raw=this._data?.consumption_peak_schedule;
+      const start=String(raw?.start||fallback.start);
+      const end=String(raw?.end||fallback.end);
+      const days=Array.isArray(raw?.days)?raw.days.map(Number).filter(Number.isInteger):fallback.days;
+      return {start,end,days:days.length?days:fallback.days};
+    }
+    _scheduleMinutes(value,fallback){
+      const parts=String(value||fallback||"00:00:00").split(":");
+      const h=Math.max(0,Math.min(23,Number(parts[0])||0));
+      const m=Math.max(0,Math.min(59,Number(parts[1])||0));
+      return h*60+m;
+    }
+    _isPeakTime(date){
+      const schedule=this._consumptionRateSchedule();
+      const day=date.getDay();
+      if(!schedule.days.includes(day))return false;
+      const start=this._scheduleMinutes(schedule.start,"15:00:00");
+      const end=this._scheduleMinutes(schedule.end,"19:00:00");
+      const minute=date.getHours()*60+date.getMinutes()+date.getSeconds()/60;
+      if(start===end)return false;
+      if(start<end)return minute>=start&&minute<end;
+      return minute>=start||minute<end;
+    }
+    _consumptionTimeline(start,end,now){
+      const segments=[];
+      const peakSchedule=this._consumptionRateSchedule();
+      const peakStart=this._scheduleMinutes(peakSchedule.start,"15:00:00");
+      const peakEnd=this._scheduleMinutes(peakSchedule.end,"19:00:00");
+      for(let dayStart=new Date(start);dayStart<end;dayStart.setDate(dayStart.getDate()+1)){
+        const day=new Date(dayStart);
+        day.setHours(0,0,0,0);
+        const boundaries=[day.getTime(),day.getTime()+24*60*60*1000];
+        if(peakStart!==peakEnd){
+          boundaries.push(day.getTime()+peakStart*60*1000,day.getTime()+peakEnd*60*1000);
+        }
+        boundaries.sort((a,b)=>a-b);
+        for(let i=0;i<boundaries.length-1;i++){
+          const aMs=Math.max(start.getTime(),boundaries[i]);
+          const bMs=Math.min(end.getTime(),boundaries[i+1]);
+          if(bMs<=aMs)continue;
+          const a=new Date(aMs),b=new Date(bMs);
+          const mid=new Date(aMs+(bMs-aMs)/2);
+          const peak=this._isPeakTime(mid);
+          const visibleEnd=new Date(Math.min(bMs,now.getTime()));
+          const visibleMs=Math.max(0,visibleEnd.getTime()-aMs);
+          segments.push({
+            start:a,end:b,rate:peak?"peak":"off_peak",visibleMs,
+            visibleFraction:Math.max(0,Math.min(1,visibleMs/Math.max(1,bMs-aMs)))
+          });
+        }
+      }
+      return segments.sort((a,b)=>a.start-b.start);
+    }
+    _consumptionStatisticsSegments(rows,start,end,now,profile,liveValue=null){
+      const timeline=this._consumptionTimeline(start,end,now);
+      return timeline.filter(segment=>segment.rate===profile).map(segment=>{
+        const value=segment.visibleMs>0
+          ?this._consumptionDeltaBetween(rows,segment.start.getTime(),Math.min(segment.end.getTime(),now.getTime()),liveValue,now.getTime())
+          :null;
+        const thresholds=this._consumptionThresholds(profile,segment.start);
+        const visible=segment.visibleMs>0&&value!=null;
+        return Object.assign({},segment,{
+          value:visible?Math.max(0,value):null,
+          visible,
           thresholds,
-          color:visible?this._consumptionSegmentColor(Math.max(0,value),thresholds,visibleMs/Math.max(1,b.getTime()-a.getTime())):"future"
+          color:visible?this._consumptionSegmentColor(Math.max(0,value),thresholds,segment.visibleFraction):"future"
         });
-      }
-      return segments;
+      });
     }
     _consumptionDelta(states,start,end,liveValue=null){
       // Raw recorder history is a secondary fallback only. It must establish
@@ -661,25 +705,22 @@ if (!customElements.get(TAG)) {
       try{
         const period=this._costPeriod,now=new Date();
         const start=this._periodStart(period,0,now),end=this._periodEnd(period,start);
-        const statisticsStart=new Date(start.getTime()-60*60*1000);
         const ids=["sensor.dte_house_energy_peak","sensor.dte_house_energy_off_peak"];
 
-        // Prefer HA recorder statistics for cumulative energy. HA maintains
-        // statistics for TOTAL/TOTAL_INCREASING energy sensors, so this gives
-        // us actual accumulated growth without ever displaying the meter's
-        // absolute state as selected-period consumption.
+        // Consumption is calculated from HA's cumulative energy statistics.
+        // The selected rate schedule determines which meter contributes to
+        // each timeline segment. Raw cumulative states are never used as a
+        // period total or as a substitute for a missing statistics baseline.
+        const statisticsStart=new Date(start.getTime()-2*60*60*1000);
         const statistics=await this._ws({
           type:"recorder/statistics_during_period",
           start_time:statisticsStart.toISOString(),
           end_time:now.toISOString(),
           statistic_ids:ids,
           period:"hour",
-          types:["sum"]
+          types:["state","sum"]
         }).catch(()=>({}));
 
-        // Raw history is retained as a fallback for installations where the
-        // energy sensors have no usable statistics yet. Fetch only the selected
-        // period plus a small baseline window; never use a lone cumulative state.
         const historyStart=new Date(start.getTime()-60*60*1000);
         const history=await this._ws({
           type:"history/history_during_period",
@@ -694,35 +735,44 @@ if (!customElements.get(TAG)) {
 
         const build=async(id,profile)=>{
           const rows=this._consumptionStatisticsRows(statistics,id);
-          const statCurrent=this._consumptionStatisticsDelta(rows,start.getTime(),now.getTime());
-          const statSegments=this._consumptionStatisticsSegments(rows,start,end,now,profile);
           const states=history?.[id]||[];
           const live=Number(this._hass?.states?.[id]?.state);
           const liveValue=Number.isFinite(live)?live:null;
-          const rawSegments=this._consumptionSegments(states,start,end,now,profile,liveValue);
+          const segments=this._consumptionStatisticsSegments(rows,start,end,now,profile,liveValue);
 
-          // HA long-term statistics are the authoritative source for completed
-          // hours. Raw history is used only to fill the still-forming current
-          // hour when no statistics row exists for it yet.
-          let segments=statSegments;
-          const lastIndex=Math.max(0,segments.length-1);
-          if(lastIndex>=0&&segments[lastIndex]?.visible===false&&rawSegments[lastIndex]?.visible){
-            segments=segments.map((segment,index)=>index===lastIndex?rawSegments[index]:segment);
-          }
+          // Current total is the sum of valid rate segments, not a raw meter
+          // reading and not a sum of recorder "change" rows.
+          const currentValues=segments.filter(s=>s.visible&&Number.isFinite(Number(s.value)));
+          const current=currentValues.length
+            ?currentValues.reduce((sum,s)=>sum+(Number(s.value)||0),0)
+            :null;
 
-          let current=statCurrent;
-          if(current!=null&&lastIndex>=0&&segments[lastIndex]?.visible&&rawSegments[lastIndex]?.visible&&statSegments[lastIndex]?.visible===false){
-            current+=Number(rawSegments[lastIndex].value)||0;
-          }else if(current==null){
-            current=this._consumptionDelta(states,start,now,liveValue);
+          // Historical state deltas are used only to establish color context.
+          // They are never allowed to become the accounting fallback.
+          const samplesBySegment=segments.map(segment=>{
+            const samples=this._segmentHistoricalSamples(
+              states,period,start,segment.start,segment.end,now,30
+            );
+            return {segment,samples};
+          });
+          for(const item of samplesBySegment){
+            const values=item.samples;
+            const average=values.length?values.reduce((a,b)=>a+b,0)/values.length:null;
+            item.segment.average=average;
+            item.segment.ratio=average>0&&item.segment.value!=null?item.segment.value/average:null;
+            item.segment.color=item.segment.visible
+              ?this._consumptionSegmentColor(item.segment.value,item.segment.thresholds,item.segment.visibleFraction)
+              :"future";
           }
           return {current,segments,available:current!=null};
         };
+
         const [peak,off]=await Promise.all([
           build(ids[0],"peak"),
           build(ids[1],"off_peak")
         ]);
-        this._dashboardHistory={peak,off,total:(peak.current||0)+(off.current||0)};
+
+        this._dashboardHistory={peak,off,total:(peak.current||0)+(off.current||0),schedule:this._consumptionRateSchedule()};
         this._dashboardHistoryAt=Date.now();
       }catch(e){
         console.error("EnergyIQ consumption history",e);
@@ -817,47 +867,45 @@ if (!customElements.get(TAG)) {
       const mysteryWidth=this._periodProgress(this._costPeriod)*100;
       return '<div class="myst"><div class="myst-headline"><div class="big">'+Math.round(mystery)+' <span>W</span></div><div class="myst-now">Unexplained right now</div></div><div class="myst-bar-row"><span>Whole-Home</span><div class="myst-bar-track"><div class="myst-bar-fill" style="width:'+mysteryWidth.toFixed(2)+'%"></div></div><strong>'+Math.round(mystery)+' W</strong></div></div>';
     }
-    _consumptionChart(label,item){
+    _consumptionChart(label,item,start,end,period){
       const bins=item?.segments||[];
-      const current=Number(item?.current);
-      const valueLabel=Number.isFinite(current)?current.toFixed(1)+" kWh":"—";
-      const W=640,H=96,base=86,top=8;
-      const head='<div class="cost-bar-head"><span>'+label+'</span><strong>'+valueLabel+'</strong></div>';
-      if(!bins.length||!bins.some(b=>b.visible&&Number.isFinite(Number(b.value)))){
-        return '<div class="cost-bar-row consumption-bar-row">'+head+'<div class="consumption-line-track consumption-unavailable">No meaningful period data</div></div>';
-      }
-      const startTime=bins[0].start.getTime();
-      const endTime=bins[bins.length-1].end.getTime();
-      const span=Math.max(1,endTime-startTime);
+      const W=640,H=72,base=62,top=6;
+      const startTime=start.getTime(),endTime=end.getTime(),span=Math.max(1,endTime-startTime);
+      const xAt=time=>Math.max(0,Math.min(W,(time-startTime)/span*W));
       const visible=bins.filter(b=>b.visible&&Number.isFinite(Number(b.value)));
       const maxValue=Math.max(0,...visible.map(b=>Number(b.value)||0));
       const maxThreshold=Math.max(0,...visible.map(b=>Number(b.thresholds?.red)||0));
       const yMax=Math.max(0.25,maxValue,maxThreshold)*1.12;
-      const xAt=time=>Math.max(0,Math.min(W,(time-startTime)/span*W));
       const yAt=value=>base-(Math.max(0,Number(value)||0)/yMax)*(base-top);
       let areas="",points=[],previous=null;
       for(const bin of bins){
-        if(!bin.visible||!Number.isFinite(Number(bin.value)))break;
+        if(!bin.visible||!Number.isFinite(Number(bin.value))){
+          previous=null;
+          continue;
+        }
         const x0=xAt(bin.start.getTime());
-        const end=bin.end.getTime();
         const fraction=Math.max(0,Math.min(1,bin.visibleFraction||1));
-        const x1=xAt(bin.start.getTime()+(end-bin.start.getTime())*fraction);
+        const x1=xAt(bin.start.getTime()+(bin.end.getTime()-bin.start.getTime())*fraction);
         const y1=yAt(bin.value);
         const y0=yAt(previous==null?0:previous);
         const cls=bin.color==="red"?"red":bin.color==="yellow"?"yellow":"green";
         areas+='<polygon points="'+x0.toFixed(2)+','+base+' '+x0.toFixed(2)+','+y0.toFixed(2)+' '+x1.toFixed(2)+','+y1.toFixed(2)+' '+x1.toFixed(2)+','+base+'" class="cons-area '+cls+'"/>';
-        if(!points.length)points.push(x0.toFixed(2)+','+y0.toFixed(2));
+        if(!points.length||previous===null)points.push(x0.toFixed(2)+','+y0.toFixed(2));
         points.push(x1.toFixed(2)+','+y1.toFixed(2));
         previous=Number(bin.value)||0;
       }
       const path=points.length>1?'<polyline points="'+points.join(" ")+'" class="cons-line"/>':"";
-      return '<div class="cost-bar-row consumption-bar-row">'+head+'<div class="consumption-line-track" aria-label="'+label+' hourly consumption history"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+areas+path+'</svg></div></div>';
+      const scheduleLabel=label==="Peak"?"Peak hours":"Off-Peak hours";
+      const head='<div class="cost-bar-head"><span>'+label+'</span><strong>'+((Number.isFinite(Number(item?.current))?Number(item.current).toFixed(1):"—"))+' kWh</strong></div>';
+      const timeline='<div class="consumption-timeline"><svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none" aria-label="'+scheduleLabel+' consumption history">'+areas+path+'</svg></div>';
+      return '<div class="cost-bar-row consumption-bar-row">'+head+timeline+'</div>';
     }
     _consumption(){
       const h=this._dashboardHistory;
       const labels={day:"DAY",week:"WEEK",month:"MONTH"},periodLabel=labels[this._costPeriod]||"DAY";
       if(!h)return '<div class="cost-loading">Loading consumption history…</div>';
-      return '<div class="cost-swipe consumption-swipe" role="group" aria-label="Consumption period '+periodLabel+'. Swipe left or right to change period."><div class="cost-bars">'+this._consumptionChart("Peak",h.peak)+this._consumptionChart("Off-Peak",h.off)+'</div><div class="cost-period-nav"><button type="button" data-cost-period="prev" aria-label="Previous consumption period">‹</button><strong>'+periodLabel+'</strong><button type="button" data-cost-period="next" aria-label="Next consumption period">›</button></div></div>';
+      const now=new Date(),start=this._periodStart(this._costPeriod,0,now),end=this._periodEnd(this._costPeriod,start);
+      return '<div class="cost-swipe consumption-swipe" role="group" aria-label="Consumption period '+periodLabel+'. Swipe left or right to change period."><div class="consumption-bars">'+this._consumptionChart("Off-Peak",h.off,start,end,this._costPeriod)+this._consumptionChart("Peak",h.peak,start,end,this._costPeriod)+'</div><div class="cost-period-nav"><button type="button" data-cost-period="prev" aria-label="Previous consumption period">‹</button><strong>'+periodLabel+'</strong><button type="button" data-cost-period="next" aria-label="Next consumption period">›</button></div></div>';
     }
 
     _cost(total,peak,off){
@@ -876,7 +924,7 @@ if (!customElements.get(TAG)) {
       };
       return '<div class="cost-swipe" role="group" aria-label="Cost period '+periodLabel+'. Swipe left or right to change period."><div class="cost-bars">'+bar("Peak",learned.peak)+bar("Off-Peak",learned.off)+'</div><div class="cost-period-nav"><button type="button" data-cost-period="prev" aria-label="Previous cost period">‹</button><strong>'+periodLabel+'</strong><button type="button" data-cost-period="next" aria-label="Next cost period">›</button></div></div>';
     }
-    _css(){return ':host{display:block;width:100%;min-width:0;max-width:100%;height:auto;box-sizing:border-box;container-type:inline-size;container-name:energyiq-card}.pad{padding:clamp(10px,2.2cqw,16px) clamp(10px,2.4cqw,16px) clamp(8px,1.7cqw,10px);color:var(--primary-text-color);min-width:0;width:100%;height:auto;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column}ha-card{display:flex;flex-direction:column;width:100%;height:auto;max-width:100%;box-sizing:border-box;overflow:hidden}.head{display:flex;justify-content:space-between;align-items:flex-start;gap:clamp(6px,1.5cqw,10px);flex:0 0 auto}.card-title-wrap{display:flex;align-items:center;gap:clamp(6px,1.5cqw,9px);min-width:0}.energyiq-brand-icon{width:28px;height:28px;object-fit:contain;display:block}.card-icon{width:clamp(28px,5.5cqw,34px);height:clamp(28px,5.5cqw,34px);flex:none;display:grid;place-items:center;border-radius:clamp(8px,1.7cqw,10px);background:rgba(28,205,255,.12);border:1px solid rgba(28,205,255,.28);overflow:hidden}.card-icon svg{width:88%;height:88%;display:block}.head-actions{display:flex;align-items:center;gap:clamp(3px,1cqw,6px);flex:none}.eyebrow{font-size:clamp(.62rem,1.9cqw,.72rem);letter-spacing:.12em;font-weight:700;color:var(--secondary-text-color)}.title{font-size:clamp(.98rem,3.2cqw,1.2rem);font-weight:700;line-height:1.15}.cost-view .title{font-size:clamp(1.18rem,4.2cqw,1.58rem);font-weight:800}.sub{font-size:clamp(.68rem,2cqw,.78rem);color:var(--secondary-text-color);line-height:1.2}.head-actions button{width:clamp(30px,5.8cqw,36px);height:clamp(30px,5.8cqw,36px);padding:0}button{width:clamp(34px,6.5cqw,40px);height:clamp(34px,6.5cqw,40px);border:0;border-radius:50%;background:var(--primary-color,#03a9f4);color:#fff;font-size:clamp(1.15rem,3.5cqw,1.5rem);cursor:pointer}.active-shortcut{background:rgba(20,242,184,.14);color:#35e7b0;border:1px solid rgba(20,242,184,.35)}.open-shortcut{background:rgba(28,205,255,.12);color:#36c8ff;border:1px solid rgba(28,205,255,.28)}.body{min-height:0;flex:1;display:flex;align-items:center;min-width:0;width:100%;overflow:hidden}.dots{display:flex;justify-content:center;gap:6px;flex:0 0 auto;padding-top:4px}.dots i{width:6px;height:6px;border-radius:50%;background:var(--divider-color)}.dots i.on{background:var(--primary-color)}.chart{width:100%;min-width:0;overflow:hidden}.summary{display:flex;gap:7px;align-items:baseline;margin:4px}.summary b,.big{font-size:clamp(1.65rem,5.5cqw,2.1rem);line-height:1.05}.summary span,.sub{color:var(--secondary-text-color);font-size:clamp(.68rem,2cqw,.76rem)}svg{display:block;width:100%;max-width:100%;height:min(175px,30cqw);min-height:105px;overflow:hidden}.axis{stroke:var(--divider-color)}.line{fill:none;stroke:var(--primary-color);stroke-width:3;stroke-linecap:round}.dotline{fill:var(--primary-color);stroke:var(--ha-card-background,#1c1c1c);stroke-width:2}.v{fill:var(--primary-text-color);font-size:clamp(9px,1.8cqw,11px);font-weight:700}.x{fill:var(--secondary-text-color);font-size:clamp(8px,1.8cqw,11px)}.c0{fill:#2196f3}.c1{fill:#42a5f5}.c2{fill:#26a69a}.c3{fill:#ffb300}.c4{fill:#ef5350}.myst,.cost{width:100%;padding:0;box-sizing:border-box;min-width:0}.cost-swipe{width:100%;min-width:0;touch-action:pan-y}.cost-bars{display:flex;flex-direction:column;gap:18px;width:100%;padding:6px 0 12px}.cost-bar-row{width:100%}.cost-bar-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:7px}.cost-bar-head span{font-size:clamp(1rem,3cqw,1.18rem);font-weight:800;letter-spacing:.02em}.cost-bar-head strong{font-size:clamp(1.1rem,3.8cqw,1.45rem);font-weight:800;font-variant-numeric:tabular-nums}.cost-bar-track{position:relative;width:100%;height:24px;border-radius:8px;overflow:hidden;background:var(--secondary-background-color);border:1px solid var(--divider-color);box-sizing:border-box}.cost-bar-segments{position:absolute;inset:0;display:flex;width:100%;height:100%;overflow:hidden}.consumption-line-track{height:96px;border-radius:10px;overflow:hidden;background:var(--secondary-background-color);border:1px solid var(--divider-color);box-sizing:border-box;padding:0}.consumption-line-track svg{display:block;width:100%;height:100%;overflow:hidden}.consumption-unavailable{display:flex;align-items:center;justify-content:center;height:96px;color:var(--secondary-text-color);font-size:.78rem}.cons-area{opacity:.9}.cons-area.green{fill:#43d85b}.cons-area.yellow{fill:#f2c21f}.cons-area.red{fill:#e8453c}.cons-line{fill:none;stroke:var(--primary-text-color);stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}.cons-future{stroke:var(--divider-color);stroke-width:1;vector-effect:non-scaling-stroke}.myst{width:100%;padding:0;box-sizing:border-box;min-width:0}.myst-headline{display:flex;align-items:baseline;gap:12px;margin:2px 0 12px}.myst-now{font-size:clamp(.8rem,2.4cqw,1rem);color:var(--secondary-text-color)}.myst-bar-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px}.myst-bar-row>span{font-size:clamp(1rem,3cqw,1.2rem);font-weight:800}.myst-bar-row>strong{font-size:clamp(1rem,3cqw,1.2rem);font-weight:800;font-variant-numeric:tabular-nums}.myst-bar-track{position:relative;height:24px;border-radius:8px;overflow:hidden;background:var(--secondary-background-color);border:1px solid var(--divider-color);box-sizing:border-box}.myst-bar-fill{height:100%;background:#e8453c;border-radius:7px;transition:width .35s ease}.consumption-head-total{min-width:90px}.cost-bar-segment{flex:1 1 0;height:100%;min-width:0;border-right:1px solid rgba(0,0,0,.10);box-sizing:border-box}.cost-bar-segment:last-child{border-right:0}.cost-bar-segment.green{background:#43d85b}.cost-bar-segment.yellow{background:#f2c21f}.cost-bar-segment.red{background:#e8453c}.cost-bar-segment.neutral{background:#70757a}.cost-bar-future{position:absolute;top:0;bottom:0;right:0;background:var(--secondary-background-color);border-left:1px solid var(--divider-color);z-index:2;transition:left .35s ease}.cost-bar-fill{display:none}.cost-bar-fill.green{background:#43d85b}.cost-bar-fill.yellow{background:#f2c21f}.cost-bar-fill.red{background:#e8453c}.cost-bar-fill.neutral{background:#70757a}.cost-period-nav{display:flex;align-items:center;justify-content:center;gap:10px;margin:4px 0 0}.cost-period-nav strong{font-size:clamp(1rem,3.2cqw,1.25rem);letter-spacing:.08em;font-weight:800}.cost-period-nav button{width:30px;height:30px;font-size:1.35rem;line-height:1;background:transparent;color:var(--primary-text-color);border:1px solid var(--divider-color);cursor:pointer;display:grid;place-items:center}.cost-period-nav button:hover{background:var(--secondary-background-color);border-color:var(--primary-color)}.cost-head-total{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;min-width:68px;margin-left:auto;margin-right:clamp(4px,1.5cqw,10px);padding-top:0}.cost-head-total span{font-size:clamp(.52rem,1.5cqw,.62rem);letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}.cost-head-total strong{font-size:clamp(1rem,3cqw,1.28rem);line-height:1.05;font-variant-numeric:tabular-nums;white-space:nowrap}.cost-loading,.cost-error{width:100%;text-align:center;color:var(--secondary-text-color);padding:22px 10px}.cost-error{color:var(--error-color)}@container energyiq-card (max-width:420px){.cost-period-nav{gap:7px;margin-top:8px;margin-bottom:0}.cost-bars{gap:8px}.cost-track{height:21px}.cost-bar-main{grid-template-columns:minmax(0,1fr) 68px;gap:6px}.cost-total{font-size:.9rem}.cost-view .title{font-size:1.3rem}}@container energyiq-card (max-width:420px){.pad{padding:9px 10px 7px}.head-actions button{width:29px;height:29px}.active-shortcut{font-size:0}.active-shortcut::before{content:"⚡";font-size:1rem}.title{font-size:1rem}.sub{font-size:.67rem}.summary{margin:2px}.summary b,.big{font-size:1.7rem}svg{height:120px;min-height:100px}.legend{gap:5px}.break{gap:6px}}@container energyiq-card (max-height:240px){.pad{padding-top:8px;padding-bottom:6px}.body{overflow:hidden}.sub{display:none}.dots{padding-top:2px}.track{margin-top:8px}.break{margin-top:7px}}@container energyiq-card (min-width:700px){.body{padding-left:4px;padding-right:4px}.summary{margin-left:0}.chart svg{height:min(185px,28cqw)}}.empty{width:100%;text-align:center;color:var(--secondary-text-color);font-size:clamp(.78rem,2.3cqw,.9rem);padding:10px}.err{margin-top:10px;color:var(--error-color)}.active-loads-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center;padding:16px}.active-loads{width:min(430px,100%);max-height:82vh;overflow:auto;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:14px;box-shadow:var(--ha-card-box-shadow);padding:16px;box-sizing:border-box}.active-loads-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.active-loads-title{font-size:1.25rem;font-weight:800}.active-loads-head button{width:38px;height:38px;padding:0}.active-load-list{margin-top:12px}.active-load-row{display:flex;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid var(--divider-color)}.active-load-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.active-load-row strong{white-space:nowrap;font-variant-numeric:tabular-nums}.active-load-empty{text-align:center;padding:22px;color:var(--secondary-text-color)}.active-load-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}.active-load-summary div{padding:9px;border-radius:9px;background:var(--secondary-background-color);border:1px solid var(--divider-color)}.active-load-summary span{display:block;font-size:9px;text-transform:uppercase;color:var(--secondary-text-color)}.active-load-summary strong{display:block;margin-top:3px;font-size:14px;font-variant-numeric:tabular-nums}@media(max-width:500px){.active-loads-backdrop{padding:10px}.active-loads{max-height:88vh;padding:14px}.active-load-summary{grid-template-columns:1fr 1fr}.active-load-summary div:last-child{grid-column:1/-1}}';}
+    _css(){return ':host{display:block;width:100%;min-width:0;max-width:100%;height:auto;box-sizing:border-box;container-type:inline-size;container-name:energyiq-card}.pad{padding:clamp(10px,2.2cqw,16px) clamp(10px,2.4cqw,16px) clamp(8px,1.7cqw,10px);color:var(--primary-text-color);min-width:0;width:100%;height:auto;box-sizing:border-box;overflow:hidden;display:flex;flex-direction:column}ha-card{display:flex;flex-direction:column;width:100%;height:auto;max-width:100%;box-sizing:border-box;overflow:hidden}.head{display:flex;justify-content:space-between;align-items:flex-start;gap:clamp(6px,1.5cqw,10px);flex:0 0 auto}.card-title-wrap{display:flex;align-items:center;gap:clamp(6px,1.5cqw,9px);min-width:0}.energyiq-brand-icon{width:28px;height:28px;object-fit:contain;display:block}.card-icon{width:clamp(28px,5.5cqw,34px);height:clamp(28px,5.5cqw,34px);flex:none;display:grid;place-items:center;border-radius:clamp(8px,1.7cqw,10px);background:rgba(28,205,255,.12);border:1px solid rgba(28,205,255,.28);overflow:hidden}.card-icon svg{width:88%;height:88%;display:block}.head-actions{display:flex;align-items:center;gap:clamp(3px,1cqw,6px);flex:none}.eyebrow{font-size:clamp(.62rem,1.9cqw,.72rem);letter-spacing:.12em;font-weight:700;color:var(--secondary-text-color)}.title{font-size:clamp(.98rem,3.2cqw,1.2rem);font-weight:700;line-height:1.15}.cost-view .title{font-size:clamp(1.18rem,4.2cqw,1.58rem);font-weight:800}.sub{font-size:clamp(.68rem,2cqw,.78rem);color:var(--secondary-text-color);line-height:1.2}.head-actions button{width:clamp(30px,5.8cqw,36px);height:clamp(30px,5.8cqw,36px);padding:0}button{width:clamp(34px,6.5cqw,40px);height:clamp(34px,6.5cqw,40px);border:0;border-radius:50%;background:var(--primary-color,#03a9f4);color:#fff;font-size:clamp(1.15rem,3.5cqw,1.5rem);cursor:pointer}.active-shortcut{background:rgba(20,242,184,.14);color:#35e7b0;border:1px solid rgba(20,242,184,.35)}.open-shortcut{background:rgba(28,205,255,.12);color:#36c8ff;border:1px solid rgba(28,205,255,.28)}.body{min-height:0;flex:1;display:flex;align-items:center;min-width:0;width:100%;overflow:hidden}.dots{display:flex;justify-content:center;gap:6px;flex:0 0 auto;padding-top:4px}.dots i{width:6px;height:6px;border-radius:50%;background:var(--divider-color)}.dots i.on{background:var(--primary-color)}.chart{width:100%;min-width:0;overflow:hidden}.summary{display:flex;gap:7px;align-items:baseline;margin:4px}.summary b,.big{font-size:clamp(1.65rem,5.5cqw,2.1rem);line-height:1.05}.summary span,.sub{color:var(--secondary-text-color);font-size:clamp(.68rem,2cqw,.76rem)}svg{display:block;width:100%;max-width:100%;height:min(175px,30cqw);min-height:105px;overflow:hidden}.axis{stroke:var(--divider-color)}.line{fill:none;stroke:var(--primary-color);stroke-width:3;stroke-linecap:round}.dotline{fill:var(--primary-color);stroke:var(--ha-card-background,#1c1c1c);stroke-width:2}.v{fill:var(--primary-text-color);font-size:clamp(9px,1.8cqw,11px);font-weight:700}.x{fill:var(--secondary-text-color);font-size:clamp(8px,1.8cqw,11px)}.c0{fill:#2196f3}.c1{fill:#42a5f5}.c2{fill:#26a69a}.c3{fill:#ffb300}.c4{fill:#ef5350}.myst,.cost{width:100%;padding:0;box-sizing:border-box;min-width:0}.cost-swipe{width:100%;min-width:0;touch-action:pan-y}.cost-bars{display:flex;flex-direction:column;gap:18px;width:100%;padding:6px 0 12px}.cost-bar-row{width:100%}.cost-bar-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:7px}.cost-bar-head span{font-size:clamp(1rem,3cqw,1.18rem);font-weight:800;letter-spacing:.02em}.cost-bar-head strong{font-size:clamp(1.1rem,3.8cqw,1.45rem);font-weight:800;font-variant-numeric:tabular-nums}.cost-bar-track{position:relative;width:100%;height:24px;border-radius:8px;overflow:hidden;background:var(--secondary-background-color);border:1px solid var(--divider-color);box-sizing:border-box}.cost-bar-segments{position:absolute;inset:0;display:flex;width:100%;height:100%;overflow:hidden}.consumption-bars{display:flex;flex-direction:column;gap:4px;width:100%;padding:6px 0 12px}.consumption-bar-row{width:100%}.consumption-timeline{height:72px;border-radius:8px;overflow:hidden;background:var(--secondary-background-color);border:1px solid var(--divider-color);box-sizing:border-box}.consumption-timeline svg{display:block;width:100%;height:100%;overflow:hidden}.consumption-bar-row .cost-bar-head{margin-bottom:4px}.consumption-bar-row .cost-bar-head span{font-size:clamp(.92rem,2.8cqw,1.08rem)}.consumption-bar-row .cost-bar-head strong{font-size:clamp(.95rem,3.2cqw,1.2rem)}.cons-area{opacity:.9}.cons-area.green{fill:#43d85b}.cons-area.yellow{fill:#f2c21f}.cons-area.red{fill:#e8453c}.cons-line{fill:none;stroke:var(--primary-text-color);stroke-width:1.6;vector-effect:non-scaling-stroke;stroke-linejoin:round;stroke-linecap:round}.cons-future{stroke:var(--divider-color);stroke-width:1;vector-effect:non-scaling-stroke}.myst{width:100%;padding:0;box-sizing:border-box;min-width:0}.myst-headline{display:flex;align-items:baseline;gap:12px;margin:2px 0 12px}.myst-now{font-size:clamp(.8rem,2.4cqw,1rem);color:var(--secondary-text-color)}.myst-bar-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px}.myst-bar-row>span{font-size:clamp(1rem,3cqw,1.2rem);font-weight:800}.myst-bar-row>strong{font-size:clamp(1rem,3cqw,1.2rem);font-weight:800;font-variant-numeric:tabular-nums}.myst-bar-track{position:relative;height:24px;border-radius:8px;overflow:hidden;background:var(--secondary-background-color);border:1px solid var(--divider-color);box-sizing:border-box}.myst-bar-fill{height:100%;background:#e8453c;border-radius:7px;transition:width .35s ease}.consumption-head-total{min-width:90px}.cost-bar-segment{flex:1 1 0;height:100%;min-width:0;border-right:1px solid rgba(0,0,0,.10);box-sizing:border-box}.cost-bar-segment:last-child{border-right:0}.cost-bar-segment.green{background:#43d85b}.cost-bar-segment.yellow{background:#f2c21f}.cost-bar-segment.red{background:#e8453c}.cost-bar-segment.neutral{background:#70757a}.cost-bar-future{position:absolute;top:0;bottom:0;right:0;background:var(--secondary-background-color);border-left:1px solid var(--divider-color);z-index:2;transition:left .35s ease}.cost-bar-fill{display:none}.cost-bar-fill.green{background:#43d85b}.cost-bar-fill.yellow{background:#f2c21f}.cost-bar-fill.red{background:#e8453c}.cost-bar-fill.neutral{background:#70757a}.cost-period-nav{display:flex;align-items:center;justify-content:center;gap:10px;margin:4px 0 0}.cost-period-nav strong{font-size:clamp(1rem,3.2cqw,1.25rem);letter-spacing:.08em;font-weight:800}.cost-period-nav button{width:30px;height:30px;font-size:1.35rem;line-height:1;background:transparent;color:var(--primary-text-color);border:1px solid var(--divider-color);cursor:pointer;display:grid;place-items:center}.cost-period-nav button:hover{background:var(--secondary-background-color);border-color:var(--primary-color)}.cost-head-total{display:flex;flex-direction:column;align-items:flex-end;justify-content:flex-start;min-width:68px;margin-left:auto;margin-right:clamp(4px,1.5cqw,10px);padding-top:0}.cost-head-total span{font-size:clamp(.52rem,1.5cqw,.62rem);letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}.cost-head-total strong{font-size:clamp(1rem,3cqw,1.28rem);line-height:1.05;font-variant-numeric:tabular-nums;white-space:nowrap}.cost-loading,.cost-error{width:100%;text-align:center;color:var(--secondary-text-color);padding:22px 10px}.cost-error{color:var(--error-color)}@container energyiq-card (max-width:420px){.cost-period-nav{gap:7px;margin-top:8px;margin-bottom:0}.cost-bars{gap:8px}.cost-track{height:21px}.cost-bar-main{grid-template-columns:minmax(0,1fr) 68px;gap:6px}.cost-total{font-size:.9rem}.cost-view .title{font-size:1.3rem}}@container energyiq-card (max-width:420px){.pad{padding:9px 10px 7px}.head-actions button{width:29px;height:29px}.active-shortcut{font-size:0}.active-shortcut::before{content:"⚡";font-size:1rem}.title{font-size:1rem}.sub{font-size:.67rem}.summary{margin:2px}.summary b,.big{font-size:1.7rem}svg{height:120px;min-height:100px}.legend{gap:5px}.break{gap:6px}}@container energyiq-card (max-height:240px){.pad{padding-top:8px;padding-bottom:6px}.body{overflow:hidden}.sub{display:none}.dots{padding-top:2px}.track{margin-top:8px}.break{margin-top:7px}}@container energyiq-card (min-width:700px){.body{padding-left:4px;padding-right:4px}.summary{margin-left:0}.chart svg{height:min(185px,28cqw)}}.empty{width:100%;text-align:center;color:var(--secondary-text-color);font-size:clamp(.78rem,2.3cqw,.9rem);padding:10px}.err{margin-top:10px;color:var(--error-color)}.active-loads-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center;padding:16px}.active-loads{width:min(430px,100%);max-height:82vh;overflow:auto;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:14px;box-shadow:var(--ha-card-box-shadow);padding:16px;box-sizing:border-box}.active-loads-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.active-loads-title{font-size:1.25rem;font-weight:800}.active-loads-head button{width:38px;height:38px;padding:0}.active-load-list{margin-top:12px}.active-load-row{display:flex;justify-content:space-between;gap:12px;padding:9px 2px;border-bottom:1px solid var(--divider-color)}.active-load-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.active-load-row strong{white-space:nowrap;font-variant-numeric:tabular-nums}.active-load-empty{text-align:center;padding:22px;color:var(--secondary-text-color)}.active-load-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:12px}.active-load-summary div{padding:9px;border-radius:9px;background:var(--secondary-background-color);border:1px solid var(--divider-color)}.active-load-summary span{display:block;font-size:9px;text-transform:uppercase;color:var(--secondary-text-color)}.active-load-summary strong{display:block;margin-top:3px;font-size:14px;font-variant-numeric:tabular-nums}@media(max-width:500px){.active-loads-backdrop{padding:10px}.active-loads{max-height:88vh;padding:14px}.active-load-summary{grid-template-columns:1fr 1fr}.active-load-summary div:last-child{grid-column:1/-1}}';}
   }
   class EnergyIQCardEditor extends HTMLElement {
     constructor() {
