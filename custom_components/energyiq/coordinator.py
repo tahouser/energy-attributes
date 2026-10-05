@@ -187,7 +187,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         # Schema 3 deliberately replaces the prior cumulative-meter delta model.
         # EnergyIQ now consumes only HA recorder/statistics ``change`` values;
         # an absolute meter state is never a Consumption amount.
-        return {"schema_version": 7, "source": "home_assistant_statistics_state_delta_v2", "days": {}, "months": {}, "intervals": []}
+        return {"schema_version": 8, "source": "home_assistant_statistics_change_v2", "days": {}, "months": {}, "intervals": []}
 
     @staticmethod
     def _consumption_number(value) -> float | None:
