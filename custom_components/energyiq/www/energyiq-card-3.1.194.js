@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.232 */
+/* EnergyIQ dashboard card — 3.1.233 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -726,42 +726,50 @@ if (!customElements.get(TAG)) {
       try{
         const period=this._costPeriod,now=new Date();
         const start=this._periodStart(period,0,now),end=this._periodEnd(period,start);
-        const ids=["sensor.dte_house_energy_peak","sensor.dte_house_energy_off_peak"];
-        const historyStart=new Date(start.getTime()-60*60*1000);
-        const history=await this._ws({
-          type:"history/history_during_period",
-          start_time:historyStart.toISOString(),
-          end_time:now.toISOString(),
-          entity_ids:ids,
-          include_start_time_state:true,
-          significant_changes_only:false,
-          minimal_response:true,
-          no_attributes:true
-        }).catch(()=>({}));
         const accounting=this._data?.consumption_accounting||{};
-        const build=(id,profile)=>{
-          const states=history?.[id]||[];
-          const live=Number(this._hass?.states?.[id]?.state);
-          const liveValue=Number.isFinite(live)?live:null;
-          const segments=this._consumptionHistorySegments(states,start,end,now,profile,liveValue);
-          const totals=this._data?.consumption_period_totals?.[period]||null;
-          return {
-            current:totals?Number(totals[profile]||0):null,
-            segments,
-            available:totals!=null,
-          };
+        const rawIntervals=Array.isArray(accounting.intervals)?accounting.intervals:[];
+        const intervalRows=rawIntervals.map(item=>{
+          const a=new Date(item.start),b=new Date(item.end),k=Number(item.kwh);
+          return {start:a,end:b,rate:item.rate,kwh:Number.isFinite(k)?Math.max(0,k):0};
+        }).filter(item=>Number.isFinite(item.start.getTime())&&Number.isFinite(item.end.getTime())&&item.end>item.start);
+
+        const build=(profile)=>{
+          // EnergyIQ's backend ledger is the sole source for the Consumption chart.
+          // Aggregate recorder-statistics sum deltas into one solid hourly segment.
+          // Raw cumulative entity history is deliberately not used here: a first
+          // lifetime meter value can otherwise appear as a false spike.
+          const bins=[];
+          for(let t=start.getTime();t<end.getTime();t+=60*60*1000){
+            const a=new Date(t),b=new Date(Math.min(t+60*60*1000,end.getTime()));
+            const visibleEnd=new Date(Math.min(b.getTime(),now.getTime()));
+            const visibleMs=Math.max(0,visibleEnd.getTime()-a.getTime());
+            if(visibleMs<=0)continue;
+            let value=0;
+            for(const row of intervalRows){
+              if(row.rate!==profile)continue;
+              const overlapStart=Math.max(a.getTime(),row.start.getTime());
+              const overlapEnd=Math.min(visibleEnd.getTime(),row.end.getTime());
+              if(overlapEnd>overlapStart){
+                const rowMs=Math.max(1,row.end.getTime()-row.start.getTime());
+                value+=row.kwh*((overlapEnd-overlapStart)/rowMs);
+              }
+            }
+            const fraction=Math.max(0,Math.min(1,visibleMs/Math.max(1,b.getTime()-a.getTime())));
+            const thresholds=this._consumptionThresholds(profile,a);
+            bins.push({
+              start:a,end:b,value:Math.max(0,value),visible:true,
+              visibleFraction:fraction,thresholds,
+              color:this._consumptionSegmentColor(Math.max(0,value),thresholds,fraction)
+            });
+          }
+          return {current:0,segments:bins,available:true};
         };
-        const totals={
-          day:this._data?.consumption_period_totals?.day,
-          week:this._data?.consumption_period_totals?.week,
-          month:this._data?.consumption_period_totals?.month
-        };
-        const periodTotals=totals[period]||null;
-        const peak=build(ids[0],"peak");
-        const off=build(ids[1],"off_peak");
-        peak.current=periodTotals?Number(periodTotals.peak||0):null;
-        off.current=periodTotals?Number(periodTotals.off_peak||0):null;
-        this._dashboardHistory={peak,off,total:(peak.current||0)+(off.current||0),schedule:this._data?.consumption_peak_schedule||{},accounting};
+
+        const periodTotals=this._data?.consumption_period_totals?.[period]||null;
+        const peak=build("peak"),off=build("off_peak");
+        peak.current=periodTotals?Number(periodTotals.peak||0):0;
+        off.current=periodTotals?Number(periodTotals.off_peak||0):0;
+        this._dashboardHistory={peak,off,total:peak.current+off.current,schedule:this._data?.consumption_peak_schedule||{},accounting};
         this._dashboardHistoryAt=Date.now();
       }catch(e){
         console.error("EnergyIQ consumption history",e);
@@ -770,6 +778,7 @@ if (!customElements.get(TAG)) {
       }
       this._render();
     }
+
     _periodProgress(period,now=new Date()){
       const start=this._periodStart(period,0,now);
       const end=this._periodEnd(period,start);
