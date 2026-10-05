@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.226 */
+/* EnergyIQ dashboard card — 3.1.227 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -540,41 +540,66 @@ if (!customElements.get(TAG)) {
         .sort((a,b)=>a.start-b.start);
     }
     _consumptionStatisticsDelta(rows,startMs,endMs){
-      let total=0,seen=false,previousSum=null;
-      for(const row of rows||[]){
-        if(row.end<=startMs)continue;
-        if(row.start>=endMs)break;
-        if(row.change!=null){
-          total+=Math.max(0,row.change);
-          seen=true;
+      // Energy meters are cumulative counters. Use HA's running "sum" as the
+      // canonical source and calculate the selected-period delta from the
+      // counter values. Do not sum API "change" rows: an initialization or
+      // baseline artifact can otherwise appear as thousands of kWh in the
+      // first visible hour.
+      const source=(rows||[]).filter(row=>row?.sum!=null).sort((a,b)=>a.start-b.start);
+      if(!source.length)return null;
+      let baseline=null,last=null,total=0,seen=false;
+      for(const row of source){
+        if(row.end<=startMs){
+          baseline=row.sum;
+          last=row.sum;
           continue;
         }
-        if(row.sum!=null){
-          if(previousSum!=null)total+=Math.max(0,row.sum-previousSum);
-          previousSum=row.sum;
+        if(row.start>=endMs)break;
+        if(baseline==null){
+          baseline=row.sum;
+          last=row.sum;
+          continue;
+        }
+        const delta=Number(row.sum)-Number(last);
+        if(Number.isFinite(delta)){
+          total+=delta>=0?delta:Math.max(0,Number(row.sum));
           seen=true;
         }
+        last=row.sum;
       }
-      return seen?Math.max(0,total):null;
+      if(!seen)return null;
+      return Math.max(0,total);
     }
     _consumptionStatisticsSegments(rows,start,end,now,profile){
       const step=60*60*1000,segments=[];
-      const source=rows||[];
+      const source=(rows||[]).filter(row=>row?.sum!=null).sort((a,b)=>a.start-b.start);
+      const byStart=new Map(source.map(row=>[row.start,row]));
+      const previousFor=new Map();
+      let previous=null;
+      for(const row of source){
+        previousFor.set(row.start,previous);
+        previous=row.sum;
+      }
       for(let t=start.getTime();t<end.getTime();t+=step){
         const a=new Date(t),b=new Date(Math.min(t+step,end.getTime()));
         const visibleEnd=new Date(Math.min(b.getTime(),now.getTime()));
         const visibleMs=Math.max(0,visibleEnd.getTime()-a.getTime());
         let value=null;
         if(visibleMs>0){
-          value=this._consumptionStatisticsDelta(source,a.getTime(),visibleEnd.getTime());
+          const row=byStart.get(a.getTime());
+          const previousSum=previousFor.get(a.getTime());
+          if(row?.sum!=null&&previousSum!=null){
+            const delta=Number(row.sum)-Number(previousSum);
+            if(Number.isFinite(delta))value=delta>=0?delta:Math.max(0,Number(row.sum));
+          }
         }
         const thresholds=this._consumptionThresholds(profile,a);
         const visible=visibleMs>0&&value!=null;
         segments.push({
-          start:a,end:b,value:visible?value:null,visible,
+          start:a,end:b,value:visible?Math.max(0,value):null,visible,
           visibleFraction:Math.max(0,Math.min(1,visibleMs/Math.max(1,b.getTime()-a.getTime()))),
           thresholds,
-          color:visible?this._consumptionSegmentColor(value,thresholds,visibleMs/Math.max(1,b.getTime()-a.getTime())):"future"
+          color:visible?this._consumptionSegmentColor(Math.max(0,value),thresholds,visibleMs/Math.max(1,b.getTime()-a.getTime())):"future"
         });
       }
       return segments;
@@ -636,6 +661,7 @@ if (!customElements.get(TAG)) {
       try{
         const period=this._costPeriod,now=new Date();
         const start=this._periodStart(period,0,now),end=this._periodEnd(period,start);
+        const statisticsStart=new Date(start.getTime()-60*60*1000);
         const ids=["sensor.dte_house_energy_peak","sensor.dte_house_energy_off_peak"];
 
         // Prefer HA recorder statistics for cumulative energy. HA maintains
@@ -644,11 +670,11 @@ if (!customElements.get(TAG)) {
         // absolute state as selected-period consumption.
         const statistics=await this._ws({
           type:"recorder/statistics_during_period",
-          start_time:start.toISOString(),
+          start_time:statisticsStart.toISOString(),
           end_time:now.toISOString(),
           statistic_ids:ids,
           period:"hour",
-          types:["change","sum"]
+          types:["sum"]
         }).catch(()=>({}));
 
         // Raw history is retained as a fallback for installations where the
@@ -673,10 +699,23 @@ if (!customElements.get(TAG)) {
           const states=history?.[id]||[];
           const live=Number(this._hass?.states?.[id]?.state);
           const liveValue=Number.isFinite(live)?live:null;
-          const rawCurrent=this._consumptionDelta(states,start,now,liveValue);
-          const current=statCurrent!=null?statCurrent:rawCurrent;
           const rawSegments=this._consumptionSegments(states,start,end,now,profile,liveValue);
-          const segments=statCurrent!=null?statSegments:rawSegments;
+
+          // HA long-term statistics are the authoritative source for completed
+          // hours. Raw history is used only to fill the still-forming current
+          // hour when no statistics row exists for it yet.
+          let segments=statSegments;
+          const lastIndex=Math.max(0,segments.length-1);
+          if(lastIndex>=0&&segments[lastIndex]?.visible===false&&rawSegments[lastIndex]?.visible){
+            segments=segments.map((segment,index)=>index===lastIndex?rawSegments[index]:segment);
+          }
+
+          let current=statCurrent;
+          if(current!=null&&lastIndex>=0&&segments[lastIndex]?.visible&&rawSegments[lastIndex]?.visible&&statSegments[lastIndex]?.visible===false){
+            current+=Number(rawSegments[lastIndex].value)||0;
+          }else if(current==null){
+            current=this._consumptionDelta(states,start,now,liveValue);
+          }
           return {current,segments,available:current!=null};
         };
         const [peak,off]=await Promise.all([
