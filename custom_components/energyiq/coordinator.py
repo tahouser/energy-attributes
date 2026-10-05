@@ -187,7 +187,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         # Schema 3 deliberately replaces the prior cumulative-meter delta model.
         # EnergyIQ now consumes only HA recorder/statistics ``change`` values;
         # an absolute meter state is never a Consumption amount.
-        return {"schema_version": 3, "source": "home_assistant_statistics_change", "days": {}, "months": {}}
+        return {"schema_version": 4, "source": "home_assistant_statistics_sum_delta", "days": {}, "months": {}}
 
     @staticmethod
     def _consumption_number(value) -> float | None:
@@ -243,17 +243,43 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         day = accounting.setdefault("days", {}).setdefault(day_key, {"peak": 0.0, "off_peak": 0.0})
         day[rate] = round(float(day.get(rate, 0.0)) + float(change), 6)
 
-    def _consumption_apply_statistics(self, accounting: dict[str, Any], statistic_rows: dict[str, list[dict[str, Any]]], entity_id: str) -> None:
-        """Add only HA positive recorder ``change`` values to the ledger."""
+    def _consumption_apply_statistics(
+        self,
+        accounting: dict[str, Any],
+        statistic_rows: dict[str, list[dict[str, Any]]],
+        entity_id: str,
+    ) -> None:
+        """Convert HA cumulative statistics sums into interval consumption.
+
+        HA's change result can include an initial/gap baseline when there is
+        no statistic immediately before the requested range. EnergyIQ therefore
+        never consumes change directly. It calculates each interval as the
+        difference between consecutive sum values. The first statistic
+        establishes the baseline and contributes zero.
+        """
+        rows = []
         for row in statistic_rows.get(entity_id, []):
-            change = self._consumption_number(row.get("change"))
             start_ts = self._consumption_number(row.get("start"))
-            if change is None or start_ts is None or change <= 0:
+            sum_value = self._consumption_number(row.get("sum"))
+            if start_ts is None or sum_value is None:
                 continue
+            rows.append((start_ts, sum_value))
+
+        rows.sort(key=lambda item: item[0])
+        previous_sum = None
+        for start_ts, current_sum in rows:
+            if previous_sum is None:
+                previous_sum = current_sum
+                continue
+
+            change = current_sum - previous_sum
+            previous_sum = current_sum
+            if change <= 0:
+                continue
+
             when = dt_util.utc_from_timestamp(start_ts)
             rate = "peak" if self._consumption_is_peak(when) else "off_peak"
             self._consumption_add_interval(accounting, rate, when, change)
-
     def _consumption_rebuild_month_totals(self, accounting: dict[str, Any]) -> None:
         """Derive month totals exclusively from the daily ledger."""
         months: dict[str, dict[str, float]] = {}
@@ -371,11 +397,11 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 "last_training_device_id", self.last_training_device_id
             )
             saved_consumption = saved.get("consumption_accounting")
-            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 3 and saved_consumption.get("source") == "home_assistant_statistics_change":
+            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 4 and saved_consumption.get("source") == "home_assistant_statistics_sum_delta":
                 self.consumption_accounting = saved_consumption
                 self._consumption_seeded = bool(saved_consumption.get("seeded_through"))
             else:
-                # Consumption accounting before schema 3 was based on cumulative\n                # meter deltas. That model is intentionally discarded; rebuild\n                # from HA recorder-statistics changes instead.
+                # Consumption accounting before schema 3 was based on cumulative\n                # meter deltas. That model is intentionally discarded; rebuild\n                # from HA recorder-statistics sum deltas instead.
                 self.consumption_accounting = self._empty_consumption_accounting()
                 self._consumption_seeded = False
             for state in self.training_state.values():
