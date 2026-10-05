@@ -201,6 +201,31 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             value = row.get("last_updated")
         return EnergyAttributionCoordinator._consumption_number(value)
 
+    @staticmethod
+    def _consumption_add_interval(
+        accounting: dict[str, Any],
+        rate: str,
+        when: datetime,
+        end: datetime,
+        change: float,
+    ) -> None:
+        """Add one Consumption interval to the daily ledger and interval history."""
+        if change is None or change <= 0 or end <= when:
+            return
+        local = dt_util.as_local(when)
+        local_end = dt_util.as_local(end)
+        day_key = local.date().isoformat()
+        day = accounting.setdefault("days", {}).setdefault(
+            day_key, {"peak": 0.0, "off_peak": 0.0}
+        )
+        day[rate] = round(float(day.get(rate, 0.0)) + float(change), 6)
+        accounting.setdefault("intervals", []).append({
+            "start": local.isoformat(),
+            "end": local_end.isoformat(),
+            "rate": rate,
+            "kwh": round(float(change), 6),
+        })
+
     def _consumption_add_history_delta(self, accounting, rate, start_ts, end_ts, change) -> None:
         """Add a Utility Meter history delta, splitting it at local midnights."""
         if change <= 0 or end_ts <= start_ts:
@@ -221,7 +246,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
 
     def _consumption_apply_history(self, accounting, history_rows, entity_id, live_value=None, live_time=None) -> None:
         """Build tariff consumption from the Utility Meter's own state history."""
-        rate = "peak" if entity_id.endswith("_peak") else "off_peak"
+        rate = "off_peak" if entity_id.endswith("_off_peak") else "peak"
         rows = []
         for row in history_rows.get(entity_id, []):
             value = self._consumption_number(row.get("s", row.get("state")))
@@ -362,7 +387,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 self.consumption_accounting = saved_consumption
                 self._consumption_seeded = bool(saved_consumption.get("seeded_through"))
             else:
-                # Consumption accounting before schema 3 was based on cumulative\n                # meter deltas. That model is intentionally discarded; rebuild\n                # from HA recorder-statistics sum deltas instead.
+                # Older Consumption accounting formats are intentionally\n                # discarded; rebuild from the current Utility Meter history model.
                 self.consumption_accounting = self._empty_consumption_accounting()
                 self._consumption_seeded = False
             for state in self.training_state.values():
