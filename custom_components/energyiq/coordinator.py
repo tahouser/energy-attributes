@@ -187,7 +187,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         # Schema 3 deliberately replaces the prior cumulative-meter delta model.
         # EnergyIQ now consumes only HA recorder/statistics ``change`` values;
         # an absolute meter state is never a Consumption amount.
-        return {"schema_version": 4, "source": "home_assistant_statistics_sum_delta", "days": {}, "months": {}}
+        return {"schema_version": 5, "source": "home_assistant_statistics_sum_delta", "days": {}, "months": {}, "intervals": []}
 
     @staticmethod
     def _consumption_number(value) -> float | None:
@@ -234,14 +234,27 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         return False
 
     @staticmethod
-    def _consumption_add_interval(accounting: dict[str, Any], rate: str, when: datetime, change: float) -> None:
-        """Add one recorder-statistics change to the persistent daily ledger."""
+    def _consumption_add_interval(
+        accounting: dict[str, Any],
+        rate: str,
+        when: datetime,
+        end: datetime,
+        change: float,
+    ) -> None:
+        """Add one recorder-statistics delta to the daily ledger and interval history."""
         if change is None or change <= 0:
             return
         local = dt_util.as_local(when)
+        local_end = dt_util.as_local(end)
         day_key = local.date().isoformat()
         day = accounting.setdefault("days", {}).setdefault(day_key, {"peak": 0.0, "off_peak": 0.0})
         day[rate] = round(float(day.get(rate, 0.0)) + float(change), 6)
+        accounting.setdefault("intervals", []).append({
+            "start": local.isoformat(),
+            "end": local_end.isoformat(),
+            "rate": rate,
+            "kwh": round(float(change), 6),
+        })
 
     def _consumption_apply_statistics(
         self,
@@ -260,14 +273,15 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         rows = []
         for row in statistic_rows.get(entity_id, []):
             start_ts = self._consumption_number(row.get("start"))
+            end_ts = self._consumption_number(row.get("end"))
             sum_value = self._consumption_number(row.get("sum"))
-            if start_ts is None or sum_value is None:
+            if start_ts is None or end_ts is None or sum_value is None:
                 continue
-            rows.append((start_ts, sum_value))
+            rows.append((start_ts, end_ts, sum_value))
 
         rows.sort(key=lambda item: item[0])
         previous_sum = None
-        for start_ts, current_sum in rows:
+        for start_ts, end_ts, current_sum in rows:
             if previous_sum is None:
                 previous_sum = current_sum
                 continue
@@ -279,7 +293,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
 
             when = dt_util.utc_from_timestamp(start_ts)
             rate = "peak" if self._consumption_is_peak(when) else "off_peak"
-            self._consumption_add_interval(accounting, rate, when, change)
+            interval_end = dt_util.utc_from_timestamp(end_ts)
+            self._consumption_add_interval(accounting, rate, when, interval_end, change)
     def _consumption_rebuild_month_totals(self, accounting: dict[str, Any]) -> None:
         """Derive month totals exclusively from the daily ledger."""
         months: dict[str, dict[str, float]] = {}
@@ -306,11 +321,11 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         try:
             hourly = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"change"},
+                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"sum"},
             )
             forming = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"change"},
+                self.hass, utc_current_hour - timedelta(minutes=5), utc_now, ids, "5minute", None, {"sum"},
             )
         except Exception:
             _LOGGER.exception("Unable to rebuild EnergyIQ consumption from Home Assistant statistics")
@@ -397,7 +412,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 "last_training_device_id", self.last_training_device_id
             )
             saved_consumption = saved.get("consumption_accounting")
-            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 4 and saved_consumption.get("source") == "home_assistant_statistics_sum_delta":
+            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 5 and saved_consumption.get("source") == "home_assistant_statistics_sum_delta":
                 self.consumption_accounting = saved_consumption
                 self._consumption_seeded = bool(saved_consumption.get("seeded_through"))
             else:
