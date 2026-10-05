@@ -286,20 +286,19 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         """Rebuild recent Consumption from HA recorder-statistics cumulative sums."""
         now = dt_util.now()
         local_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        local_history_start = local_month_start - timedelta(days=7)
         current_hour = now.replace(minute=0, second=0, microsecond=0)
-        utc_start = dt_util.as_utc(local_history_start)
+        utc_start = dt_util.as_utc(local_month_start)
         utc_current_hour = dt_util.as_utc(current_hour)
         utc_now = dt_util.as_utc(now)
         ids = {"sensor.dte_house_energy_peak", "sensor.dte_house_energy_off_peak"}
         try:
             hourly = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"state"},
+                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"change"},
             )
             forming = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"state"},
+                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"change"},
             )
         except Exception:
             _LOGGER.exception("Unable to rebuild EnergyIQ consumption from Home Assistant statistics")
