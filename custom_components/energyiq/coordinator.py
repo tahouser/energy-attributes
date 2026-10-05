@@ -12,6 +12,8 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.util import dt as dt_util
+from homeassistant.components.recorder import history as recorder_history
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import area_registry as ar
@@ -55,6 +57,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self._direct_rpc_host: str | None = None
         self._direct_rpc_mode: str | None = None
         self.bulk_training_state={"status":"idle","queue":[],"current_index":0,"total":0,"current_device_id":None,"completed":0,"skipped":[],"failed":[]}
+        self.consumption_accounting=self._empty_consumption_accounting()
+        self._consumption_seeded=False
         self._last_persist=0.0
         super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
 
@@ -73,10 +77,12 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 watts = float(state.state)
             except (TypeError, ValueError):
                 watts = None
+        await self._async_update_consumption_accounting()
         return {
             "whole_home_power": watts,
             "power_entity": power_entity,
             "training_state": self.training_state,
+            "consumption_accounting": self.consumption_accounting,
         }
 
     def _remove_shelly_energy_meter_candidates(self):
