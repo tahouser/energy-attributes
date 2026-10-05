@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.228 */
+/* EnergyIQ dashboard card — 3.1.229 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
@@ -702,27 +702,31 @@ if (!customElements.get(TAG)) {
       }
       return segments;
     }
+    _consumptionHistorySegments(states,start,end,now,profile,liveValue=null){
+      const timeline=this._consumptionTimeline(start,end,now);
+      return timeline.map(segment=>{
+        const active=segment.rate===profile;
+        const visibleEnd=new Date(Math.min(segment.end.getTime(),now.getTime()));
+        const visibleMs=Math.max(0,visibleEnd.getTime()-segment.start.getTime());
+        const liveForSegment=visibleEnd.getTime()>=now.getTime()-1000?liveValue:null;
+        const value=active&&visibleMs>0?this._consumptionDelta(states,segment.start,visibleEnd,liveForSegment):null;
+        const thresholds=this._consumptionThresholds(profile,segment.start);
+        const visible=active&&visibleMs>0&&value!=null;
+        return Object.assign({},segment,{
+          active,
+          value:visible?Math.max(0,value):null,
+          visible,
+          thresholds,
+          color:visible?this._consumptionSegmentColor(Math.max(0,value),thresholds,segment.visibleFraction):"future"
+        });
+      });
+    }
     async _loadConsumptionHistory(){
       if(!this._hass)return;
       try{
         const period=this._costPeriod,now=new Date();
         const start=this._periodStart(period,0,now),end=this._periodEnd(period,start);
         const ids=["sensor.dte_house_energy_peak","sensor.dte_house_energy_off_peak"];
-
-        // Consumption is calculated from HA's cumulative energy statistics.
-        // The selected rate schedule determines which meter contributes to
-        // each timeline segment. Raw cumulative states are never used as a
-        // period total or as a substitute for a missing statistics baseline.
-        const statisticsStart=new Date(start.getTime()-2*60*60*1000);
-        const statistics=await this._ws({
-          type:"recorder/statistics_during_period",
-          start_time:statisticsStart.toISOString(),
-          end_time:now.toISOString(),
-          statistic_ids:ids,
-          period:"hour",
-          types:["state","sum"]
-        }).catch(()=>({}));
-
         const historyStart=new Date(start.getTime()-60*60*1000);
         const history=await this._ws({
           type:"history/history_during_period",
@@ -734,47 +738,30 @@ if (!customElements.get(TAG)) {
           minimal_response:true,
           no_attributes:true
         }).catch(()=>({}));
-
-        const build=async(id,profile)=>{
-          const rows=this._consumptionStatisticsRows(statistics,id);
+        const accounting=this._data?.consumption_accounting||{};
+        const build=(id,profile)=>{
           const states=history?.[id]||[];
           const live=Number(this._hass?.states?.[id]?.state);
           const liveValue=Number.isFinite(live)?live:null;
-          const segments=this._consumptionStatisticsSegments(rows,start,end,now,profile,liveValue);
-
-          // Current total is the sum of valid rate segments, not a raw meter
-          // reading and not a sum of recorder "change" rows.
-          const currentValues=segments.filter(s=>s.visible&&Number.isFinite(Number(s.value)));
-          const current=currentValues.length
-            ?currentValues.reduce((sum,s)=>sum+(Number(s.value)||0),0)
-            :null;
-
-          // Historical state deltas are used only to establish color context.
-          // They are never allowed to become the accounting fallback.
-          const samplesBySegment=segments.map(segment=>{
-            const samples=this._segmentHistoricalSamples(
-              states,period,start,segment.start,segment.end,now,30
-            );
-            return {segment,samples};
-          });
-          for(const item of samplesBySegment){
-            const values=item.samples;
-            const average=values.length?values.reduce((a,b)=>a+b,0)/values.length:null;
-            item.segment.average=average;
-            item.segment.ratio=average>0&&item.segment.value!=null?item.segment.value/average:null;
-            item.segment.color=item.segment.visible
-              ?this._consumptionSegmentColor(item.segment.value,item.segment.thresholds,item.segment.visibleFraction)
-              :"future";
-          }
-          return {current,segments,available:current!=null};
+          const segments=this._consumptionHistorySegments(states,start,end,now,profile,liveValue);
+          const totals=this._data?.consumption_period_totals?.[period]||null;
+          return {
+            current:totals?Number(totals[profile]||0):null,
+            segments,
+            available:totals!=null,
+          };
         };
-
-        const [peak,off]=await Promise.all([
-          build(ids[0],"peak"),
-          build(ids[1],"off_peak")
-        ]);
-
-        this._dashboardHistory={peak,off,total:(peak.current||0)+(off.current||0),schedule:this._consumptionRateSchedule()};
+        const totals={
+          day:this._data?.consumption_period_totals?.day,
+          week:this._data?.consumption_period_totals?.week,
+          month:this._data?.consumption_period_totals?.month
+        };
+        const periodTotals=totals[period]||null;
+        const peak=build(ids[0],"peak");
+        const off=build(ids[1],"off_peak");
+        peak.current=periodTotals?Number(periodTotals.peak||0):null;
+        off.current=periodTotals?Number(periodTotals.off_peak||0):null;
+        this._dashboardHistory={peak,off,total:(peak.current||0)+(off.current||0),schedule:this._data?.consumption_peak_schedule||{},accounting};
         this._dashboardHistoryAt=Date.now();
       }catch(e){
         console.error("EnergyIQ consumption history",e);
@@ -783,7 +770,6 @@ if (!customElements.get(TAG)) {
       }
       this._render();
     }
-
     _periodProgress(period,now=new Date()){
       const start=this._periodStart(period,0,now);
       const end=this._periodEnd(period,start);

@@ -325,6 +325,12 @@ async def ws_workspace(hass, connection, msg):
             "consumption_peak_schedule",
             {"start": "15:00:00", "end": "19:00:00", "days": [1, 2, 3, 4, 5]},
         ),
+        "consumption_accounting": coordinator.consumption_accounting,
+        "consumption_period_totals": {
+            "day": coordinator.consumption_period_totals("day"),
+            "week": coordinator.consumption_period_totals("week"),
+            "month": coordinator.consumption_period_totals("month"),
+        },
     })
 
 
