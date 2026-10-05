@@ -261,14 +261,15 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         accounting: dict[str, Any],
         statistic_rows: dict[str, list[dict[str, Any]]],
         entity_id: str,
+        initial_sum: float | None = None,
     ) -> None:
         """Convert HA cumulative statistics sums into interval consumption.
 
-        HA's change result can include an initial/gap baseline when there is
-        no statistic immediately before the requested range. EnergyIQ therefore
-        never consumes change directly. It calculates each interval as the
-        difference between consecutive sum values. The first statistic
-        establishes the baseline and contributes zero.
+        EnergyIQ never consumes the recorder ``change`` field directly.
+        It calculates each interval as the difference between consecutive
+        cumulative ``sum`` values. The first statistic establishes the
+        baseline and contributes zero unless an earlier statistic already
+        supplied the baseline through ``initial_sum``.
         """
         rows = []
         for row in statistic_rows.get(entity_id, []):
@@ -280,7 +281,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             rows.append((start_ts, end_ts, sum_value))
 
         rows.sort(key=lambda item: item[0])
-        previous_sum = None
+        previous_sum = initial_sum
         for start_ts, end_ts, current_sum in rows:
             if previous_sum is None:
                 previous_sum = current_sum
@@ -309,7 +310,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         accounting["months"] = months
 
     async def _async_rebuild_consumption_accounting(self) -> bool:
-        """Rebuild recent Consumption from HA recorder-statistics changes only."""
+        """Rebuild recent Consumption from HA recorder-statistics cumulative sums."""
         now = dt_util.now()
         local_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         local_history_start = local_month_start - timedelta(days=7)
@@ -325,7 +326,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             )
             forming = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_current_hour - timedelta(minutes=5), utc_now, ids, "5minute", None, {"sum"},
+                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"sum"},
             )
         except Exception:
             _LOGGER.exception("Unable to rebuild EnergyIQ consumption from Home Assistant statistics")
@@ -336,7 +337,13 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         accounting = self._empty_consumption_accounting()
         for entity_id in ids:
             self._consumption_apply_statistics(accounting, hourly, entity_id)
-            self._consumption_apply_statistics(accounting, forming, entity_id)
+            hourly_rows = hourly.get(entity_id, [])
+            baseline = None
+            for row in reversed(hourly_rows):
+                baseline = self._consumption_number(row.get("sum"))
+                if baseline is not None:
+                    break
+            self._consumption_apply_statistics(accounting, forming, entity_id, initial_sum=baseline)
         self._consumption_rebuild_month_totals(accounting)
         accounting["seeded_through"] = now.isoformat()
         self.consumption_accounting = accounting
