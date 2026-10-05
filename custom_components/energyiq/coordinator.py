@@ -13,7 +13,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
-from homeassistant.components.recorder import history as recorder_history
+from homeassistant.components.recorder import statistics as recorder_statistics
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import area_registry as ar
@@ -59,6 +59,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.bulk_training_state={"status":"idle","queue":[],"current_index":0,"total":0,"current_device_id":None,"completed":0,"skipped":[],"failed":[]}
         self.consumption_accounting=self._empty_consumption_accounting()
         self._consumption_seeded=False
+        self._consumption_last_refresh=0.0
         self._last_persist=0.0
         super().__init__(hass, logger=_LOGGER, name="energy_attribution", update_interval=timedelta(seconds=2))
 
@@ -182,9 +183,11 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         return entity.name or entity.original_name or entity.entity_id
 
     def _empty_consumption_accounting(self) -> dict[str, Any]:
-        # Accounting schema 2 fixes recorder-history seeding for HA compressed
-        # state responses (state is stored as "s" and the timestamp as "lu").
-        return {"schema_version": 2, "days": {}, "months": {}, "last_readings": {}}
+        """Return the statistics-change based Consumption accounting store."""
+        # Schema 3 deliberately replaces the prior cumulative-meter delta model.
+        # EnergyIQ now consumes only HA recorder/statistics ``change`` values;
+        # an absolute meter state is never a Consumption amount.
+        return {"schema_version": 3, "source": "home_assistant_statistics_change", "days": {}, "months": {}}
 
     @staticmethod
     def _consumption_number(value) -> float | None:
@@ -194,133 +197,119 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             return None
         return number if number == number and number not in (float("inf"), float("-inf")) else None
 
-    @staticmethod
-    def _consumption_state_value(state) -> float | None:
-        # Recorder history is requested with compressed_state_format=True.
-        # In that format HA returns the state under "s", not "state".
-        if isinstance(state, dict):
-            value = state.get("s")
-            if value is None:
-                value = state.get("state")
-        else:
-            value = getattr(state, "state", None)
-        return EnergyAttributionCoordinator._consumption_number(value)
+    def _consumption_schedule(self) -> dict[str, Any]:
+        saved = self.entry.options.get("consumption_peak_schedule", {})
+        if not isinstance(saved, dict):
+            saved = {}
+        return {
+            "start": str(saved.get("start", "15:00:00")),
+            "end": str(saved.get("end", "19:00:00")),
+            "days": [int(day) for day in saved.get("days", [1, 2, 3, 4, 5])
+                     if str(day).isdigit() and 0 <= int(day) <= 6],
+        }
 
     @staticmethod
-    def _consumption_state_time(state) -> datetime | None:
-        # Compressed recorder history uses "lu" for last_updated.
-        if isinstance(state, dict):
-            raw = state.get("lu")
-            if raw is None:
-                raw = state.get("last_updated")
-            if raw is None:
-                raw = state.get("last_updated_ts")
-                if raw is not None:
-                    try:
-                        return dt_util.utc_from_timestamp(float(raw))
-                    except (TypeError, ValueError):
-                        return None
-        else:
-            raw = getattr(state, "last_updated", None)
-        if isinstance(raw, (int, float)):
-            # HA compressed timestamps may be expressed as epoch seconds or ms.
-            if raw > 1e12:
-                raw /= 1000
-            return dt_util.utc_from_timestamp(float(raw))
-        if isinstance(raw, str):
-            try:
-                return dt_util.parse_datetime(raw)
-            except (TypeError, ValueError):
-                return None
-        return raw if isinstance(raw, datetime) else None
+    def _consumption_minutes(value: str, fallback: int) -> int:
+        try:
+            parts = str(value).split(":")
+            return int(parts[0]) * 60 + int(parts[1])
+        except (TypeError, ValueError, IndexError):
+            return fallback
+
+    def _consumption_is_peak(self, when: datetime) -> bool:
+        """Classify a statistics interval using the configured Peak schedule."""
+        local = dt_util.as_local(when)
+        schedule = self._consumption_schedule()
+        configured_days = set(schedule["days"])
+        ha_day = (local.weekday() + 1) % 7
+        if ha_day not in configured_days:
+            return False
+        start_minutes = self._consumption_minutes(schedule["start"], 15 * 60)
+        end_minutes = self._consumption_minutes(schedule["end"], 19 * 60)
+        current_minutes = local.hour * 60 + local.minute
+        if start_minutes < end_minutes:
+            return start_minutes <= current_minutes < end_minutes
+        if start_minutes > end_minutes:
+            return current_minutes >= start_minutes or current_minutes < end_minutes
+        return False
 
     @staticmethod
-    def _consumption_add_delta(accounting: dict[str, Any], rate: str, when: datetime, delta: float) -> None:
-        if delta <= 0:
+    def _consumption_add_interval(accounting: dict[str, Any], rate: str, when: datetime, change: float) -> None:
+        """Add one recorder-statistics change to the persistent daily ledger."""
+        if change is None or change <= 0:
             return
         local = dt_util.as_local(when)
         day_key = local.date().isoformat()
-        month_key = local.strftime("%Y-%m")
         day = accounting.setdefault("days", {}).setdefault(day_key, {"peak": 0.0, "off_peak": 0.0})
-        day[rate] = round(float(day.get(rate, 0.0)) + delta, 6)
-        month = accounting.setdefault("months", {}).setdefault(month_key, {"peak": 0.0, "off_peak": 0.0})
-        month[rate] = round(float(month.get(rate, 0.0)) + delta, 6)
+        day[rate] = round(float(day.get(rate, 0.0)) + float(change), 6)
 
-    def _consumption_process_history(self, accounting: dict[str, Any], rate: str, states: list[Any]) -> float | None:
-        previous = None
-        for state in states or []:
-            value = self._consumption_state_value(state)
-            when = self._consumption_state_time(state)
-            if value is None or when is None:
+    def _consumption_apply_statistics(self, accounting: dict[str, Any], statistic_rows: dict[str, list[dict[str, Any]]], entity_id: str) -> None:
+        """Add only HA positive recorder ``change`` values to the ledger."""
+        for row in statistic_rows.get(entity_id, []):
+            change = self._consumption_number(row.get("change"))
+            start_ts = self._consumption_number(row.get("start"))
+            if change is None or start_ts is None or change <= 0:
                 continue
-            if previous is not None:
-                delta = value - previous
-                if delta < 0:
-                    delta = value
-                self._consumption_add_delta(accounting, rate, when, max(0.0, delta))
-            previous = value
-        return previous
+            when = dt_util.utc_from_timestamp(start_ts)
+            rate = "peak" if self._consumption_is_peak(when) else "off_peak"
+            self._consumption_add_interval(accounting, rate, when, change)
 
-    async def _async_seed_consumption_accounting(self) -> None:
-        if self._consumption_seeded:
-            return
+    def _consumption_rebuild_month_totals(self, accounting: dict[str, Any]) -> None:
+        """Derive month totals exclusively from the daily ledger."""
+        months: dict[str, dict[str, float]] = {}
+        for day_key, values in accounting.get("days", {}).items():
+            month_key = str(day_key)[:7]
+            month = months.setdefault(month_key, {"peak": 0.0, "off_peak": 0.0})
+            month["peak"] += float(values.get("peak", 0.0))
+            month["off_peak"] += float(values.get("off_peak", 0.0))
+        for values in months.values():
+            values["peak"] = round(values["peak"], 6)
+            values["off_peak"] = round(values["off_peak"], 6)
+        accounting["months"] = months
+
+    async def _async_rebuild_consumption_accounting(self) -> bool:
+        """Rebuild recent Consumption from HA recorder-statistics changes only."""
         now = dt_util.now()
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        ids = ["sensor.dte_house_energy_peak", "sensor.dte_house_energy_off_peak"]
+        local_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        local_history_start = local_month_start - timedelta(days=7)
+        current_hour = now.replace(minute=0, second=0, microsecond=0)
+        utc_start = dt_util.as_utc(local_history_start)
+        utc_current_hour = dt_util.as_utc(current_hour)
+        utc_now = dt_util.as_utc(now)
+        ids = {"sensor.dte_house_energy_peak", "sensor.dte_house_energy_off_peak"}
         try:
-            states = await self.hass.async_add_executor_job(
-                recorder_history.get_significant_states,
-                self.hass, month_start, now, ids, None, True, False, True, True, True,
+            hourly = await self.hass.async_add_executor_job(
+                recorder_statistics.statistics_during_period,
+                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"change"},
             )
-            accounting = self._empty_consumption_accounting()
-            peak_last = self._consumption_process_history(accounting, "peak", states.get(ids[0], []))
-            off_last = self._consumption_process_history(accounting, "off_peak", states.get(ids[1], []))
-            accounting["last_readings"] = {
-                ids[0]: {"value": peak_last, "updated": now.isoformat()},
-                ids[1]: {"value": off_last, "updated": now.isoformat()},
-            }
-            accounting["seeded_month"] = month_start.strftime("%Y-%m")
-            self.consumption_accounting = accounting
-            self._consumption_seeded = True
-            await self._persist(force=True)
+            forming = await self.hass.async_add_executor_job(
+                recorder_statistics.statistics_during_period,
+                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"change"},
+            )
         except Exception:
-            _LOGGER.exception("Unable to seed EnergyIQ consumption accounting from recorder history")
-            for entity_id in ids:
-                state = self.hass.states.get(entity_id)
-                value = self._consumption_number(state.state) if state is not None else None
-                self.consumption_accounting.setdefault("last_readings", {})[entity_id] = {"value": value, "updated": now.isoformat()}
-            self.consumption_accounting["seeded_month"] = month_start.strftime("%Y-%m")
-            self._consumption_seeded = True
-            await self._persist(force=True)
+            _LOGGER.exception("Unable to rebuild EnergyIQ consumption from Home Assistant statistics")
+            return False
+        if not hourly and not forming:
+            _LOGGER.warning("EnergyIQ Consumption statistics unavailable; keeping the existing ledger")
+            return False
+        accounting = self._empty_consumption_accounting()
+        for entity_id in ids:
+            self._consumption_apply_statistics(accounting, hourly, entity_id)
+            self._consumption_apply_statistics(accounting, forming, entity_id)
+        self._consumption_rebuild_month_totals(accounting)
+        accounting["seeded_through"] = now.isoformat()
+        self.consumption_accounting = accounting
+        self._consumption_seeded = True
+        self._consumption_last_refresh = self.hass.loop.time()
+        await self._persist(force=True)
+        return True
 
     async def _async_update_consumption_accounting(self) -> None:
-        if not self._consumption_seeded:
-            await self._async_seed_consumption_accounting()
+        """Refresh Consumption from recorder statistics, never from meter state."""
+        now_loop = self.hass.loop.time()
+        if self._consumption_seeded and now_loop - self._consumption_last_refresh < 30:
             return
-        now = dt_util.now()
-        month_key = now.strftime("%Y-%m")
-        if self.consumption_accounting.get("seeded_month") != month_key:
-            self.consumption_accounting["seeded_month"] = month_key
-            self.consumption_accounting.setdefault("months", {}).setdefault(month_key, {"peak": 0.0, "off_peak": 0.0})
-        ids = {"peak": "sensor.dte_house_energy_peak", "off_peak": "sensor.dte_house_energy_off_peak"}
-        changed = False
-        last_readings = self.consumption_accounting.setdefault("last_readings", {})
-        for rate, entity_id in ids.items():
-            state = self.hass.states.get(entity_id)
-            value = self._consumption_number(state.state) if state is not None else None
-            if value is None:
-                continue
-            previous = last_readings.get(entity_id, {}).get("value")
-            if previous is not None:
-                delta = value - float(previous)
-                if delta < 0:
-                    delta = value
-                if delta > 0:
-                    self._consumption_add_delta(self.consumption_accounting, rate, now, delta)
-                    changed = True
-            last_readings[entity_id] = {"value": value, "updated": now.isoformat()}
-        if changed:
-            await self._persist()
+        await self._async_rebuild_consumption_accounting()
 
     def consumption_period_totals(self, period: str, now: datetime | None = None) -> dict[str, float]:
         now = now or dt_util.now()
@@ -329,7 +318,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             month = self.consumption_accounting.get("months", {}).get(now.strftime("%Y-%m"), {})
             return {"peak": float(month.get("peak", 0.0)), "off_peak": float(month.get("off_peak", 0.0))}
         local = dt_util.as_local(now)
-        if period == 'week':
+        if period == "week":
             start = local.replace(hour=0, minute=0, second=0, microsecond=0)
             while start.weekday() != 6:
                 start -= timedelta(days=1)
@@ -340,10 +329,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 cursor += timedelta(days=1)
         else:
             dates = [local.date().isoformat()]
-        return {
-            "peak": sum(float(days.get(day, {}).get("peak", 0.0)) for day in dates),
-            "off_peak": sum(float(days.get(day, {}).get("off_peak", 0.0)) for day in dates),
-        }
+        return {"peak": sum(float(days.get(day, {}).get("peak", 0.0)) for day in dates), "off_peak": sum(float(days.get(day, {}).get("off_peak", 0.0)) for day in dates)}
     async def async_load_training(self):
         """Load canonical persistent data and migrate the legacy entry-keyed store."""
         restore = self.entry.data.get("_restore_persistent_data", True)
@@ -385,14 +371,11 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 "last_training_device_id", self.last_training_device_id
             )
             saved_consumption = saved.get("consumption_accounting")
-            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 2:
+            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 3 and saved_consumption.get("source") == "home_assistant_statistics_change":
                 self.consumption_accounting = saved_consumption
-                self._consumption_seeded = bool(saved_consumption.get("seeded_month"))
+                self._consumption_seeded = bool(saved_consumption.get("seeded_through"))
             else:
-                # 3.1.229 could not read HA's compressed recorder history
-                # format during initial seeding, so its accounting may contain
-                # only live deltas. Rebuild the current month from recorder
-                # history once with the corrected parser.
+                # Consumption accounting before schema 3 was based on cumulative\n                # meter deltas. That model is intentionally discarded; rebuild\n                # from HA recorder-statistics changes instead.
                 self.consumption_accounting = self._empty_consumption_accounting()
                 self._consumption_seeded = False
             for state in self.training_state.values():
@@ -414,7 +397,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
 
         # Inventory cleanup must happen after canonical state is loaded.
         self._remove_shelly_energy_meter_candidates()
-        await self._async_seed_consumption_accounting()
+        await self._async_rebuild_consumption_accounting()
         await self._persist(force=True)
         self._persistent_loaded = True
 

@@ -1,4 +1,4 @@
-/* EnergyIQ dashboard card — 3.1.230 */
+/* EnergyIQ dashboard card — 3.1.231 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
