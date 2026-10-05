@@ -256,17 +256,21 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             "kwh": round(float(change), 6),
         })
 
-    def _consumption_apply_statistics(self, accounting, statistic_rows, entity_id, *, skip_first=False):
-        """Use Home Assistant Recorder change values, excluding the baseline row."""
-        for index, row in enumerate(statistic_rows.get(entity_id, [])):
-            # Hourly history includes one baseline row immediately before the
-            # month. Forming 5-minute history does not.
-            if skip_first and index == 0:
-                continue
-            change = self._consumption_number(row.get("change"))
+    def _consumption_apply_statistics(self, accounting, statistic_rows, entity_id):
+        """Calculate Consumption from adjacent HA Recorder cumulative sums."""
+        previous_sum = None
+        for row in statistic_rows.get(entity_id, []):
+            current_sum = self._consumption_number(row.get("sum"))
             start_ts = self._consumption_number(row.get("start"))
             end_ts = self._consumption_number(row.get("end"))
-            if change is None or start_ts is None or end_ts is None or change <= 0:
+            if current_sum is None or start_ts is None or end_ts is None:
+                continue
+            if previous_sum is None:
+                previous_sum = current_sum
+                continue
+            change = current_sum - previous_sum
+            previous_sum = current_sum
+            if change <= 0:
                 continue
             when = dt_util.utc_from_timestamp(start_ts)
             interval_end = dt_util.utc_from_timestamp(end_ts)
@@ -291,27 +295,23 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         now = dt_util.now()
         local_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         current_hour = now.replace(minute=0, second=0, microsecond=0)
-        # Include one complete hour before the month so Home Assistant can
-        # calculate the first in-month hourly change against a real prior sum.
-        # Without this baseline, the first row can be the meter's lifetime
-        # initialization value (14,297.6 kWh in the Peak sensor).
+        # Read cumulative sums and calculate adjacent deltas ourselves. This
+        # avoids Recorder's special ``change`` initialization behavior.
         baseline_hour = local_month_start - timedelta(hours=1)
+        forming_baseline = current_hour - timedelta(minutes=5)
         utc_start = dt_util.as_utc(baseline_hour)
-        utc_current_hour = dt_util.as_utc(current_hour)
+        utc_current_hour = dt_util.as_utc(forming_baseline)
         utc_now = dt_util.as_utc(now)
         ids = {"sensor.dte_house_energy_peak", "sensor.dte_house_energy_off_peak"}
         try:
             hourly = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"change"},
+                self.hass, utc_start, dt_util.as_utc(current_hour), ids, "hour", None, {"sum"},
             )
             forming = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"change"},
+                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"sum"},
             )
-        except Exception:
-            _LOGGER.exception("Unable to rebuild EnergyIQ consumption from Home Assistant statistics")
-            return False
         if not hourly and not forming:
             _LOGGER.warning("EnergyIQ Consumption statistics unavailable; keeping the existing ledger")
             return False
