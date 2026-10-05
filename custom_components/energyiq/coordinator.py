@@ -182,7 +182,9 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         return entity.name or entity.original_name or entity.entity_id
 
     def _empty_consumption_accounting(self) -> dict[str, Any]:
-        return {"schema_version": 1, "days": {}, "months": {}, "last_readings": {}}
+        # Accounting schema 2 fixes recorder-history seeding for HA compressed
+        # state responses (state is stored as "s" and the timestamp as "lu").
+        return {"schema_version": 2, "days": {}, "months": {}, "last_readings": {}}
 
     @staticmethod
     def _consumption_number(value) -> float | None:
@@ -194,16 +196,37 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
 
     @staticmethod
     def _consumption_state_value(state) -> float | None:
-        value = state.get("state") if isinstance(state, dict) else getattr(state, "state", None)
+        # Recorder history is requested with compressed_state_format=True.
+        # In that format HA returns the state under "s", not "state".
+        if isinstance(state, dict):
+            value = state.get("s")
+            if value is None:
+                value = state.get("state")
+        else:
+            value = getattr(state, "state", None)
         return EnergyAttributionCoordinator._consumption_number(value)
 
     @staticmethod
     def _consumption_state_time(state) -> datetime | None:
-        raw = state.get("last_updated") if isinstance(state, dict) else getattr(state, "last_updated", None)
-        if raw is None and isinstance(state, dict):
-            raw = state.get("last_updated_ts")
-            if raw is not None:
-                return dt_util.utc_from_timestamp(float(raw))
+        # Compressed recorder history uses "lu" for last_updated.
+        if isinstance(state, dict):
+            raw = state.get("lu")
+            if raw is None:
+                raw = state.get("last_updated")
+            if raw is None:
+                raw = state.get("last_updated_ts")
+                if raw is not None:
+                    try:
+                        return dt_util.utc_from_timestamp(float(raw))
+                    except (TypeError, ValueError):
+                        return None
+        else:
+            raw = getattr(state, "last_updated", None)
+        if isinstance(raw, (int, float)):
+            # HA compressed timestamps may be expressed as epoch seconds or ms.
+            if raw > 1e12:
+                raw /= 1000
+            return dt_util.utc_from_timestamp(float(raw))
         if isinstance(raw, str):
             try:
                 return dt_util.parse_datetime(raw)
@@ -362,9 +385,16 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 "last_training_device_id", self.last_training_device_id
             )
             saved_consumption = saved.get("consumption_accounting")
-            if isinstance(saved_consumption, dict):
+            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 2:
                 self.consumption_accounting = saved_consumption
                 self._consumption_seeded = bool(saved_consumption.get("seeded_month"))
+            else:
+                # 3.1.229 could not read HA's compressed recorder history
+                # format during initial seeding, so its accounting may contain
+                # only live deltas. Rebuild the current month from recorder
+                # history once with the corrected parser.
+                self.consumption_accounting = self._empty_consumption_accounting()
+                self._consumption_seeded = False
             for state in self.training_state.values():
                 if isinstance(state, dict) and state.get("status") == "active":
                     state["status"] = "interrupted"
