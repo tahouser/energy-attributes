@@ -373,7 +373,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             saved_consumption = saved.get("consumption_accounting")
             if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 3 and saved_consumption.get("source") == "home_assistant_statistics_change":
                 self.consumption_accounting = saved_consumption
-                self._consumption_seeded = bool(saved_consumption.get("seeded_month"))
+                self._consumption_seeded = bool(saved_consumption.get("seeded_through"))
             else:
                 # Consumption accounting before schema 3 was based on cumulative\n                # meter deltas. That model is intentionally discarded; rebuild\n                # from HA recorder-statistics changes instead.
                 self.consumption_accounting = self._empty_consumption_accounting()
@@ -397,7 +397,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
 
         # Inventory cleanup must happen after canonical state is loaded.
         self._remove_shelly_energy_meter_candidates()
-        await self._async_seed_consumption_accounting()
+        await self._async_rebuild_consumption_accounting()
         await self._persist(force=True)
         self._persistent_loaded = True
 
