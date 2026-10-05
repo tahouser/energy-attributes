@@ -256,17 +256,21 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             "kwh": round(float(change), 6),
         })
 
-    def _consumption_apply_statistics(self, accounting, statistic_rows, entity_id, *, skip_first=False):
-        """Use Home Assistant Recorder change values, excluding the baseline row."""
-        for index, row in enumerate(statistic_rows.get(entity_id, [])):
-            # Hourly history includes one baseline row immediately before the
-            # month. Forming 5-minute history does not.
-            if skip_first and index == 0:
-                continue
-            change = self._consumption_number(row.get("change"))
+    def _consumption_apply_statistics(self, accounting, statistic_rows, entity_id):
+        """Calculate Consumption from adjacent HA Recorder cumulative sums."""
+        previous_sum = None
+        for row in statistic_rows.get(entity_id, []):
+            current_sum = self._consumption_number(row.get("sum"))
             start_ts = self._consumption_number(row.get("start"))
             end_ts = self._consumption_number(row.get("end"))
-            if change is None or start_ts is None or end_ts is None or change <= 0:
+            if current_sum is None or start_ts is None or end_ts is None:
+                continue
+            if previous_sum is None:
+                previous_sum = current_sum
+                continue
+            change = current_sum - previous_sum
+            previous_sum = current_sum
+            if change <= 0:
                 continue
             when = dt_util.utc_from_timestamp(start_ts)
             interval_end = dt_util.utc_from_timestamp(end_ts)
