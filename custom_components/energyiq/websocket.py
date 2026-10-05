@@ -321,6 +321,10 @@ async def ws_workspace(hass, connection, msg):
         "devices": rows,
         "last_training_device_id": getattr(coordinator, "last_training_device_id", None),
         "consumption_thresholds": coordinator.entry.options.get("consumption_thresholds", {}),
+        "consumption_peak_schedule": coordinator.entry.options.get(
+            "consumption_peak_schedule",
+            {"start": "15:00:00", "end": "19:00:00", "days": [1, 2, 3, 4, 5]},
+        ),
     })
 
 
