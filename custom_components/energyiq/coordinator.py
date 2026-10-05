@@ -309,13 +309,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         accounting = self._empty_consumption_accounting()
         for entity_id in ids:
             self._consumption_apply_statistics(accounting, hourly, entity_id)
-            hourly_rows = hourly.get(entity_id, [])
-            baseline = None
-            for row in reversed(hourly_rows):
-                baseline = self._consumption_number(row.get("state"))
-                if baseline is not None:
-                    break
-            self._consumption_apply_statistics(accounting, forming, entity_id, initial_state=baseline)
+            self._consumption_apply_statistics(accounting, forming, entity_id)
         self._consumption_rebuild_month_totals(accounting)
         accounting["seeded_through"] = now.isoformat()
         self.consumption_accounting = accounting
