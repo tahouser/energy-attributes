@@ -184,7 +184,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
 
     def _empty_consumption_accounting(self) -> dict[str, Any]:
         """Return the Utility Meter history-based Consumption accounting store."""
-        return {"schema_version": 9, "source": "home_assistant_utility_meter_history_v1", "days": {}, "months": {}, "intervals": []}
+        return {"schema_version": 10, "source": "house_energy_total_schedule_history_v2", "days": {}, "months": {}, "intervals": []}
 
     @staticmethod
     def _consumption_number(value) -> float | None:
@@ -244,9 +244,73 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 self._consumption_add_interval(accounting, rate, cursor, piece_end, piece)
             cursor = piece_end
 
-    def _consumption_apply_history(self, accounting, history_rows, entity_id, live_value=None, live_time=None) -> None:
-        """Build tariff consumption from the Utility Meter's own state history."""
-        rate = "off_peak" if entity_id.endswith("_off_peak") else "peak"
+    def _consumption_peak_schedule(self) -> dict[str, Any]:
+        schedule = self.entry.options.get("consumption_peak_schedule", {})
+        if not isinstance(schedule, dict):
+            schedule = {}
+        return {
+            "start": str(schedule.get("start", "15:00:00")),
+            "end": str(schedule.get("end", "19:00:00")),
+            "days": [int(day) for day in schedule.get("days", [1, 2, 3, 4, 5]) if str(day).isdigit()],
+        }
+
+    def _consumption_rate_at(self, when: datetime) -> str:
+        local = dt_util.as_local(when)
+        schedule = self._consumption_peak_schedule()
+        # Config flow uses Sunday=0 ... Saturday=6; Python uses Monday=0 ... Sunday=6.
+        ha_day = (local.weekday() + 1) % 7
+        if ha_day not in schedule["days"]:
+            return "off_peak"
+        start = schedule["start"][:8]
+        end = schedule["end"][:8]
+        current = local.strftime("%H:%M:%S")
+        if start <= current < end:
+            return "peak"
+        return "off_peak"
+
+    def _consumption_add_source_delta(self, accounting, start_ts, end_ts, change) -> None:
+        """Split cumulative whole-home energy changes across the configured tariff schedule."""
+        if change <= 0 or end_ts <= start_ts:
+            return
+        start = dt_util.utc_from_timestamp(start_ts)
+        end = dt_util.utc_from_timestamp(end_ts)
+        total_seconds = max(1.0, end_ts - start_ts)
+        cursor = start
+        while cursor < end:
+            local = dt_util.as_local(cursor)
+            boundaries = [
+                local.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1),
+            ]
+            schedule = self._consumption_peak_schedule()
+            for hhmmss in (schedule["start"], schedule["end"]):
+                parts = hhmmss.split(":")
+                if len(parts) >= 2:
+                    boundary = local.replace(
+                        hour=int(parts[0]), minute=int(parts[1]),
+                        second=int(parts[2]) if len(parts) > 2 else 0, microsecond=0
+                    )
+                    if boundary <= local:
+                        boundary += timedelta(days=1)
+                    boundaries.append(boundary)
+            next_local = min(boundaries)
+            piece_end = min(end, dt_util.as_utc(next_local))
+            if piece_end <= cursor:
+                break
+            fraction = max(0.0, min(1.0, (piece_end - cursor).total_seconds() / total_seconds))
+            piece = change * fraction
+            if piece > 0:
+                self._consumption_add_interval(
+                    accounting,
+                    self._consumption_rate_at(cursor + (piece_end - cursor) / 2),
+                    cursor,
+                    piece_end,
+                    piece,
+                )
+            cursor = piece_end
+
+    def _consumption_apply_source_history(self, accounting, history_rows, live_value=None, live_time=None) -> None:
+        """Build tariff consumption from the real cumulative whole-home energy source."""
+        entity_id = "sensor.house_energy_total"
         rows = []
         for row in history_rows.get(entity_id, []):
             value = self._consumption_number(row.get("s", row.get("state")))
@@ -263,22 +327,17 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 previous_time = timestamp
                 continue
             change = value - previous_value
-            # Utility Meter history can contain an initialization jump from a
-            # restored zero to the already-accumulated meter value.  That is
-            # not consumption during the interval and must not become a giant
-            # spike in the monthly ledger.  Only suppress that condition for
-            # the first delta and only when the jump is clearly impossible for
-            # a residential interval.
-            initialization_jump = first_delta and previous_value == 0.0 and change > 100.0
-            if change > 0 and not initialization_jump:
-                self._consumption_add_history_delta(accounting, rate, previous_time, timestamp, change)
+            # Ignore only a recorder initialization jump from zero to an already
+            # accumulated cumulative meter value.
+            if change > 0 and not (first_delta and previous_value == 0.0 and change > 100.0):
+                self._consumption_add_source_delta(accounting, previous_time, timestamp, change)
             first_delta = False
             previous_value = value
             previous_time = timestamp
         if previous_value is not None and previous_time is not None and live_value is not None and live_time is not None and live_time > previous_time:
             change = live_value - previous_value
             if change > 0:
-                self._consumption_add_history_delta(accounting, rate, previous_time, live_time, change)
+                self._consumption_add_source_delta(accounting, previous_time, live_time, change)
 
     def _consumption_rebuild_month_totals(self, accounting: dict[str, Any]) -> None:
         """Derive month totals exclusively from the daily ledger."""
@@ -294,29 +353,43 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         accounting["months"] = months
 
     async def _async_rebuild_consumption_accounting(self) -> bool:
-        """Rebuild Consumption from the monthly Utility Meter state history."""
+        """Rebuild the current month from the real cumulative source, preserving prior days."""
         now = dt_util.now()
         local_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         utc_start = dt_util.as_utc(local_month_start)
         utc_now = dt_util.as_utc(now)
-        ids = {"sensor.dte_house_energy_peak", "sensor.dte_house_energy_off_peak"}
+        entity_id = "sensor.house_energy_total"
         try:
             history_rows = await self.hass.async_add_executor_job(
                 recorder_history.get_significant_states,
-                self.hass, utc_start, utc_now, list(ids), None, True, False, True, True, True
+                self.hass, utc_start, utc_now, [entity_id], None, True, False, True, True, True
             )
         except Exception:
-            _LOGGER.exception("Unable to rebuild EnergyIQ Consumption from Utility Meter history")
+            _LOGGER.exception("Unable to rebuild EnergyIQ Consumption from whole-home energy history")
             return False
         if not history_rows:
-            _LOGGER.warning("EnergyIQ Utility Meter history unavailable; keeping the existing ledger")
+            _LOGGER.warning("EnergyIQ whole-home energy history unavailable; keeping the existing ledger")
             return False
+
+        old = self.consumption_accounting if isinstance(self.consumption_accounting, dict) else {}
         accounting = self._empty_consumption_accounting()
-        for entity_id in ids:
-            live_state = self.hass.states.get(entity_id)
-            live_value = self._consumption_number(live_state.state) if live_state is not None else None
-            live_time = live_state.last_updated.timestamp() if live_state is not None and live_state.last_updated is not None else None
-            self._consumption_apply_history(accounting, history_rows, entity_id, live_value, live_time)
+        current_month = local_month_start.strftime("%Y-%m")
+        old_days = old.get("days", {}) if isinstance(old.get("days"), dict) else {}
+        old_intervals = old.get("intervals", []) if isinstance(old.get("intervals"), list) else []
+        accounting["days"] = {
+            day: dict(values)
+            for day, values in old_days.items()
+            if not str(day).startswith(current_month)
+        }
+        accounting["intervals"] = [
+            item for item in old_intervals
+            if not str(item.get("start", "")).startswith(current_month)
+        ]
+
+        live_state = self.hass.states.get(entity_id)
+        live_value = self._consumption_number(live_state.state) if live_state is not None else None
+        live_time = live_state.last_updated.timestamp() if live_state is not None and live_state.last_updated is not None else None
+        self._consumption_apply_source_history(accounting, history_rows, live_value, live_time)
         self._consumption_rebuild_month_totals(accounting)
         accounting["seeded_through"] = now.isoformat()
         self.consumption_accounting = accounting
