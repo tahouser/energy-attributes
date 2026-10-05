@@ -187,7 +187,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         # Schema 3 deliberately replaces the prior cumulative-meter delta model.
         # EnergyIQ now consumes only HA recorder/statistics ``change`` values;
         # an absolute meter state is never a Consumption amount.
-        return {"schema_version": 7, "source": "home_assistant_statistics_state_delta_v2", "days": {}, "months": {}, "intervals": []}
+        return {"schema_version": 8, "source": "home_assistant_statistics_change_v2", "days": {}, "months": {}, "intervals": []}
 
     @staticmethod
     def _consumption_number(value) -> float | None:
@@ -256,81 +256,19 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             "kwh": round(float(change), 6),
         })
 
-    def _consumption_apply_statistics(
-        self,
-        accounting: dict[str, Any],
-        statistic_rows: dict[str, list[dict[str, Any]]],
-        entity_id: str,
-        initial_state: float | None = None,
-    ) -> None:
-        """Convert adjacent HA statistics state samples into real interval use.
-
-        HA can expose an initialization row at the beginning of a statistics
-        series. For a lifetime energy meter that can appear as a jump from 0
-        to the meter's lifetime value. That jump is not consumption.
-
-        EnergyIQ therefore:
-        - establishes the first sample as a baseline;
-        - calculates only adjacent positive state deltas;
-        - rejects an initialization-scale first jump when it is clearly
-          disproportionate to the subsequent interval deltas; and
-        - treats decreases/resets as a new baseline.
-        """
-        rows = []
+    def _consumption_apply_statistics(self, accounting, statistic_rows, entity_id):
+        """Use Home Assistant Recorder change values directly."""
         for row in statistic_rows.get(entity_id, []):
+            change = self._consumption_number(row.get("change"))
             start_ts = self._consumption_number(row.get("start"))
             end_ts = self._consumption_number(row.get("end"))
-            state_value = self._consumption_number(row.get("state"))
-            if start_ts is None or end_ts is None or state_value is None:
+            if change is None or start_ts is None or end_ts is None or change <= 0:
                 continue
-            rows.append((start_ts, end_ts, state_value))
-
-        rows.sort(key=lambda item: item[0])
-        previous_state = initial_state
-        deltas = []
-        for _, _, current_state in rows:
-            if previous_state is None:
-                previous_state = current_state
-                continue
-            deltas.append(current_state - previous_state)
-            previous_state = current_state
-
-        positive_deltas = [value for value in deltas if value > 0]
-        typical_delta = None
-        if positive_deltas:
-            ordered = sorted(positive_deltas)
-            middle = len(ordered) // 2
-            typical_delta = (ordered[middle] if len(ordered) % 2 else
-                             (ordered[middle - 1] + ordered[middle]) / 2.0)
-
-        previous_state = initial_state
-        for index, (start_ts, end_ts, current_state) in enumerate(rows):
-            if previous_state is None:
-                previous_state = current_state
-                continue
-
-            change = current_state - previous_state
-            previous_state = current_state
-            if change <= 0:
-                continue
-
-            # The statistics series can begin with 0 followed by the
-            # lifetime meter state. Ignore that one-time initialization jump
-            # when it is plainly outside the scale of real intervals.
-            if (
-                index == 0
-                and initial_state is None
-                and change > 50.0
-                and typical_delta is not None
-                and typical_delta > 0
-                and change > typical_delta * 20.0
-            ):
-                continue
-
             when = dt_util.utc_from_timestamp(start_ts)
-            rate = "peak" if self._consumption_is_peak(when) else "off_peak"
             interval_end = dt_util.utc_from_timestamp(end_ts)
+            rate = "peak" if self._consumption_is_peak(when) else "off_peak"
             self._consumption_add_interval(accounting, rate, when, interval_end, change)
+
     def _consumption_rebuild_month_totals(self, accounting: dict[str, Any]) -> None:
         """Derive month totals exclusively from the daily ledger."""
         months: dict[str, dict[str, float]] = {}
@@ -348,20 +286,19 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         """Rebuild recent Consumption from HA recorder-statistics cumulative sums."""
         now = dt_util.now()
         local_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        local_history_start = local_month_start - timedelta(days=7)
         current_hour = now.replace(minute=0, second=0, microsecond=0)
-        utc_start = dt_util.as_utc(local_history_start)
+        utc_start = dt_util.as_utc(local_month_start)
         utc_current_hour = dt_util.as_utc(current_hour)
         utc_now = dt_util.as_utc(now)
         ids = {"sensor.dte_house_energy_peak", "sensor.dte_house_energy_off_peak"}
         try:
             hourly = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"state"},
+                self.hass, utc_start, utc_current_hour, ids, "hour", None, {"change"},
             )
             forming = await self.hass.async_add_executor_job(
                 recorder_statistics.statistics_during_period,
-                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"state"},
+                self.hass, utc_current_hour, utc_now, ids, "5minute", None, {"change"},
             )
         except Exception:
             _LOGGER.exception("Unable to rebuild EnergyIQ consumption from Home Assistant statistics")
@@ -372,13 +309,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         accounting = self._empty_consumption_accounting()
         for entity_id in ids:
             self._consumption_apply_statistics(accounting, hourly, entity_id)
-            hourly_rows = hourly.get(entity_id, [])
-            baseline = None
-            for row in reversed(hourly_rows):
-                baseline = self._consumption_number(row.get("state"))
-                if baseline is not None:
-                    break
-            self._consumption_apply_statistics(accounting, forming, entity_id, initial_state=baseline)
+            self._consumption_apply_statistics(accounting, forming, entity_id)
         self._consumption_rebuild_month_totals(accounting)
         accounting["seeded_through"] = now.isoformat()
         self.consumption_accounting = accounting
@@ -454,7 +385,7 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 "last_training_device_id", self.last_training_device_id
             )
             saved_consumption = saved.get("consumption_accounting")
-            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 7 and saved_consumption.get("source") == "home_assistant_statistics_state_delta_v2":
+            if isinstance(saved_consumption, dict) and int(saved_consumption.get("schema_version", 0)) >= 8 and saved_consumption.get("source") == "home_assistant_statistics_change_v2":
                 self.consumption_accounting = saved_consumption
                 self._consumption_seeded = bool(saved_consumption.get("seeded_through"))
             else:
