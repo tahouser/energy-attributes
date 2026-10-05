@@ -551,6 +551,7 @@ if (!customElements.get(TAG)) {
       for(const row of source){
         if(row.end<=startMs){
           baseline=row.sum;
+          last=row.sum;
           continue;
         }
         if(row.start>=endMs)break;
