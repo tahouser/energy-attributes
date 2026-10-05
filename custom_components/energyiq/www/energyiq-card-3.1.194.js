@@ -634,13 +634,15 @@ if (!customElements.get(TAG)) {
     }
     _consumptionStatisticsSegments(rows,start,end,now,profile,liveValue=null){
       const timeline=this._consumptionTimeline(start,end,now);
-      return timeline.filter(segment=>segment.rate===profile).map(segment=>{
-        const value=segment.visibleMs>0
+      return timeline.map(segment=>{
+        const active=segment.rate===profile;
+        const value=active&&segment.visibleMs>0
           ?this._consumptionDeltaBetween(rows,segment.start.getTime(),Math.min(segment.end.getTime(),now.getTime()),liveValue,now.getTime())
           :null;
         const thresholds=this._consumptionThresholds(profile,segment.start);
-        const visible=segment.visibleMs>0&&value!=null;
+        const visible=active&&segment.visibleMs>0&&value!=null;
         return Object.assign({},segment,{
+          active,
           value:visible?Math.max(0,value):null,
           visible,
           thresholds,
