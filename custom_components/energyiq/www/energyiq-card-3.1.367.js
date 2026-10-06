@@ -579,7 +579,7 @@ if(this._view===2&&Date.now()-this._costHistoryAt>30000)await this._loadCostHist
       const period=this._costPeriod,labels={day:"DAY",week:"WEEK",month:"MONTH"},periodLabel=labels[period]||"DAY";
       const money=v=>"$"+Number(v||0).toFixed(2);
       const totalValue=Number(h.total)||0,peakValue=Number(h.peak)||0,offValue=Number(h.off)||0;
-      const buckets=chart.buckets||[],max=Math.max(0.0001,...buckets.map(x=>(x.peak||0)+(x.off||0)));
+      const buckets=chart.buckets||[],bucketMs=chart.bucketMs||60000,max=Math.max(0.0001,...buckets.map(x=>(x.peak||0)+(x.off||0)));
       const W=760,H=185,L=36,R=16,T=20,B=28,ch=H-T-B;
       const count=Math.max(1,buckets.length),gap=period==="day"?0.5:period==="week"?1:1.5;
       const width=Math.max(1,((W-L-R)/count)-gap);
