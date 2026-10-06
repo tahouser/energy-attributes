@@ -481,7 +481,8 @@ if(this._view===2&&Date.now()-this._costHistoryAt>30000)await this._loadCostHist
       if(period==="day"){
         [{h:15,label:"PEAK"},{h:19,label:"OFF PEAK"}].forEach(m=>{const x=L+((m.h/24)*(W-L-R));svg+='<line x1="'+x+'" y1="'+T+'" x2="'+x+'" y2="'+(T+ch)+'" class="tariff-break"/><text x="'+(m.h===15?x+5:x-5)+'" y="'+(T+12)+'" text-anchor="'+(m.h===15?"start":"end")+'" class="tariff-label">'+m.label+'</text>';});
       }
-      for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i],color=this._consumptionColor(b.row,thresholds);svg+='<polygon points="'+a.x+','+(T+ch)+' '+a.x+','+a.y+' '+b.x+','+b.y+' '+b.x+','+(T+ch)+'" class="area '+color+'"/>';\n    svg+='<line x1="'+a.x+'" y1="'+a.y+'" x2="'+b.x+'" y2="'+b.y+'" class="seg '+color+'"/>'; }
+      for(let i=1;i<pts.length;i++){const a=pts[i-1],b=pts[i],color=this._consumptionColor(b.row,thresholds);svg+='<polygon points="'+a.x+','+(T+ch)+' '+a.x+','+a.y+' '+b.x+','+b.y+' '+b.x+','+(T+ch)+'" class="area '+color+'"/>';
+    svg+='<line x1="'+a.x+'" y1="'+a.y+'" x2="'+b.x+'" y2="'+b.y+'" class="seg '+color+'"/>'; }
       pts.forEach(p=>{svg+='<circle cx="'+p.x+'" cy="'+p.y+'" r="3" class="point '+this._consumptionColor(p.row,thresholds)+'"/>';});
       svg+='</svg>';
       return '<div class="consumption-wrap"><div class="consumption-period-nav"><button data-consumption-period="day" class="'+(period==="day"?"selected":"")+'">DAY</button><button data-consumption-period="week" class="'+(period==="week"?"selected":"")+'">WEEK</button><button data-consumption-period="month" class="'+(period==="month"?"selected":"")+'">MONTH</button></div><div class="consumption-summary"><strong>'+total.toFixed(1)+' kWh</strong><span>'+periodLabel+'</span></div>'+svg+'</div>';
