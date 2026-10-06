@@ -580,7 +580,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         ]
 
         schema = vol.Schema({
-            vol.Required("peak_period", default={}): section(
+            vol.Required("peak_period"): section(
                 vol.Schema({
                     vol.Required("peak_start", default=schedule["start"]): selector.TimeSelector(),
                     vol.Required("peak_end", default=schedule["end"]): selector.TimeSelector(),
@@ -597,7 +597,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 }),
                 {"collapsed": False},
             ),
-            vol.Required("consumption_limits", default={}): section(
+            vol.Required("consumption_limits"): section(
                 vol.Schema({
                     vol.Required(
                         "green_yellow",
