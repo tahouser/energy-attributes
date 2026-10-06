@@ -16,7 +16,7 @@
     "step": {
       "init": {
         "title": "EnergyIQ — Commissioning",
-        "description": "{count} electrical-load candidates are in the private EnergyIQ environment. Select the devices to monitor.",
+        "description": "{count} electrical-load candidates are in the private EnergyIQ environment. Select the devices to monitor, then set the Peak period and two shared consumption limits.",
         "data": {
           "monitored_devices": "Devices to monitor",
           "action": "Training / save action"
@@ -104,12 +104,40 @@
         "data": {
           "finish": "Finish training capture"
         }
+      },
+      "consumption_settings": {
+        "title": "Consumption setpoints",
+        "description": "Set the Peak period and the two hourly consumption limits used by the chart.",
+        "sections": {
+          "peak_period": {
+            "name": "Peak period",
+            "description": "Set when Peak applies. All other times are Off-Peak.",
+            "data": {
+              "peak_start": "Peak starts",
+              "peak_end": "Peak ends",
+              "peak_days": "Peak days"
+            }
+          },
+          "consumption_limits": {
+            "name": "Consumption limits",
+            "description": "These two limits apply to both Peak and Off-Peak.",
+            "data": {
+              "green_yellow": "Green → Yellow (kWh)",
+              "yellow_red": "Yellow → Red (kWh)"
+            },
+            "data_description": {
+              "green_yellow": "At or below this amount is green.",
+              "yellow_red": "Above this amount is red; values between the two limits are yellow."
+            }
+          }
+        }
       }
     }
   },
   "error": {
     "times_must_increase": "Times must be in increasing order.",
-    "red_must_be_at_least_yellow": "Red threshold must be at least the yellow threshold."
+    "red_must_be_at_least_yellow": "Red threshold must be at least the yellow threshold.",
+    "peak_days_required": "Select at least one Peak day."
   },
   "abort": {
     "no_candidates": "No electrical-load candidates were found after filtering.",
