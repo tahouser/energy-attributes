@@ -8,6 +8,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -487,7 +488,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                 )),
             })
             self._pending_options = options
-            return await self.async_step_consumption_thresholds()
+            return await self.async_step_consumption_settings()
 
         schema = vol.Schema({
             vol.Required("monitored_devices", default=selected_default): SelectSelector(
@@ -504,28 +505,63 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             description_placeholders={"count": str(len(candidates))},
         )
 
-    async def async_step_peak_schedule(self, user_input=None):
-        saved = self.config_entry.options.get("consumption_peak_schedule", {})
-        existing = dict(_PEAK_SCHEDULE_DEFAULTS)
-        if isinstance(saved, dict):
-            existing["start"] = str(saved.get("start", existing["start"]))
-            existing["end"] = str(saved.get("end", existing["end"]))
-            days = saved.get("days", existing["days"])
+    async def async_step_consumption_settings(self, user_input=None):
+        """Configure the compact consumption thresholds and Peak schedule."""
+        saved_thresholds = self.config_entry.options.get("consumption_thresholds", {})
+        yellow_default = 1.0
+        red_default = 2.0
+
+        # Migrate the previous four-point profiles into the new single
+        # threshold pair without discarding an existing configured value.
+        if isinstance(saved_thresholds, dict):
+            if isinstance(saved_thresholds.get("yellow"), (int, float)):
+                yellow_default = float(saved_thresholds["yellow"])
+            elif isinstance(saved_thresholds.get("peak"), list) and saved_thresholds["peak"]:
+                yellow_default = float(saved_thresholds["peak"][0].get("yellow", yellow_default))
+            if isinstance(saved_thresholds.get("red"), (int, float)):
+                red_default = float(saved_thresholds["red"])
+            elif isinstance(saved_thresholds.get("peak"), list) and saved_thresholds["peak"]:
+                red_default = float(saved_thresholds["peak"][0].get("red", red_default))
+
+        saved_schedule = self.config_entry.options.get("consumption_peak_schedule", {})
+        schedule = dict(_PEAK_SCHEDULE_DEFAULTS)
+        if isinstance(saved_schedule, dict):
+            schedule["start"] = str(saved_schedule.get("start", schedule["start"]))
+            schedule["end"] = str(saved_schedule.get("end", schedule["end"]))
+            days = saved_schedule.get("days", schedule["days"])
             if isinstance(days, list):
-                existing["days"] = [int(day) for day in days if str(day).isdigit() and 0 <= int(day) <= 6]
+                schedule["days"] = [
+                    int(day) for day in days
+                    if str(day).isdigit() and 0 <= int(day) <= 6
+                ]
 
         errors: dict[str, str] = {}
         if user_input is not None:
-            start = str(user_input["peak_start"])
-            end = str(user_input["peak_end"])
-            days = [int(day) for day in user_input.get("peak_days", [])]
-            if start == end and days:
-                errors["peak_end"] = "peak_start_end_must_differ"
+            peak = user_input.get("peak_period", {})
+            limits = user_input.get("consumption_limits", {})
+            start_time = str(peak.get("peak_start", schedule["start"]))
+            end_time = str(peak.get("peak_end", schedule["end"]))
+            days = [int(day) for day in peak.get("peak_days", schedule["days"])]
+
+            yellow = float(limits.get("green_yellow", yellow_default))
+            red = float(limits.get("yellow_red", red_default))
+
+            if start_time == end_time:
+                errors["peak_period"] = "peak_start_end_must_differ"
+            elif red < yellow:
+                errors["consumption_limits"] = "red_must_be_at_least_yellow"
+            elif not days:
+                errors["peak_period"] = "peak_days_required"
+
             if not errors:
                 options = dict(self._pending_options or self.config_entry.options)
+                options["consumption_thresholds"] = {
+                    "yellow": yellow,
+                    "red": red,
+                }
                 options["consumption_peak_schedule"] = {
-                    "start": start,
-                    "end": end,
+                    "start": start_time,
+                    "end": end_time,
                     "days": days,
                 }
                 coordinator = self.config_entry.runtime_data
@@ -542,96 +578,59 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             SelectOptionDict(value="5", label="Friday"),
             SelectOptionDict(value="6", label="Saturday"),
         ]
+
         schema = vol.Schema({
-            vol.Required("peak_start", default=existing["start"]): selector.TimeSelector(),
-            vol.Required("peak_end", default=existing["end"]): selector.TimeSelector(),
-            vol.Required("peak_days", default=[str(day) for day in existing["days"]]): SelectSelector(
-                SelectSelectorConfig(
-                    options=weekday_options,
-                    multiple=True,
-                    mode=SelectSelectorMode.LIST,
-                )
+            vol.Required("peak_period", default={}): section(
+                vol.Schema({
+                    vol.Required("peak_start", default=schedule["start"]): selector.TimeSelector(),
+                    vol.Required("peak_end", default=schedule["end"]): selector.TimeSelector(),
+                    vol.Required(
+                        "peak_days",
+                        default=[str(day) for day in schedule["days"]],
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=weekday_options,
+                            multiple=True,
+                            mode=SelectSelectorMode.LIST,
+                        )
+                    ),
+                }),
+                {"collapsed": False},
+            ),
+            vol.Required("consumption_limits", default={}): section(
+                vol.Schema({
+                    vol.Required(
+                        "green_yellow",
+                        default=yellow_default,
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=_CONSUMPTION_THRESHOLD_MAX_KWH,
+                            step=0.1,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                    vol.Required(
+                        "yellow_red",
+                        default=red_default,
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0,
+                            max=_CONSUMPTION_THRESHOLD_MAX_KWH,
+                            step=0.1,
+                            mode=NumberSelectorMode.BOX,
+                        )
+                    ),
+                }),
+                {"collapsed": False},
             ),
         })
         return self.async_show_form(
-            step_id="peak_schedule",
+            step_id="consumption_settings",
             data_schema=schema,
             errors=errors,
         )
 
-    async def async_step_consumption_thresholds(self, user_input=None):
-        existing = dict(_CONSUMPTION_THRESHOLD_DEFAULTS)
-        saved = self.config_entry.options.get("consumption_thresholds", {})
-        for profile in ("peak", "off_peak"):
-            if isinstance(saved.get(profile), list) and len(saved[profile]) == 4:
-                existing[profile] = [
-                    {
-                        "time": str(point.get("time", default["time"])),
-                        "yellow": float(point.get("yellow", default["yellow"])),
-                        "red": float(point.get("red", default["red"])),
-                    }
-                    for point, default in zip(saved[profile], _CONSUMPTION_THRESHOLD_DEFAULTS[profile])
-                ]
-
-        errors: dict[str, str] = {}
-        if user_input is not None:
-            profiles: dict[str, list[dict[str, Any]]] = {"peak": [], "off_peak": []}
-            for profile in ("peak", "off_peak"):
-                for index in range(4):
-                    prefix = f"{profile}_{index + 1}"
-                    time_value = str(user_input[f"{prefix}_time"])
-                    yellow = float(user_input[f"{prefix}_yellow"])
-                    red = float(user_input[f"{prefix}_red"])
-                    profiles[profile].append({
-                        "time": time_value,
-                        "yellow": yellow,
-                        "red": red,
-                    })
-
-                previous_minutes = -1
-                for index, point in enumerate(profiles[profile]):
-                    parts = point["time"].split(":")
-                    minutes = int(parts[0]) * 60 + int(parts[1])
-                    if minutes <= previous_minutes:
-                        errors[f"{profile}_{index + 1}_time"] = "times_must_increase"
-                        break
-                    if point["red"] < point["yellow"]:
-                        errors[f"{profile}_{index + 1}_red"] = "red_must_be_at_least_yellow"
-                    previous_minutes = minutes
-
-            if not errors:
-                options = dict(self._pending_options or self.config_entry.options)
-                options["consumption_thresholds"] = profiles
-                self._pending_options = options
-                return await self.async_step_peak_schedule()
-
-        schema_fields: dict[Any, Any] = {}
-        for profile in ("peak", "off_peak"):
-            for index, point in enumerate(existing[profile], start=1):
-                prefix = f"{profile}_{index}"
-                schema_fields[vol.Required(f"{prefix}_time", default=point["time"])] = selector.TimeSelector()
-                schema_fields[vol.Required(f"{prefix}_yellow", default=float(point["yellow"]))] = NumberSelector(
-                    NumberSelectorConfig(
-                        min=0,
-                        max=_CONSUMPTION_THRESHOLD_MAX_KWH,
-                        step=0.1,
-                        mode=NumberSelectorMode.BOX,
-                    )
-                )
-                schema_fields[vol.Required(f"{prefix}_red", default=float(point["red"]))] = NumberSelector(
-                    NumberSelectorConfig(
-                        min=0,
-                        max=_CONSUMPTION_THRESHOLD_MAX_KWH,
-                        step=0.1,
-                        mode=NumberSelectorMode.BOX,
-                    )
-                )
-
-        return self.async_show_form(
-            step_id="consumption_thresholds",
-            data_schema=vol.Schema(schema_fields),
-            errors=errors,
-        )
 
 
 def _training_method(candidate: dict[str, Any]) -> str:
