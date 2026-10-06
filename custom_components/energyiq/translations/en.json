@@ -137,7 +137,8 @@
   "error": {
     "times_must_increase": "Times must be in increasing order.",
     "red_must_be_at_least_yellow": "Red threshold must be at least the yellow threshold.",
-    "peak_days_required": "Select at least one Peak day."
+    "peak_days_required": "Select at least one Peak day.",
+    "peak_start_end_must_differ": "Peak start and end times must be different."
   },
   "abort": {
     "no_candidates": "No electrical-load candidates were found after filtering.",
