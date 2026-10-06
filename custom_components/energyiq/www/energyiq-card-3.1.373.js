@@ -478,11 +478,11 @@ if(this._view===2&&Date.now()-this._costHistoryAt>30000)await this._loadCostHist
       const barWidth=Math.max(1,((W-L-R)/bucketCount)-barGap);
       const baseline=T+ch;let svg='<svg viewBox="0 0 '+W+' '+H+'"><line x1="'+L+'" y1="'+baseline+'" x2="'+(W-R)+'" y2="'+baseline+'" class="axis"/>';
       if(period==="day"){
-        const schedule=schedule||{};
+        const tariffSchedule=schedule||{};
         const toHour=value=>{const parts=String(value||"00:00:00").split(":").map(Number);return (parts[0]||0)+((parts[1]||0)/60)+((parts[2]||0)/3600);};
-        const startHour=toHour(schedule.start),endHour=toHour(schedule.end);
+        const startHour=toHour(tariffSchedule.start),endHour=toHour(tariffSchedule.end);
         const localDay=(start.getDay());
-        const peakDays=Array.isArray(schedule.days)?schedule.days.map(Number):[1,2,3,4,5];
+        const peakDays=Array.isArray(tariffSchedule.days)?tariffSchedule.days.map(Number):[1,2,3,4,5];
         const haDay=(localDay+0);
         if(peakDays.includes(haDay)){
           [startHour,endHour].forEach(h=>{
