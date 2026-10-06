@@ -23,7 +23,7 @@ FRONTEND_VERSION = "34700"
 
 _MANIFEST_PATH = Path(__file__).with_name("manifest.json")
 INTEGRATION_VERSION = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))["version"]
-CARD_PATH = f"{URL_BASE}/energyiq-card-3.1.246.js"
+CARD_PATH = f"{URL_BASE}/energyiq-card-3.1.347.js"
 CARD_URL = f"{CARD_PATH}?v={FRONTEND_VERSION}"
 
 
