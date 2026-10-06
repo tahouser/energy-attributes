@@ -19,11 +19,11 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "37400"
+FRONTEND_VERSION = "37500"
 
 _MANIFEST_PATH = Path(__file__).with_name("manifest.json")
 INTEGRATION_VERSION = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))["version"]
-CARD_PATH = f"{URL_BASE}/energyiq-card-3.1.374.js"
+CARD_PATH = f"{URL_BASE}/energyiq-card-3.1.375.js"
 CARD_URL = f"{CARD_PATH}?v={FRONTEND_VERSION}"
 
 
@@ -35,19 +35,24 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
     if resources is not None and hasattr(resources, "async_create_item"):
         try:
             await resources.async_get_info()
-            # Remove every existing EnergyIQ card resource before registering the
-            # current URL. This includes the same card path with an older query
-            # string: HA otherwise keeps serving the already-registered resource
-            # and the browser can continue executing the previous frontend.
+            # Remove older EnergyIQ card resources, but keep the current one
+            # if it is already registered. Replacing the resource on every
+            # integration setup can leave Lovelace with a stale custom element.
             old_prefix = f"{URL_BASE}/energyiq-card"
-            for item in list(resources.async_items()):
+            current_path = CARD_PATH
+            items = list(resources.async_items())
+            for item in items:
                 url = str(item.get("url", "")).split("?")[0]
-                if url.startswith(old_prefix):
+                if url.startswith(old_prefix) and url != current_path:
                     await resources.async_delete_item(item["id"])
-            await resources.async_create_item({
-                "url": CARD_URL,
-                "res_type": "module",
-            })
+            if not any(
+                str(item.get("url", "")).split("?")[0] == current_path
+                for item in resources.async_items()
+            ):
+                await resources.async_create_item({
+                    "url": CARD_URL,
+                    "res_type": "module",
+                })
             return
         except Exception:
             # Fall through to the legacy extra-JS loader for YAML-mode/older HA.
