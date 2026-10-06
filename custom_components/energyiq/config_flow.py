@@ -591,7 +591,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
                         SelectSelectorConfig(
                             options=weekday_options,
                             multiple=True,
-                            mode=SelectSelectorMode.LIST,
+                            mode=SelectSelectorMode.DROPDOWN,
                         )
                     ),
                 }),
