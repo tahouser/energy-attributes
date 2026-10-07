@@ -179,6 +179,9 @@
             ${c.hw_version ? `<span class="chip">HW ${this.escape(c.hw_version)}</span>` : ""}
           </div>
 
+          <div class="probe-action"><button class="secondary probe-button" data-probe="${this.escape(c.device_id)}" ${this.probing ? "disabled" : ""}>${this.probing ? "Interrogating…" : "Interrogate channels (30 sec)"}</button></div>
+          ${this.probe && this.probe.device_id===c.device_id ? this.renderProbe(this.probe) : ""}
+
           <div class="inference ${status}">
             <div><span class="eyebrow">Electrical-system inference</span><strong>${this.escape(inf.inference || "Unknown")}</strong></div>
             <div class="confidence">${this.escape(inf.confidence || "unknown")} confidence</div>
