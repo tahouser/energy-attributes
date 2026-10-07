@@ -90,6 +90,7 @@ def _config_info(hass: HomeAssistant, entity) -> list[dict]:
         config_id = getattr(entity, "config_entry_id", None)
         config_ids = {config_id} if config_id else set()
     for config_entry_id in config_ids:
+        entry = hass.config_entries.async_get_entry(config_entry_id)
         if entry is None:
             continue
         result.append({
