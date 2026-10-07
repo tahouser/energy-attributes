@@ -624,15 +624,30 @@ if(this._view===2&&Date.now()-this._costHistoryAt>30000)await this._loadCostHist
         // Preserve the existing WEEK/MONTH path until DAY is verified.
         const addHistory=(states,key)=>{
           const entries=this._historyEntries(states);
-          let previous=null;
+          let previous=null, lastValid=null;
+          const HEADROOM=1.30;
+          const MAX_FIVE_MINUTE_COST=0.02;
           for(const e of entries){
             if(e.t<=start.getTime()){previous=e.v;continue;}
             if(e.t>end.getTime())break;
             if(previous==null){previous=e.v;continue;}
             const delta=e.v-previous;
-            if(delta>=0){
-              const idx=Math.floor((e.t-start.getTime())/bucketMs);
-              if(idx>=0&&idx<buckets.length)buckets[idx][key]+=delta;
+            if(delta<0){
+              previous=e.v;
+              continue;
+            }
+            // WEEK/MONTH chart only: reject the same impossible cumulative
+            // helper jump already filtered by DAY. The helper represents
+            // 5-minute accumulated cost, so >$0.02 is not a valid interval.
+            if(delta>MAX_FIVE_MINUTE_COST ||
+               (lastValid!=null&&delta>Math.max(MAX_FIVE_MINUTE_COST,lastValid*HEADROOM))){
+              previous=e.v;
+              continue;
+            }
+            const idx=Math.floor((e.t-start.getTime())/bucketMs);
+            if(idx>=0&&idx<buckets.length){
+              buckets[idx][key]+=delta;
+              lastValid=delta;
             }
             previous=e.v;
           }
