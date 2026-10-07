@@ -327,9 +327,12 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
                 previous_time = timestamp
                 continue
             change = value - previous_value
-            # Ignore only a recorder initialization jump from zero to an already
-            # accumulated cumulative meter value.
-            if change > 0 and not (first_delta and previous_value == 0.0 and change > 100.0):
+            # The first positive delta after the month-start history baseline
+            # is not a trustworthy consumption interval. Recorder history can
+            # begin with a non-zero cumulative meter value, or can surface a
+            # catch-up jump when the source history starts. Establish the
+            # baseline first; only subsequent deltas become consumption.
+            if change > 0 and not first_delta:
                 self._consumption_add_source_delta(accounting, previous_time, timestamp, change)
             first_delta = False
             previous_value = value
