@@ -349,10 +349,16 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         """Derive month totals exclusively from the daily ledger."""
         months: dict[str, dict[str, float]] = {}
         for day_key, values in accounting.get("days", {}).items():
+            # Filter impossible recorder catch-up days. A whole-home residential
+            # day above 100 kWh is treated as an invalid cumulative-history artifact.
+            day_peak = float(values.get("peak", 0.0))
+            day_off = float(values.get("off_peak", 0.0))
+            if day_peak + day_off > 100.0:
+                continue
             month_key = str(day_key)[:7]
             month = months.setdefault(month_key, {"peak": 0.0, "off_peak": 0.0})
-            month["peak"] += float(values.get("peak", 0.0))
-            month["off_peak"] += float(values.get("off_peak", 0.0))
+            month["peak"] += day_peak
+            month["off_peak"] += day_off
         for values in months.values():
             values["peak"] = round(values["peak"], 6)
             values["off_peak"] = round(values["off_peak"], 6)
