@@ -1,7 +1,7 @@
 (() => {
   const TARGET = "energyiq-panel-v339";
   const SOURCE = "/energyiq-static/energyiq-panel.js?v=31413";
-  const CARD_SOURCE = "/energyiq-static/energyiq-card-3.1.379.js?v=37900";
+  const CARD_SOURCE = "/energyiq-static/energyiq-card-3.1.380.js?v=38000";
 
   const loadCard = () => {
     if (customElements.get("energyiq-card")) return;
