@@ -346,7 +346,17 @@ def discover_meters(hass: HomeAssistant) -> dict:
 @websocket_api.async_response
 async def ws_meter_detector(hass: HomeAssistant, connection, msg) -> None:
     """Return a non-destructive whole-home meter discovery report."""
-    connection.send_result(msg["id"], discover_meters(hass))
+    try:
+        result = discover_meters(hass)
+    except Exception as err:
+        result = {
+            "candidate_count": 0,
+            "candidates": [],
+            "unattached": [],
+            "analysis_notes": ["Detector backend exception"],
+            "error": f"{type(err).__name__}: {err}",
+        }
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command({
