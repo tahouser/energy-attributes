@@ -1,8 +1,8 @@
-/* EnergyIQ dashboard card — 3.1.402 */
+/* EnergyIQ dashboard card — 3.1.405 */
 const TAG = "energyiq-card";
 if (!customElements.get(TAG)) {
   class EnergyIQCard extends HTMLElement {
-    constructor() { super(); this._hass=null; this._cfg={}; this._data=null; this._entryId=null; this._view=0; this._timer=null; this._busy=false; this._ro=null; this._click=this._handleClick.bind(this); this._costPeriod="day"; this._costHistory=null; this._costHistoryAt=0; this._costLearned=null; this._costSwipeStartX=0; this._costSwipeStartY=0; this._costSwipeActive=false; this._consumptionPeriod="day"; this._mysteryHistory=[]; }
+    constructor() { super(); this._hass=null; this._cfg={}; this._data=null; this._entryId=null; this._view=0; this._timer=null; this._busy=false; this._ro=null; this._click=this._handleClick.bind(this); this._costPeriod="day"; this._costHistory=null; this._costHistoryAt=0; this._costLearned=null; this._costSwipeStartX=0; this._costSwipeStartY=0; this._costSwipeActive=false; this._consumptionPeriod="day"; this._mysteryHistory=[]; this._activeLoadsOpen=false; }
     static getConfigForm() {
       return {
         schema: [
@@ -412,7 +412,8 @@ if(this._view===2&&Date.now()-this._costHistoryAt>30000)await this._loadCostHist
       if(costPeriod){e.stopPropagation();const p=costPeriod.dataset.costPeriod;if(p==="day"||p==="week"||p==="month"){this._costPeriod=p;this._costHistoryAt=0;this._loadCostHistory();}return;}
       if(train){e.stopPropagation();this._openEnergyIQ();return;}
       if(next){e.stopPropagation();this._view=(this._view+1)%3;this._render();if(this._view===2)this._loadCostHistory();return;}
-      if(active){e.stopPropagation();this._showActiveLoads();return;}
+      if(e.target.closest("[data-close-active]")){e.stopPropagation();this._activeLoadsOpen=false;this._closeActiveLoads();return;}
+  if(active){e.stopPropagation();this._showActiveLoads();return;}
       if(open){e.stopPropagation();this._openEnergyIQ();return;}
     }
     _openEnergyIQ(){if(this._hass&&typeof this._hass.navigate==="function"){this._hass.navigate("/energyiq");return;}window.history.pushState({}, "", "/energyiq");window.dispatchEvent(new Event("location-changed"));}
