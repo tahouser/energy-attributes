@@ -228,7 +228,10 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
 
     def _consumption_add_history_delta(self, accounting, rate, start_ts, end_ts, change) -> None:
         """Add a Utility Meter history delta, splitting it at local midnights."""
-        if change <= 0 or end_ts <= start_ts:
+        # Filter impossible catch-up jumps from recorder history. The source is
+        # a cumulative whole-home kWh meter; a single history interval above
+        # 100 kWh is treated as a stale/catch-up value, not real consumption.
+        if change <= 0 or change > 100.0 or end_ts <= start_ts:
             return
         start = dt_util.utc_from_timestamp(start_ts)
         end = dt_util.utc_from_timestamp(end_ts)
