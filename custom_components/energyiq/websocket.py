@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
 from .persistence import get_store, validate_import_snapshot
-from .meter_detector import discover_meters
+from .meter_detector import discover_meters, ws_meter_detector, ws_meter_detector_probe
 
 _MANIFEST_VERSION = json.loads((Path(__file__).with_name("manifest.json")).read_text(encoding="utf-8"))["version"]
 
@@ -684,5 +684,5 @@ async def ws_stop_training(hass, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for handler in (ws_list_entries, ws_workspace, ws_export_data, ws_import_data, ws_delete_data, ws_set_monitoring, ws_remove_devices, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_stop_training, ws_meter_detector):
+    for handler in (ws_list_entries, ws_workspace, ws_export_data, ws_import_data, ws_delete_data, ws_set_monitoring, ws_remove_devices, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_stop_training, ws_meter_detector, ws_meter_detector_probe):
         websocket_api.async_register_command(hass, handler)
