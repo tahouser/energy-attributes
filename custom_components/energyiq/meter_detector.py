@@ -84,8 +84,11 @@ def _entity_summary(hass: HomeAssistant, entry, device) -> list[dict]:
 
 def _config_info(hass: HomeAssistant, entity) -> list[dict]:
     result = []
-    for config_entry_id in entity.config_entry_ids:
-        entry = hass.config_entries.async_get_entry(config_entry_id)
+    config_ids = getattr(entity, "config_entry_ids", None)
+    if config_ids is None:
+        config_id = getattr(entity, "config_entry_id", None)
+        config_ids = {config_id} if config_id else set()
+    for config_entry_id in config_ids:
         if entry is None:
             continue
         result.append({
