@@ -133,7 +133,7 @@
               </div>
               <button id="refresh" class="primary" ${this.loading ? "disabled" : ""}>${this.loading ? "Scanning…" : "Scan again"}</button>
             </section>
-            ${this.error ? `<section class="error"><strong>Detector error</strong><p>${this.escape(this.error)}</p></section>` : ""}
+            ${this.error ? `<section class="error"><strong>Detector error</strong><p>${this.escape(this.error)}</p></section>` : ""}${d?.error ? `<section class="error"><strong>Detector backend error</strong><p>${this.escape(d.error)}</p></section>` : ""}
             ${!d && !this.error ? `<section class="empty"><span class="spinner"></span><strong>Scanning Home Assistant…</strong></section>` : ""}
             ${d ? this.renderResults(d) : ""}
           </main>
