@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import asyncio
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
@@ -204,6 +205,38 @@ def _infer_electrical_system(device, entities: list[dict]) -> dict:
     }
 
 
+def _channel_label(row: dict) -> str:
+    """Best-effort channel label from the HA entity name."""
+    text = f"{row.get('name','')} {row.get('entity_id','')}".casefold()
+    match = re.search(r"(?:^|[^a-z0-9])(l[123]|phase[_ -]?[123]|channel[_ -]?[123]|ch[123])(?:$|[^a-z0-9])", text)
+    if match:
+        return re.sub(r"[_ -]+", " ", match.group(1)).upper()
+    return "unlabeled"
+
+async def _probe_entities(hass: HomeAssistant, entities: list[dict]) -> list[dict]:
+    """Sample HA live meter entities so channel activity is observed, not guessed."""
+    samples = {e["entity_id"]: [] for e in entities}
+    started = asyncio.get_running_loop().time()
+    while asyncio.get_running_loop().time() - started < 30:
+        now = asyncio.get_running_loop().time()
+        for entity in entities:
+            state = hass.states.get(entity["entity_id"])
+            value = _number(state) if state is not None else None
+            samples[entity["entity_id"]].append((now, value, state.state if state is not None else "unavailable"))
+        await asyncio.sleep(2)
+    results = []
+    for entity in entities:
+        series = samples[entity["entity_id"]]
+        numeric = [x[1] for x in series if x[1] is not None]
+        if not numeric:
+            status = "unavailable"
+        else:
+            peak = max(abs(v) for v in numeric)
+            span = max(numeric) - min(numeric)
+            threshold = {"power": 1.0, "current": 0.02, "voltage": 5.0, "energy": 0.0001}.get(entity["kind"], 0.0)
+            status = "active signal" if peak > threshold or span > threshold else "reporting zero"
+        results.append({"entity_id": entity["entity_id"], "name": entity["name"], "kind": entity["kind"], "unit": entity["unit"], "channel": _channel_label(entity), "samples": len(series), "numeric_samples": len(numeric), "min": min(numeric) if numeric else None, "max": max(numeric) if numeric else None, "range": (max(numeric)-min(numeric)) if numeric else None, "status": status})
+    return results
 def discover_meters(hass: HomeAssistant) -> dict:
     registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
@@ -314,6 +347,34 @@ async def ws_meter_detector(hass: HomeAssistant, connection, msg) -> None:
     """Return a non-destructive whole-home meter discovery report."""
     connection.send_result(msg["id"], discover_meters(hass))
 
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/meter_detector_probe",
+    vol.Optional("device_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_meter_detector_probe(hass: HomeAssistant, connection, msg) -> None:
+    """Interrogate the selected meter channels for a short live window."""
+    report = discover_meters(hass)
+    candidates = report.get("candidates", [])
+    device_id = msg.get("device_id")
+    candidate = next((c for c in candidates if c["device_id"] == device_id), None) if device_id else (candidates[0] if candidates else None)
+    if candidate is None:
+        raise ValueError("No meter candidate is available to interrogate")
+    probe = await _probe_entities(hass, candidate["entities"])
+    by_channel = {}
+    for row in probe:
+        channel = row["channel"]
+        item = by_channel.setdefault(channel, {"channel": channel, "entities": [], "active": False, "reporting": False})
+        item["entities"].append(row)
+        item["reporting"] = item["reporting"] or row["numeric_samples"] > 0
+        item["active"] = item["active"] or row["status"] == "active signal"
+    channels = list(by_channel.values())
+    for item in channels:
+        item["assessment"] = ("likely populated / carrying measurable signal" if item["active"] else "reporting, but zero during the probe — cannot prove CT is absent" if item["reporting"] else "not reporting during the probe")
+    active_channels = sum(1 for x in channels if x["active"])
+    connection.send_result(msg["id"], {"device_id": candidate["device_id"], "device_name": candidate["name"], "model": candidate["model"], "probe_seconds": 30, "sample_interval_seconds": 2, "channels": channels, "active_channel_count": active_channels, "channel_count_observed": len(channels), "conclusion": f"{active_channels} channel(s) showed measurable activity during the 30-second probe. Channel count is reported separately from electrical topology; an exposed CT input is not treated as a phase.", "limitations": ["A populated CT with no load can look exactly like an unused CT during a quiet window.", "A channel is labeled likely populated only when HA reports a measurable signal; zero-only channels remain indeterminate.", "This probe interrogates Home Assistant live entity state. It does not directly call the Shelly network API."]})
 
 def async_register(hass: HomeAssistant) -> None:
     """Register the detector WebSocket command."""
