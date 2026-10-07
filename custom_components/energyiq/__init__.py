@@ -16,7 +16,6 @@ from .websocket import async_register as async_register_websocket
 from .long_cycle import async_register as async_register_long_cycle
 from .accounting import async_register as async_register_accounting
 from .response_migration import migrate_response_log
-from .meter_detector import async_register as async_register_meter_detector
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
@@ -72,7 +71,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         async_register_websocket(hass)
         await async_register_long_cycle(hass)
         async_register_accounting(hass)
-        async_register_meter_detector(hass)
         data["_websocket_registered"] = True
 
     if not data.get("_panel_registered"):
