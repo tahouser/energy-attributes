@@ -402,6 +402,42 @@ def _device_data(candidates: list[dict[str, Any]], selected: set[str]) -> dict[s
     }
 
 
+def _read_utility_charges(user_input: dict[str, Any]) -> list[dict[str, Any]]:
+    charges = []
+    for index in range(1, 5):
+        name = str(user_input.get(f"charge{index}_name", "")).strip()
+        amount = user_input.get(f"charge{index}_amount")
+        basis = str(user_input.get(f"charge{index}_basis", "monthly"))
+        if amount in (None, ""):
+            continue
+        charges.append({"name": name or f"Other charge {index}", "amount": float(amount), "basis": basis})
+    return charges
+
+
+def _utility_cost_schema(*, utility_name: str, average_rate: Any, zip_code: str, saved: Any, include_average: bool = True) -> vol.Schema:
+    saved_map = {}
+    if isinstance(saved, list):
+        for index, charge in enumerate(saved[:4], start=1):
+            if isinstance(charge, dict):
+                saved_map[index] = charge
+    fields: dict[Any, Any] = {
+        vol.Required("zip_code", default=zip_code): str,
+        vol.Required("utility_name", default=utility_name): str,
+        vol.Optional("rate_plan", default=""): str,
+        vol.Optional("peak_rate", default=""): NumberSelector(NumberSelectorConfig(min=0, max=100, step=0.0001, mode=NumberSelectorMode.BOX)),
+        vol.Optional("off_peak_rate", default=""): NumberSelector(NumberSelectorConfig(min=0, max=100, step=0.0001, mode=NumberSelectorMode.BOX)),
+    }
+    if include_average:
+        fields[vol.Optional("average_rate", default=str(average_rate or ""))] = str
+    basis_options = [SelectOptionDict(value=value, label=label) for value, label in _UTILITY_CHARGE_BASES.items()]
+    for index in range(1, 5):
+        charge = saved_map.get(index, {})
+        fields[vol.Optional(f"charge{index}_name", default=str(charge.get("name", "")))] = str
+        fields[vol.Optional(f"charge{index}_amount", default=str(charge.get("amount", "")))] = NumberSelector(NumberSelectorConfig(min=0, max=10000, step=0.01, mode=NumberSelectorMode.BOX))
+        fields[vol.Optional(f"charge{index}_basis", default=str(charge.get("basis", "monthly")))] = SelectSelector(SelectSelectorConfig(options=basis_options, multiple=False, mode=SelectSelectorMode.DROPDOWN))
+    return vol.Schema(fields)
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Initial setup only: choose the aggregate meter and create the entry."""
 
