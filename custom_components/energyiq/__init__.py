@@ -30,7 +30,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
 
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "42400"
+FRONTEND_VERSION = "42500"
 
 _MANIFEST_PATH = Path(__file__).with_name("manifest.json")
 INTEGRATION_VERSION = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))["version"]
