@@ -551,10 +551,56 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_manual_meter(self, user_input=None):
-        """Allow a meter entity to be selected directly from Home Assistant."""
+        """Offer either a discovered device or a manually selected power entity."""
         if not self._detected_meters:
             self._refresh_detected_meters()
-        power_candidates = self._detected_meters
+
+        if user_input is not None:
+            action = user_input.get("action")
+            if action == "device":
+                return await self.async_step_manual_device()
+            if action == "entity":
+                return await self.async_step_manual_entity()
+
+        return self.async_show_menu(
+            step_id="manual_meter",
+            menu_options=["manual_device", "manual_entity"],
+            description_placeholders={
+                "message": (
+                    "EnergyIQ could not identify your whole-home meter. "
+                    "You can choose a useful device it found, or select any "
+                    "Home Assistant power sensor yourself."
+                )
+            },
+        )
+
+    async def async_step_manual_device(self, user_input=None):
+        """Choose a discovered Class A/B/C source."""
+        if not self._detected_meters:
+            self._refresh_detected_meters()
+        if user_input is not None:
+            selected = self._commissioning_candidate_map().get(user_input["meter"])
+            if selected:
+                self._selected_meter = selected
+                power = _commissioning_power_entity(selected)
+                if power:
+                    return await self._finish_commissioning(power, selected)
+            return await self.async_step_manual_meter()
+
+        return self.async_show_form(
+            step_id="manual_device",
+            data_schema=vol.Schema({
+                vol.Required("meter"): SelectSelector(
+                    SelectSelectorConfig(
+                        options=_commissioning_options(self._detected_meters),
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+            }),
+        )
+
+    async def async_step_manual_entity(self, user_input=None):
+        """Select any Home Assistant power entity directly."""
         if user_input is not None:
             power_entity = user_input.get("power_entity")
             if power_entity:
@@ -562,7 +608,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self._finish_commissioning(power_entity, None)
 
         return self.async_show_form(
-            step_id="manual_meter",
+            step_id="manual_entity",
             data_schema=vol.Schema({
                 vol.Required("power_entity"): selector.EntitySelector(
                     selector.EntitySelectorConfig(
@@ -572,14 +618,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     )
                 ),
             }),
-            description_placeholders={
-                "message": (
-                    "Choose any Home Assistant power sensor. "
-                    "EnergyIQ will use it as the whole-home source and you can configure "
-                    "the remaining settings later."
-                )
-            },
         )
+
 
     async def async_step_reconfigure(self, user_input=None):
         """Re-select the EnergyIQ whole-home meter for an existing entry."""
