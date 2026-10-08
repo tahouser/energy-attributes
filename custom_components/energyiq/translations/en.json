@@ -51,12 +51,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "EnergyIQ — Commissioning",
-        "description": "{count} electrical-load candidates are in the private EnergyIQ environment. Select the devices to monitor, then set the Peak period and two shared consumption limits.",
-        "data": {
-          "monitored_devices": "Devices to monitor",
-          "action": "Training / save action"
-        },
+        "title": "EnergyIQ — Configuration",
         "menu_options": {
           "meter_properties": "Meter Properties",
           "general": "General",
