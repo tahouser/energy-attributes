@@ -13,6 +13,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import dt as dt_util
+from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder import history as recorder_history
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers import entity_registry as er
@@ -376,7 +377,8 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         utc_now = dt_util.as_utc(now)
         entity_id = "sensor.house_energy_total"
         try:
-            history_rows = await self.hass.async_add_executor_job(
+            recorder = get_instance(self.hass)
+            history_rows = await recorder.async_add_executor_job(
                 recorder_history.get_significant_states,
                 self.hass, utc_start, utc_now, [entity_id], None, True, False, True, True, True
             )
