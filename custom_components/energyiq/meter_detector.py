@@ -260,13 +260,61 @@ async def _probe_entities(hass: HomeAssistant, entities: list[dict]) -> list[dic
             span = max(numeric) - min(numeric)
             threshold = {"power": 1.0, "current": 0.02, "voltage": 5.0, "energy": 0.0001}.get(entity["kind"], 0.0)
             status = "active signal" if peak > threshold or span > threshold else "reporting zero"
-        results.append({"entity_id": entity["entity_id"], "name": entity["name"], "kind": entity["kind"], "unit": entity["unit"], "channel": _channel_label(entity), "samples": len(series), "numeric_samples": len(numeric), "min": min(numeric) if numeric else None, "max": max(numeric) if numeric else None, "range": (max(numeric)-min(numeric)) if numeric else None, "status": status})
+        results.append({"entity_id": entity["entity_id"], "name": entity["name"], "kind": entity["kind"], "unit": entity["unit"], "channel": _channel_label(entity), "role": entity.get("role", ""), "samples": len(series), "numeric_samples": len(numeric), "min": min(numeric) if numeric else None, "max": max(numeric) if numeric else None, "range": (max(numeric)-min(numeric)) if numeric else None, "status": status})
     return results
 _DEVICE_EXCLUDE_WORDS = (
     "plug", "smart plug", "outlet", "switch", "dishwasher", "refrigerator",
     "fridge", "washer", "dryer", "oven", "range", "microwave", "television",
     "tv", "lamp", "light", "fan", "thermostat", "climate",
 )
+
+def _summarize_meter_source(candidate: dict, probe: list[dict]) -> dict:
+    """Interpret interrogated channels as one logical meter source."""
+    active_power = [
+        row for row in probe
+        if row.get("kind") == "power" and row.get("status") == "active signal"
+    ]
+    active_power = [row for row in active_power if row.get("role") != "phase" or True]
+    phase_power = [row for row in active_power if row.get("role") == "phase"]
+    whole_home_power = [row for row in active_power if row.get("role") == "whole_home"]
+    active_voltage = [
+        row for row in probe
+        if row.get("kind") == "voltage" and row.get("status") == "active signal"
+    ]
+    active_current = [
+        row for row in probe
+        if row.get("kind") == "current" and row.get("status") == "active signal"
+    ]
+    if whole_home_power:
+        mode = "direct_whole_home"
+        label = "Whole-home power entity detected"
+        entity_ids = [row["entity_id"] for row in whole_home_power]
+    elif len(phase_power) >= 2:
+        mode = "combined_channels"
+        label = f"Combined meter detected — {len(phase_power)} active power channels"
+        entity_ids = [row["entity_id"] for row in phase_power]
+    elif len(active_power) == 1:
+        mode = "single_channel"
+        label = "Single active power channel detected"
+        entity_ids = [active_power[0]["entity_id"]]
+    else:
+        mode = "insufficient"
+        label = "Interrogation did not establish a usable power source"
+        entity_ids = []
+    return {
+        "mode": mode,
+        "label": label,
+        "power_entity_ids": entity_ids,
+        "active_power_channels": len(active_power),
+        "phase_power_channels": len(phase_power),
+        "active_voltage_channels": len(active_voltage),
+        "active_current_channels": len(active_current),
+        "combined_current_w": round(sum(
+            (row.get("max") or 0) for row in phase_power
+        ), 2) if phase_power else None,
+        "confidence": "high" if whole_home_power or len(phase_power) >= 2 else "medium" if len(active_power) == 1 else "low",
+    }
+
 
 def _is_meter_candidate(device, entities: list[dict], config_entries: list[dict], score: int) -> bool:
     """Require meter-like evidence; ordinary loads are not meter candidates."""
@@ -577,10 +625,12 @@ async def ws_meter_detector_probe(hass: HomeAssistant, connection, msg) -> None:
         item["reporting"] = item["reporting"] or row["numeric_samples"] > 0
         item["active"] = item["active"] or row["status"] == "active signal"
     channels = list(by_channel.values())
+    probe_by_id = {row["entity_id"]: row for row in probe}
     for item in channels:
         item["assessment"] = ("likely populated / carrying measurable signal" if item["active"] else "reporting, but zero during the probe — cannot prove CT is absent" if item["reporting"] else "not reporting during the probe")
     active_channels = sum(1 for x in channels if x["active"])
-    connection.send_result(msg["id"], {"device_id": candidate["device_id"], "device_name": candidate["name"], "model": candidate["model"], "probe_seconds": 30, "sample_interval_seconds": 2, "channels": channels, "active_channel_count": active_channels, "channel_count_observed": len(channels), "conclusion": f"{active_channels} channel(s) showed measurable activity during the 30-second probe. Channel count is reported separately from electrical topology; an exposed CT input is not treated as a phase.", "limitations": ["A populated CT with no load can look exactly like an unused CT during a quiet window.", "A channel is labeled likely populated only when HA reports a measurable signal; zero-only channels remain indeterminate.", "This probe interrogates Home Assistant live entity state. It does not directly call the Shelly network API."]})
+    summary = _summarize_meter_source(candidate, probe)
+    connection.send_result(msg["id"], {"device_id": candidate["device_id"], "device_name": candidate["name"], "model": candidate["model"], "probe_seconds": 30, "sample_interval_seconds": 2, "channels": channels, "active_channel_count": active_channels, "channel_count_observed": len(channels), "meter_source": summary, "conclusion": f"{active_channels} channel(s) showed measurable activity during the 30-second probe. EnergyIQ interprets related active channels as one meter source rather than asking the user to choose a single phase.", "limitations": ["A populated CT with no load can look exactly like an unused CT during a quiet window.", "A channel is labeled likely populated only when HA reports a measurable signal; zero-only channels remain indeterminate.", "This probe interrogates Home Assistant live entity state. It does not directly call the Shelly network API."]})
 
 def async_register(hass: HomeAssistant) -> None:
     """Register the detector WebSocket command."""
