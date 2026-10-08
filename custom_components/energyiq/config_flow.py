@@ -574,6 +574,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         self._pending_options: dict[str, Any] | None = None
         self._candidates_map: dict[str, dict[str, Any]] = {}
         self._candidates: list[dict[str, Any]] = []
+        self._utility_lookup: dict[str, str] = {}
 
     async def async_step_init(self, user_input=None):
         """Enter the EnergyIQ configuration categories."""
@@ -738,7 +739,76 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         )
 
     async def async_step_utility_search(self, user_input=None):
-        return await self._configuration_placeholder("utility_search", user_input)
+        options = dict(self.config_entry.options)
+        if user_input is not None:
+            zip_code = str(user_input.get("zip_code", "")).strip()
+            if len(zip_code) != 5 or not zip_code.isdigit():
+                return self.async_show_form(
+                    step_id="utility_search",
+                    data_schema=vol.Schema({vol.Required("zip_code", default=zip_code): str}),
+                    errors={"base": "invalid_zip"},
+                )
+            result = await _lookup_utility_by_zip(self.hass, zip_code)
+            if result:
+                self._utility_lookup = result
+                return await self.async_step_utility_result()
+            return await self.async_step_utility_manual(zip_code=zip_code)
+        return self.async_show_form(
+            step_id="utility_search",
+            data_schema=vol.Schema({vol.Required("zip_code", default=str(options.get("utility_zip_code", ""))): str}),
+        )
+
+    async def async_step_utility_result(self, user_input=None):
+        options = dict(self.config_entry.options)
+        result = self._utility_lookup
+        if user_input is not None:
+            options.update({
+                "utility_zip_code": str(user_input["zip_code"]),
+                "utility_name": str(user_input["utility_name"]),
+                "utility_rate_plan": str(user_input.get("rate_plan", "")),
+                "utility_average_rate": float(user_input["average_rate"]) if user_input.get("average_rate") not in (None, "") else None,
+                "utility_peak_rate": float(user_input["peak_rate"]) if user_input.get("peak_rate") not in (None, "") else None,
+                "utility_off_peak_rate": float(user_input["off_peak_rate"]) if user_input.get("off_peak_rate") not in (None, "") else None,
+                "utility_lookup_year": int(result.get("year", _UTILITY_LOOKUP_YEAR)),
+                "utility_lookup_source": result.get("source", ""),
+                "utility_costs": _read_utility_charges(user_input),
+            })
+            return self.async_create_entry(data=options)
+        return self.async_show_form(
+            step_id="utility_result",
+            data_schema=_utility_cost_schema(
+                utility_name=result.get("utility_name", ""),
+                average_rate=result.get("average_rate", ""),
+                zip_code=options.get("utility_zip_code", ""),
+                saved=options.get("utility_costs", []),
+            ),
+        )
+
+    async def async_step_utility_manual(self, user_input=None, zip_code=""):
+        options = dict(self.config_entry.options)
+        if user_input is not None:
+            options.update({
+                "utility_zip_code": str(user_input["zip_code"]),
+                "utility_name": str(user_input["utility_name"]),
+                "utility_rate_plan": str(user_input.get("rate_plan", "")),
+                "utility_average_rate": None,
+                "utility_peak_rate": float(user_input["peak_rate"]) if user_input.get("peak_rate") not in (None, "") else None,
+                "utility_off_peak_rate": float(user_input["off_peak_rate"]) if user_input.get("off_peak_rate") not in (None, "") else None,
+                "utility_lookup_year": None,
+                "utility_lookup_source": "manual",
+                "utility_costs": _read_utility_charges(user_input),
+            })
+            return self.async_create_entry(data=options)
+        return self.async_show_form(
+            step_id="utility_manual",
+            data_schema=_utility_cost_schema(
+                utility_name=options.get("utility_name", ""),
+                average_rate="",
+                zip_code=zip_code or options.get("utility_zip_code", ""),
+                saved=options.get("utility_costs", []),
+                include_average=False,
+            ),
+        )
 
     async def async_step_consumption_settings(self, user_input=None):
         """Configure the compact consumption thresholds and Peak schedule."""
