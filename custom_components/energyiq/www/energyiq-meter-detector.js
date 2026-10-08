@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "44400";
+  const VERSION = "44700";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -136,27 +136,40 @@
       const source = p.meter_source;
       const ids = source?.power_entity_ids || [];
       const selected = ids.length > 0 && ids.every(x => this.currentPowerEntities.has(x));
+      const active = Number(p.active_channel_count || 0);
+      const observed = Number(p.channel_count_observed || 0);
+      const watts = source?.current_w == null ? null : Number(source.current_w);
       return `
-        <div class="probe">
+        <div class="probe compact-probe">
           <div class="probe-head">
-            <div><span class="eyebrow">Live interrogation</span><strong>30-second channel test</strong><small>${this.escape(p.conclusion)}</small></div>
-            <span class="probe-count">${p.active_channel_count} active / ${p.channel_count_observed} observed</span>
-          </div>
-          <div class="channel-grid">
-            ${(p.channels||[]).map(ch => `
-              <div class="channel-card ${ch.active ? "active" : ""}">
-                <div class="channel-top"><strong>${this.escape(ch.channel)}</strong><span>${ch.active ? "SIGNAL" : "QUIET"}</span></div>
-                <div class="channel-assessment">${this.escape(ch.assessment)}</div>
-                ${(ch.entities||[]).map(e=>`<div class="probe-row"><span>${this.escape(e.kind)}</span><strong>${e.max == null ? "—" : this.escape(Number(e.max).toFixed(2))} ${this.escape(e.unit||"")}</strong><small>range ${e.range == null ? "—" : this.escape(Number(e.range).toFixed(2))}</small></div>`).join("")}
-              </div>`).join("")}
+            <div>
+              <span class="eyebrow">Live interrogation</span>
+              <strong>${active} active channel${active === 1 ? "" : "s"} detected</strong>
+              <small>${this.escape(p.conclusion)}</small>
+            </div>
+            <span class="probe-count">${active} / ${observed} active</span>
           </div>
           ${source && source.mode !== "insufficient" ? `
-            <div class="source-result">
-              <div><span class="eyebrow">EnergyIQ interpretation</span><strong>${this.escape(source.label)}</strong>
-              <small>${this.escape(ids.map(x => x.split(".").pop()).join(" + "))}${source.current_w == null ? "" : ` · ${this.escape(Number(source.current_w).toFixed(0))} W observed`}</small></div>
+            <div class="source-result compact-source">
+              <div>
+                <span class="eyebrow">EnergyIQ interpretation</span>
+                <strong>${this.escape(source.label)}</strong>
+                <small>${ids.length} power channel${ids.length === 1 ? "" : "s"}${Number.isFinite(watts) ? ` · ${watts.toFixed(0)} W observed` : ""}</small>
+              </div>
               ${ids.length ? `<button type="button" class="meter-use primary" data-use-source="${this.escape(ids.join(","))}" data-source-mode="${this.escape(source.mode)}">${selected ? "Current EnergyIQ meter" : "Use this meter"}</button>` : ""}
             </div>` : ""}
-          <div class="probe-note">${(p.limitations||[]).map(x=>`<div>• ${this.escape(x)}</div>`).join("")}</div>
+          <details class="probe-details">
+            <summary>Technical details</summary>
+            <div class="channel-grid">
+              ${(p.channels||[]).map(ch => `
+                <div class="channel-card ${ch.active ? "active" : ""}">
+                  <div class="channel-top"><strong>${this.escape(ch.channel)}</strong><span>${ch.active ? "SIGNAL" : "QUIET"}</span></div>
+                  <div class="channel-assessment">${this.escape(ch.assessment)}</div>
+                  ${(ch.entities||[]).map(e=>`<div class="probe-row"><span>${this.escape(e.kind)}</span><strong>${e.max == null ? "—" : this.escape(Number(e.max).toFixed(2))} ${this.escape(e.unit||"")}</strong><small>range ${e.range == null ? "—" : this.escape(Number(e.range).toFixed(2))}</small></div>`).join("")}
+                </div>`).join("")}
+            </div>
+            ${(p.limitations||[]).length ? `<div class="probe-note">${(p.limitations||[]).map(x=>`<div>• ${this.escape(x)}</div>`).join("")}</div>` : ""}
+          </details>
         </div>`;
     }
 
@@ -336,7 +349,7 @@
       button{border:1px solid var(--divider-color);border-radius:8px;background:var(--card-background-color);color:var(--primary-text-color);padding:9px 13px;cursor:pointer;font:inherit}button:hover{background:var(--secondary-background-color);transform:translateY(-1px)}button.primary{background:#26b8f0;color:#07131d;border-color:#26b8f0;font-weight:800}button:disabled{opacity:.45}
       .summary-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.metric{padding:13px 14px;display:flex;flex-direction:column;gap:4px}.metric span{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--secondary-text-color)}.metric strong{font-size:20px}.metric small{font-size:10px;color:var(--secondary-text-color)}
       .panel{padding:17px}.panel.top{border-color:rgba(20,242,184,.42);box-shadow:inset 0 1px 0 rgba(255,255,255,.03),0 0 18px rgba(20,242,184,.05)}.candidate-head,.panel-head{display:flex;justify-content:space-between;gap:15px;align-items:flex-start}.candidate-head h2,.panel-head h2{margin:2px 0 4px}.candidate-head p{margin:0;color:var(--secondary-text-color)}.score{min-width:74px;text-align:center;border:1px solid rgba(54,200,255,.3);border-radius:11px;padding:7px 8px}.score strong{display:block;font-size:24px;color:#36c8ff}.score span{font-size:9px;color:var(--secondary-text-color)}
-      .probe-action{margin:12px 0}.secondary{font-weight:700}.probe{margin:12px 0;padding:12px;border:1px solid rgba(54,200,255,.25);border-radius:11px;background:rgba(54,200,255,.035)}.probe-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.probe-head strong{display:block}.probe-head small{display:block;color:var(--secondary-text-color);margin-top:3px}.probe-count{font-size:10px;text-transform:uppercase;color:#35e7b0;white-space:nowrap}.channel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.channel-card{border:1px solid var(--divider-color);border-radius:9px;padding:9px;background:rgba(255,255,255,.02)}.channel-card.active{border-color:rgba(20,242,184,.45)}.channel-top{display:flex;justify-content:space-between}.channel-top span{font-size:9px;color:var(--secondary-text-color)}.channel-assessment{font-size:10px;color:var(--secondary-text-color);margin:6px 0}.probe-row{display:grid;grid-template-columns:55px 1fr auto;gap:5px;border-top:1px solid var(--divider-color);padding-top:5px;margin-top:5px;font-size:9px}.probe-row small{color:var(--secondary-text-color)}.probe-note{margin-top:9px;color:var(--secondary-text-color);font-size:9px;line-height:1.45}.chips,.evidence>div{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.chip,.evidence span{padding:5px 8px;border-radius:999px;background:rgba(54,200,255,.08);border:1px solid rgba(54,200,255,.16);font-size:10px;color:var(--secondary-text-color)}.evidence{margin:12px 0}.evidence>strong{font-size:11px}.inference{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px;border-radius:10px;margin:13px 0;border:1px solid var(--divider-color);background:rgba(255,255,255,.025)}.inference.promising{border-color:rgba(20,242,184,.4)}.inference.limited{border-color:rgba(255,193,7,.38)}.inference strong{display:block;font-size:15px}.confidence{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}
+      .probe-action{margin:12px 0}.secondary{font-weight:700}.probe{margin:10px 0;padding:10px;border:1px solid rgba(54,200,255,.25);border-radius:11px;background:rgba(54,200,255,.035)}.probe-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.probe-head strong{display:block}.probe-head small{display:block;color:var(--secondary-text-color);margin-top:3px}.probe-count{font-size:10px;text-transform:uppercase;color:#35e7b0;white-space:nowrap}.probe-details{margin-top:8px}.probe-details summary{font-size:10px;color:var(--secondary-text-color)}.compact-source{margin-top:8px}.channel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.channel-card{border:1px solid var(--divider-color);border-radius:9px;padding:9px;background:rgba(255,255,255,.02)}.channel-card.active{border-color:rgba(20,242,184,.45)}.channel-top{display:flex;justify-content:space-between}.channel-top span{font-size:9px;color:var(--secondary-text-color)}.channel-assessment{font-size:10px;color:var(--secondary-text-color);margin:6px 0}.probe-row{display:grid;grid-template-columns:55px 1fr auto;gap:5px;border-top:1px solid var(--divider-color);padding-top:5px;margin-top:5px;font-size:10px}.probe-row small{color:var(--secondary-text-color)}.probe-note{margin-top:9px;color:var(--secondary-text-color);font-size:10px;line-height:1.4}.chips,.evidence>div{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.chip,.evidence span{padding:5px 8px;border-radius:999px;background:rgba(54,200,255,.08);border:1px solid rgba(54,200,255,.16);font-size:10px;color:var(--secondary-text-color)}.evidence{margin:12px 0}.evidence>strong{font-size:11px}.inference{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px;border-radius:10px;margin:13px 0;border:1px solid var(--divider-color);background:rgba(255,255,255,.025)}.inference.promising{border-color:rgba(20,242,184,.4)}.inference.limited{border-color:rgba(255,193,7,.38)}.inference strong{display:block;font-size:15px}.confidence{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}
       .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:13px}.stats>div{padding:9px;border:1px solid rgba(255,255,255,.05);border-radius:8px;background:rgba(255,255,255,.03)}.stats span{display:block;font-size:9px;text-transform:uppercase;color:var(--secondary-text-color)}.stats strong{display:block;margin-top:3px;font-size:17px}
       details{border-top:1px solid var(--divider-color);padding-top:10px;margin-top:10px}summary{cursor:pointer;font-weight:700;font-size:12px;color:var(--primary-text-color)}.entity-table{margin-top:9px;border:1px solid var(--divider-color);border-radius:9px;overflow:hidden}.entity-row{display:grid;grid-template-columns:90px minmax(180px,1fr) 90px 65px minmax(130px,auto);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid var(--divider-color);font-size:11px}.entity-row:first-child{border-top:0}.entity-head{background:rgba(255,255,255,.03);font-size:9px;text-transform:uppercase;color:var(--secondary-text-color);letter-spacing:.06em}.entity-row small,.simple-row small{display:block;color:var(--secondary-text-color);font-size:9px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.type{font-size:9px;text-transform:uppercase;font-weight:800}.type.power{color:#36c8ff}.type.energy{color:#35e7b0}.type.voltage{color:#ffd166}.type.current{color:#ff9f68}.registry{display:grid;gap:5px;margin-top:8px}.registry code{font-size:10px;overflow-wrap:anywhere}.notes{margin:8px 0 0;padding-left:19px;color:var(--secondary-text-color);line-height:1.5;font-size:12px}.simple-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--divider-color);font-size:11px}
       .meter-use{white-space:nowrap;font-size:10px;padding:6px 8px}.meter-use.current{opacity:.7;cursor:default}.notice{border-color:rgba(20,242,184,.4)}.role{display:inline-block;margin-right:5px;padding:2px 5px;border-radius:5px;font-size:8px;font-weight:900;letter-spacing:.04em}.whole-home{color:#35e7b0;background:rgba(53,231,176,.10)}.phase-role{color:#ffd166;background:rgba(255,209,102,.10)}.phase-note{font-size:9px;color:var(--secondary-text-color)}
