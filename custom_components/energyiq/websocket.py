@@ -113,7 +113,7 @@ def _meter_summary(hass: HomeAssistant, coordinator) -> list[dict]:
     source_prefixes = set()
     for entity_id in configured_power_entities:
         prefix = re.sub(
-            r"_(?:(?:energy_)?meter_\\d+|(?:active_)?power)(?:_.*)?$",
+            r"_(?:(?:energy_)?meter_\d+|(?:active_)?power)(?:_.*)?$",
             "",
             entity_id.casefold(),
         )
@@ -141,17 +141,17 @@ def _meter_summary(hass: HomeAssistant, coordinator) -> list[dict]:
 
     def meter_key(name: str):
         text = name.casefold().replace("_", " ").replace("-", " ")
-        match = re.search(r"(?:meter|phase|leg)[ ]*(\\d+)", text)
+        match = re.search(r"(?:meter|phase|leg)[ ]*(\d+)", text)
         if match:
             return f"meter-{match.group(1)}"
-        if re.search(r"\\bphase[ ]*a\\b", text):
+        if re.search(r"\bphase[ ]*a\b", text):
             return "l1"
-        if re.search(r"\\bphase[ ]*b\\b", text):
+        if re.search(r"\bphase[ ]*b\b", text):
             return "l2"
-        if re.search(r"\\bphase[ ]*c\\b", text):
+        if re.search(r"\bphase[ ]*c\b", text):
             return "l3"
         for token in ("l1", "l2", "l3"):
-            if re.search(rf"\\b{token}\\b", text):
+            if re.search(rf"\b{token}\b", text):
                 return token
         return None
 
