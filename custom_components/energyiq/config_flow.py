@@ -499,10 +499,27 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             if result is None:
                 continue
+            channel_lines = []
+            for channel in result.get("channels", []):
+                measurements = []
+                for entity in channel.get("entities", []):
+                    maximum = entity.get("max")
+                    if maximum is None:
+                        continue
+                    unit = entity.get("unit") or ""
+                    measurements.append(f"{entity.get('kind', 'signal')} {float(maximum):.1f}{unit}")
+                signal = ", ".join(measurements[:2])
+                channel_lines.append(
+                    f"{channel.get('channel', 'unlabeled')}: "
+                    f"{'active' if channel.get('active') else 'quiet'}"
+                    + (f" ({signal})" if signal else "")
+                )
+            detail = "; ".join(channel_lines)
             probe_lines.append(
                 f"{candidate.get('name', 'Class A meter')}: "
-                f"{result.get('active_channel_count', 0)} active / "
-                f"{result.get('channel_count_observed', 0)} channels observed"
+                f"{result.get('active_channel_count', 0)}/"
+                f"{result.get('channel_count_observed', 0)} channels active"
+                + (f" — {detail}" if detail else "")
             )
 
         summary = (
