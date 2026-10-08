@@ -384,6 +384,47 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "_restore_persistent_data": False,
         })
 
+    def _refresh_detected_meters(self) -> None:
+        """Refresh all useful meter candidates from the live HA inventory."""
+        report = discover_meters(self.hass)
+        self._detected_meters = [
+            candidate
+            for candidate in report.get("candidates", [])
+            if _commissioning_power_entity(candidate)
+        ]
+
+    def _commissioning_update_data(self, power_entity: str, candidate: dict[str, Any] | None) -> dict[str, Any]:
+        """Build the small set of setup fields owned by commissioning."""
+        return {
+            CONF_POWER_ENTITY: power_entity,
+            "commissioning_status": "complete",
+            "commissioning_source": candidate.get("group_id") if candidate else "manual",
+            "commissioning_source_class": candidate.get("meter_class") if candidate else "manual",
+        }
+
+    def _commissioning_candidate_map(self) -> dict[str, dict[str, Any]]:
+        return {
+            candidate["group_id"]: candidate
+            for candidate in self._detected_meters
+            if candidate.get("group_id")
+        }
+
+    async def _finish_commissioning(
+        self,
+        power_entity: str,
+        candidate: dict[str, Any] | None,
+    ):
+        """Create a new entry or update an existing entry with the selected meter."""
+        if self.source == config_entries.SOURCE_RECONFIGURE:
+            update_data = self._commissioning_update_data(power_entity, candidate)
+            return self.async_update_reload_and_abort(
+                self._get_reconfigure_entry(),
+                data_updates=update_data,
+            )
+
+        self._selected_meter = candidate
+        return self._create_commissioned_entry(power_entity, False)
+
     async def async_step_user(self, user_input=None):
         """Discover a useful whole-home source before asking for advanced settings."""
         if self._saved_snapshot is None:
@@ -413,57 +454,144 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("restore_existing", default=True): bool,
             }))
 
-        report = discover_meters(self.hass)
-        self._detected_meters = [c for c in report.get("candidates", []) if c.get("meter_class") == "A" and _commissioning_power_entity(c)]
-        if len(self._detected_meters) == 1:
-            self._selected_meter = self._detected_meters[0]
+        self._refresh_detected_meters()
+        class_a = [c for c in self._detected_meters if c.get("meter_class") == "A"]
+        if len(class_a) == 1:
+            self._selected_meter = class_a[0]
             return await self.async_step_commission()
-        if self._detected_meters:
+        if class_a:
+            self._detected_meters = class_a
             return await self.async_step_meter_select()
         return await self.async_step_manual_meter()
 
     async def async_step_meter_select(self, user_input=None):
+        """Choose among multiple Class A sources before the confirmation screen."""
         if user_input is not None:
-            self._selected_meter = next(c for c in self._detected_meters if c["group_id"] == user_input["meter"])
-            return await self.async_step_commission()
+            selected = self._commissioning_candidate_map().get(user_input["meter"])
+            if selected:
+                self._selected_meter = selected
+                return await self.async_step_commission()
         return self.async_show_form(step_id="meter_select", data_schema=vol.Schema({
-            vol.Required("meter"): SelectSelector(SelectSelectorConfig(options=_commissioning_options(self._detected_meters), mode=SelectSelectorMode.DROPDOWN))
+            vol.Required("meter"): SelectSelector(
+                SelectSelectorConfig(
+                    options=_commissioning_options(self._detected_meters),
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
         }))
 
     async def async_step_commission(self, user_input=None):
+        """Give the user an explicit accept / choose-different / manual choice."""
+        if self._selected_meter is None:
+            self._refresh_detected_meters()
+        if user_input is not None:
+            action = user_input.get("action")
+            if action == "use":
+                power = _commissioning_power_entity(self._selected_meter) if self._selected_meter else None
+                if power:
+                    return await self._finish_commissioning(power, self._selected_meter)
+            if action == "choose":
+                self._refresh_detected_meters()
+                return await self.async_step_choose_meter()
+            return await self.async_step_manual_meter()
+
+        if self._selected_meter is None:
+            return await self.async_step_manual_meter()
+
+        return self.async_show_menu(
+            step_id="commission",
+            menu_options=["commission_use", "commission_choose", "commission_manual"],
+            description_placeholders={
+                "meter": _commissioning_meter_label(self._selected_meter),
+                "power": _commissioning_power_entity(self._selected_meter) or "Not available",
+            },
+        )
+
+    async def async_step_commission_use(self, user_input=None):
+        """Accept the detected meter."""
         if self._selected_meter is None:
             return await self.async_step_manual_meter()
         power = _commissioning_power_entity(self._selected_meter)
+        if not power:
+            return await self.async_step_manual_meter()
+        return await self._finish_commissioning(power, self._selected_meter)
+
+    async def async_step_commission_choose(self, user_input=None):
+        """Reject the presented meter and choose another detected source."""
+        self._refresh_detected_meters()
+        return await self.async_step_choose_meter(user_input)
+
+    async def async_step_commission_manual(self, user_input=None):
+        """Reject the presented meter and enter a meter manually."""
+        return await self.async_step_manual_meter(user_input)
+
+    async def async_step_choose_meter(self, user_input=None):
+        """List every useful detected source, not only Class A."""
+        if not self._detected_meters:
+            self._refresh_detected_meters()
         if user_input is not None:
-            return self._create_commissioned_entry(power, user_input.get("action") != "use") if power else await self.async_step_manual_meter()
-        return self.async_show_form(step_id="commission", data_schema=vol.Schema({
-            vol.Required("action", default="use"): SelectSelector(SelectSelectorConfig(options=[
-                SelectOptionDict(value="use", label="Use this meter — start EnergyIQ"),
-                SelectOptionDict(value="defer", label="Not now — use it and configure later"),
-            ], mode=SelectSelectorMode.DROPDOWN))
-        }), description_placeholders={"meter": _commissioning_meter_label(self._selected_meter), "power": power or "Not available"})
+            selected = self._commissioning_candidate_map().get(user_input["meter"])
+            if selected:
+                self._selected_meter = selected
+                power = _commissioning_power_entity(selected)
+                if power:
+                    return await self._finish_commissioning(power, selected)
+            return await self.async_step_manual_meter()
+
+        return self.async_show_form(
+            step_id="choose_meter",
+            data_schema=vol.Schema({
+                vol.Required("meter"): SelectSelector(
+                    SelectSelectorConfig(
+                        options=_commissioning_options(self._detected_meters),
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+            }),
+        )
 
     async def async_step_manual_meter(self, user_input=None):
-        self._candidates = _build_candidates(self.hass)
-        power_candidates = [c for c in self._candidates if c.get("power_count", 0)]
+        """Allow a meter entity to be selected directly from Home Assistant."""
+        if not self._detected_meters:
+            self._refresh_detected_meters()
+        power_candidates = self._detected_meters
         if user_input is not None:
-            if user_input.get("source") == "device" and user_input.get("device"):
-                candidate = next(c for c in power_candidates if c["device_id"] == user_input["device"])
-                power_entities = [m["entity_id"] for m in candidate.get("measurements", []) if m.get("kind") == "power"]
-                if power_entities:
-                    self._selected_meter = candidate
-                    return self._create_commissioned_entry(power_entities[0], True)
-            if user_input.get("power_entity"):
+            power_entity = user_input.get("power_entity")
+            if power_entity:
                 self._selected_meter = None
-                return self._create_commissioned_entry(user_input["power_entity"], True)
-        return self.async_show_form(step_id="manual_meter", data_schema=vol.Schema({
-            vol.Required("source", default="manual"): SelectSelector(SelectSelectorConfig(options=[
-                SelectOptionDict(value="manual", label="I will choose my meter"),
-                SelectOptionDict(value="device", label="Choose a device EnergyIQ found"),
-            ], mode=SelectSelectorMode.DROPDOWN)),
-            vol.Optional("power_entity"): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power", multiple=False)),
-            vol.Optional("device"): SelectSelector(SelectSelectorConfig(options=_candidate_options(power_candidates), mode=SelectSelectorMode.DROPDOWN)),
-        }), description_placeholders={"message": "EnergyIQ could not automatically identify your whole-home meter. This does not necessarily mean Home Assistant does not have one. Choose a power entity yourself, or use a device EnergyIQ found for basic functionality."})
+                return await self._finish_commissioning(power_entity, None)
+
+        return self.async_show_form(
+            step_id="manual_meter",
+            data_schema=vol.Schema({
+                vol.Required("power_entity"): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class="power",
+                        multiple=False,
+                    )
+                ),
+            }),
+            description_placeholders={
+                "message": (
+                    "Choose any Home Assistant power sensor. "
+                    "EnergyIQ will use it as the whole-home source and you can configure "
+                    "the remaining settings later."
+                )
+            },
+        )
+
+    async def async_step_reconfigure(self, user_input=None):
+        """Re-select the EnergyIQ whole-home meter for an existing entry."""
+        self._refresh_detected_meters()
+        class_a = [c for c in self._detected_meters if c.get("meter_class") == "A"]
+        if len(class_a) == 1:
+            self._selected_meter = class_a[0]
+            return await self.async_step_commission()
+        if class_a:
+            self._detected_meters = class_a
+            return await self.async_step_meter_select()
+        return await self.async_step_manual_meter()
 
 
 
