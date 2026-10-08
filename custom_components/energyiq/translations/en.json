@@ -32,10 +32,15 @@
         }
       },
       "manual_meter": {
-        "title": "Add my meter manually",
-        "description": "EnergyIQ could not identify the meter you want to use. Choose any Home Assistant power sensor. You can configure the remaining settings later.",
-        "data": {
-          "power_entity": "Home Assistant power sensor"
+        "title": "Choose your meter",
+        "description": "EnergyIQ could not identify a whole-home Class A meter. You can choose a device EnergyIQ found, or select a Home Assistant power sensor yourself.",
+        "menu_options": {
+          "manual_device": "CHOOSE A DEVICE ENERGYIQ FOUND",
+          "manual_entity": "ADD MY METER MANUALLY"
+        },
+        "menu_option_descriptions": {
+          "manual_device": "Use a detected electrical source as the EnergyIQ meter.",
+          "manual_entity": "Select any Home Assistant power sensor."
         }
       },
       "choose_meter": {
@@ -48,6 +53,20 @@
       "reconfigure": {
         "title": "Re-select EnergyIQ meter",
         "description": "Choose the whole-home meter EnergyIQ should use. Existing EnergyIQ settings and training data will be preserved."
+      },
+      "manual_device": {
+        "title": "Choose a device EnergyIQ found",
+        "description": "Select the electrical source you want EnergyIQ to use.",
+        "data": {
+          "meter": "Detected electrical source"
+        }
+      },
+      "manual_entity": {
+        "title": "Add my meter manually",
+        "description": "Select the Home Assistant power sensor EnergyIQ should use.",
+        "data": {
+          "power_entity": "Home Assistant power sensor"
+        }
       }
     },
     "abort": {}
