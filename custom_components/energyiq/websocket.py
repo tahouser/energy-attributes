@@ -315,6 +315,7 @@ async def ws_workspace(hass, connection, msg):
         "entry_id": msg["entry_id"],
         "version": _MANIFEST_VERSION,
         "power_entity": coordinator.power_entity,
+        "currency": coordinator.entry.options.get("currency", "USD"),
         "whole_home_power": state.state if state else None,
         "trained_live_power_w": trained_live_w,
         "trained_live_count": trained_live_count,
