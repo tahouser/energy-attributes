@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "41400";
+  const VERSION = "41500";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -10,7 +10,7 @@
       this.data = null;
       this.loading = false;
       this.error = null;
-      this.probe = null;
+      this.probeResult = null;
       this.probing = false;
       this.selected = new Set();
       this.timer = null;
@@ -73,14 +73,14 @@
     }
 
 
-    async probe(deviceId) {
+    async runProbe(deviceId) {
       if (this.probing) return;
       this.probing = true;
-      this.probe = null;
+      this.probeResult = null;
       this.error = null;
       this.render();
       try {
-        this.probe = await this.ws({type:"energy_attribution/meter_detector_probe", device_id:deviceId});
+        this.probeResult = await this.ws({type:"energy_attribution/meter_detector_probe", device_id:deviceId});
         this.render();
       } catch (e) {
         this.error = this.formatError(e);
@@ -195,7 +195,7 @@
           <div class="meter-detail">
             <div class="meter-detail-head"><div><span class="eyebrow">${this.escape(label)}</span><strong>${c.member_device_ids?.length > 1 ? `Grouped physical source · ${c.member_device_ids.length} HA records` : this.escape(inf.inference || "Electrical measurement source")}</strong></div><span class="score-mini">${c.score} match</span></div>
             <div class="meter-actions">${tier === "d" ? `<div class="unsupported-note">This device is retained for discovery, but it is not a usable EnergyIQ electrical source.</div>` : ""}<button class="secondary probe-button" data-probe="${this.escape(c.device_id)}" ${this.probing ? "disabled" : ""}>${this.probing ? "Interrogating…" : "Interrogate channels (30 sec)"}</button></div>
-            ${this.probe && this.probe.device_id===c.device_id ? this.renderProbe(this.probe) : ""}
+            ${this.probeResult && this.probeResult.device_id===c.device_id ? this.renderProbe(this.probeResult) : ""}
             <div class="evidence compact-evidence">${(c.evidence||[]).slice(0,4).map(x=>`<span>${this.escape(x)}</span>`).join("")}</div>
             <details class="subdetails"><summary>Show Home Assistant entities (${c.entities.length})</summary>
               <div class="entity-table">
@@ -224,7 +224,7 @@
       this.querySelector("#refresh")?.addEventListener("click", () => this.load());
       this.querySelector("#clear-selection")?.addEventListener("click", () => { this.selected.clear(); this.render(); });
       this.querySelectorAll("[data-select]").forEach(cb => cb.addEventListener("click", (ev) => { ev.stopPropagation(); const id = cb.dataset.select; if (cb.checked) this.selected.add(id); else this.selected.delete(id); this.render(); }));
-      this.querySelectorAll("[data-probe]").forEach(btn => btn.addEventListener("click", () => this.probe(btn.dataset.probe)));
+      this.querySelectorAll("[data-probe]").forEach(btn => btn.addEventListener("click", () => this.runProbe(btn.dataset.probe)));
     }
 
     styles() { return `
