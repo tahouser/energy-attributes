@@ -18,6 +18,15 @@ from .accounting import async_register as async_register_accounting
 from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
+
+
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate the commissioning schema without changing existing user data."""
+    if config_entry.version == 4:
+        # 3.1.420 introduced commissioning flow metadata, but existing entries
+        # do not need any data transformation. Advance only the schema version.
+        hass.config_entries.async_update_entry(config_entry, version=5)
+    return True
 URL_BASE = "/energyiq-static"
 FRONTEND_VERSION = "41800"
 
