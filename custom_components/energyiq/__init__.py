@@ -27,6 +27,8 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         # do not need any data transformation. Advance only the schema version.
         hass.config_entries.async_update_entry(config_entry, version=5)
     return True
+
+
 URL_BASE = "/energyiq-static"
 FRONTEND_VERSION = "41800"
 
