@@ -101,14 +101,17 @@ def _trained_live_power(hass: HomeAssistant, candidates: dict, training_state: d
 def _meter_summary(hass: HomeAssistant, coordinator) -> list[dict]:
     """Discover live power/energy/voltage/current meters attached to the configured source device."""
     registry = er.async_get(hass)
-    source_entry = registry.async_get(coordinator.power_entity)
-    if source_entry is None or not source_entry.device_id:
+    configured_power_entities = list(getattr(coordinator, "power_entities", [coordinator.power_entity]))
+    if not configured_power_entities:
+        configured_power_entities = [coordinator.power_entity]
+    source_entries = [registry.async_get(entity_id) for entity_id in configured_power_entities]
+    device_ids = {entry.device_id for entry in source_entries if entry is not None and entry.device_id}
+    if not device_ids:
         return []
 
-    device_id = source_entry.device_id
     entities = []
     for entry in registry.entities.values():
-        if entry.device_id != device_id or entry.domain != "sensor" or entry.disabled_by is not None:
+        if entry.device_id not in device_ids or entry.domain != "sensor" or entry.disabled_by is not None:
             continue
         state = hass.states.get(entry.entity_id)
         if state is None:
@@ -139,7 +142,7 @@ def _meter_summary(hass: HomeAssistant, coordinator) -> list[dict]:
     for item in entities:
         entry, state, unit, device_class, name = item
         if device_class == "power" or unit in {"w", "kw"}:
-            if entry.entity_id == coordinator.power_entity:
+            if entry.entity_id in configured_power_entities and len(configured_power_entities) == 1:
                 continue
             value = number(item)
             if value is None:
