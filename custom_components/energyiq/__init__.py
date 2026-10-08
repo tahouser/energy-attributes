@@ -115,7 +115,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     response_log_path = migrate_response_log(hass)
     coordinator = EnergyAttributionCoordinator(hass, entry)
     coordinator._response_log_path = response_log_path
-    entry.runtime_data = coordinator
+    hass.data.setdefault(DOMAIN, {}).setdefault("_coordinators", {})[entry.entry_id] = coordinator
+    try:
+        entry.runtime_data = coordinator
+    except AttributeError:
+        pass
 
     await coordinator.async_load_training()
     await coordinator.async_config_entry_first_refresh()
@@ -125,7 +129,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload EnergyIQ integration cleanly."""
-    coordinator = entry.runtime_data
+    coordinator = getattr(entry, "runtime_data", None)
+    if coordinator is None:
+        coordinator = hass.data.get(DOMAIN, {}).get("_coordinators", {}).get(entry.entry_id)
     if coordinator:
         for device_id in list(coordinator.training_state):
             if coordinator.training_state[device_id].get("status") == "active":
