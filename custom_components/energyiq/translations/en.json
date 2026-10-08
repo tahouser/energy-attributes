@@ -3,11 +3,34 @@
     "flow_title": "EnergyIQ",
     "step": {
       "user": {
-        "title": "Choose whole-home meter",
-        "description": "Select the HA power sensor that represents total whole-home consumption. If saved EnergyIQ data is detected, keep Restore existing EnergyIQ data enabled to recover it, or turn it off to start fresh. Commissioning is available later from Configure.",
+        "title": "EnergyIQ commissioning",
+        "description": "EnergyIQ will first look for a whole-home electrical meter. If one is found, you can start immediately and configure the rest later.",
         "data": {
           "power_entity": "Whole-home power sensor",
           "restore_existing": "Restore existing EnergyIQ data"
+        }
+      },
+      "meter_select": {
+        "title": "Choose your whole-home meter",
+        "description": "EnergyIQ found more than one Class A meter source. Choose the one that represents total home consumption.",
+        "data": {
+          "meter": "Whole-home meter"
+        }
+      },
+      "commission": {
+        "title": "Whole-home meter found",
+        "description": "{meter}\\n\\nPrimary power: {power}\\n\\nYou can start EnergyIQ now. The remaining configuration can be completed later from Configure.",
+        "data": {
+          "action": "Setup"
+        }
+      },
+      "manual_meter": {
+        "title": "Choose your meter",
+        "description": "EnergyIQ could not automatically identify your whole-home meter. This does not necessarily mean Home Assistant does not have one. Choose your own power entity, or choose a device EnergyIQ found for basic functionality.",
+        "data": {
+          "source": "Meter source",
+          "power_entity": "My power entity",
+          "device": "Device found by EnergyIQ"
         }
       }
     }
