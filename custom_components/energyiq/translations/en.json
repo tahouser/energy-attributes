@@ -12,7 +12,7 @@
       },
       "meter_discovery": {
         "title": "EnergyIQ meter discovery",
-        "description": "EnergyIQ is scanning Home Assistant, grouping physical meter records, classifying electrical sources, and automatically interrogating every Class A meter for 30 seconds. No configuration is changed during this test.",
+        "description": "EnergyIQ is scanning Home Assistant, grouping physical meter records, classifying electrical sources, and automatically interrogating every Class A meter for 30 seconds. No configuration is changed during this test."
       },
       "meter_select": {
         "title": "Choose your whole-home meter",
