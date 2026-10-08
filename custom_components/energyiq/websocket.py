@@ -554,13 +554,16 @@ async def ws_workspace(hass, connection, msg):
             "current_power": _candidate_current_power(hass, candidate, coordinator.training_state.get(did, {})),
         })
     state = hass.states.get(coordinator.power_entity)
+    whole_home_power = coordinator._whole_home_power_watts()
     trained_live_w, trained_live_count = _trained_live_power(hass, coordinator.candidate_devices, coordinator.training_state)
     connection.send_result(msg["id"], {
         "entry_id": msg["entry_id"],
         "version": _MANIFEST_VERSION,
         "power_entity": coordinator.power_entity,
+        "power_entities": list(getattr(coordinator, "power_entities", [coordinator.power_entity])),
+        "power_source_mode": getattr(coordinator, "power_source_mode", "single_channel"),
         "currency": coordinator.entry.options.get("currency", "USD"),
-        "whole_home_power": state.state if state else None,
+        "whole_home_power": whole_home_power,
         "trained_live_power_w": trained_live_w,
         "trained_live_count": trained_live_count,
         "meters": _meter_summary(hass, coordinator),
