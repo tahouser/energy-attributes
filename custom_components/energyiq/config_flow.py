@@ -517,8 +517,62 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             return await self.async_step_configuration_menu()
         return self.async_show_form(step_id=step_id, data_schema=vol.Schema({}))
 
+    async def async_step_meter_properties(self, user_input=None):
+        """Manage only the whole-home EnergyIQ meter."""
+        current = self.config_entry.data.get(CONF_POWER_ENTITY)
+        if user_input is not None:
+            selected = user_input[CONF_POWER_ENTITY]
+            data = dict(self.config_entry.data)
+            data[CONF_POWER_ENTITY] = selected
+            options = dict(self.config_entry.options)
+            options[CONF_POWER_ENTITY] = selected
+            self.hass.config_entries.async_update_entry(self.config_entry, data=data)
+            return self.async_create_entry(data=options)
+
+        schema = vol.Schema({
+            vol.Required(CONF_POWER_ENTITY, default=current): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    domain="sensor",
+                    device_class="power",
+                    multiple=False,
+                )
+            ),
+        })
+        return self.async_show_form(
+            step_id="meter_properties",
+            data_schema=schema,
+        )
+
     async def async_step_general(self, user_input=None):
-        return await self._configuration_placeholder("general", user_input)
+        """Configure global EnergyIQ preferences."""
+        options = dict(self.config_entry.options)
+        currency = str(options.get("currency", "USD"))
+        time_zone = str(self.hass.config.time_zone or "UTC")
+        if user_input is not None:
+            options["currency"] = str(user_input.get("currency", currency))
+            return self.async_create_entry(data=options)
+
+        currency_options = [
+            SelectOptionDict(value="USD", label="USD ($)"),
+            SelectOptionDict(value="CAD", label="CAD ($)"),
+            SelectOptionDict(value="EUR", label="EUR (€)"),
+            SelectOptionDict(value="GBP", label="GBP (£)"),
+            SelectOptionDict(value="AUD", label="AUD ($)"),
+        ]
+        schema = vol.Schema({
+            vol.Required("currency", default=currency): SelectSelector(
+                SelectSelectorConfig(
+                    options=currency_options,
+                    multiple=False,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            ),
+        })
+        return self.async_show_form(
+            step_id="general",
+            data_schema=schema,
+            description_placeholders={"time_zone": time_zone},
+        )
 
     async def async_step_consumption_limits(self, user_input=None):
         return await self._configuration_placeholder("consumption_limits", user_input)
@@ -531,72 +585,6 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
 
     async def async_step_utility_search(self, user_input=None):
         return await self._configuration_placeholder("utility_search", user_input)
-    async def async_step_meter_properties(self, user_input=None):
-        discovered = _build_candidates(
-            self.hass, self.config_entry.data.get(CONF_POWER_ENTITY)
-        )
-        existing = dict(self.config_entry.options.get(
-            "candidate_devices",
-            self.config_entry.data.get("candidate_devices", {}),
-        ))
-        candidates_map = _reconcile_candidates(existing, discovered)
-        candidates = list(candidates_map.values())
-        if not candidates:
-            return self.async_abort(reason="no_candidates")
-
-        self._candidates_map = candidates_map
-        self._candidates = candidates
-        current = dict(self.config_entry.options.get(
-            "device_classifications",
-            self.config_entry.data.get("device_classifications", {}),
-        ))
-        selected_default = [
-            c["device_id"] for c in candidates
-            if current.get(c["device_id"], "monitor") == "monitor"
-        ]
-
-        if user_input is not None:
-            selected = set(user_input.get("monitored_devices", []))
-            classifications = {
-                c["device_id"]: ("monitor" if c["device_id"] in selected else "ignore")
-                for c in candidates
-            }
-            monitored = _monitored_entities(candidates, selected)
-            options = dict(self.config_entry.options)
-            options.update({
-                CONF_MONITORED_ENTITIES: monitored,
-                "device_classifications": classifications,
-                "candidate_devices": candidates_map,
-                "commissioned_devices": dict(options.get(
-                    "commissioned_devices",
-                    self.config_entry.data.get("commissioned_devices", {}),
-                )),
-                "training_state": dict(options.get(
-                    "training_state",
-                    self.config_entry.data.get("training_state", {}),
-                )),
-                "training_samples": dict(options.get(
-                    "training_samples",
-                    self.config_entry.data.get("training_samples", {}),
-                )),
-            })
-            self._pending_options = options
-            return await self.async_step_consumption_settings()
-
-        schema = vol.Schema({
-            vol.Required("monitored_devices", default=selected_default): SelectSelector(
-                SelectSelectorConfig(
-                    options=_candidate_options(candidates),
-                    multiple=True,
-                    mode=SelectSelectorMode.LIST,
-                )
-            ),
-        })
-        return self.async_show_form(
-            step_id="meter_properties",
-            data_schema=schema,
-            description_placeholders={"count": str(len(candidates))},
-        )
 
     async def async_step_consumption_settings(self, user_input=None):
         """Configure the compact consumption thresholds and Peak schedule."""
