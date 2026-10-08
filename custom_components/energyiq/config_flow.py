@@ -28,6 +28,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN, TRAINING_SESSION
+from .meter_detector import discover_meters
 from .persistence import build_entry_data, get_store, has_saved_data, migrate_snapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -357,77 +358,114 @@ def _device_data(candidates: list[dict[str, Any]], selected: set[str]) -> dict[s
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Initial setup only: choose the aggregate meter and create the entry."""
+    """Commission EnergyIQ with the simplest useful path first."""
 
-    VERSION = 4
+    VERSION = 5
 
     def __init__(self) -> None:
         self._power_entity: str | None = None
         self._candidates: list[dict[str, Any]] = []
         self._saved_snapshot: dict[str, Any] | None = None
+        self._detected_meters: list[dict[str, Any]] = []
+        self._selected_meter: dict[str, Any] | None = None
+
+    def _create_commissioned_entry(self, power_entity: str, deferred: bool):
+        self._power_entity = power_entity
+        self._candidates = _build_candidates(self.hass, power_entity)
+        return self.async_create_entry(title="EnergyIQ", data={
+            CONF_POWER_ENTITY: power_entity,
+            "candidate_devices": {c["device_id"]: c for c in self._candidates},
+            CONF_MONITORED_ENTITIES: [],
+            "device_classifications": {},
+            "commissioned_devices": {},
+            "commissioning_status": "deferred" if deferred else "complete",
+            "commissioning_source": self._selected_meter.get("group_id") if self._selected_meter else "manual",
+            "commissioning_source_class": self._selected_meter.get("meter_class") if self._selected_meter else "manual",
+            "_restore_persistent_data": False,
+        })
 
     async def async_step_user(self, user_input=None):
-        """Select the whole-home power sensor and optionally restore saved data."""
+        """Discover a useful whole-home source before asking for advanced settings."""
         if self._saved_snapshot is None:
-            self._saved_snapshot = migrate_snapshot(
-                await get_store(self.hass).async_load()
-            )
+            self._saved_snapshot = migrate_snapshot(await get_store(self.hass).async_load())
 
-        if user_input is not None:
-            self._power_entity = user_input[CONF_POWER_ENTITY]
-            restore = bool(user_input.get("restore_existing", False))
-
-            if restore and has_saved_data(self._saved_snapshot):
-                snapshot = self._saved_snapshot
-                data = build_entry_data(snapshot, self._power_entity)
-                data["_restore_persistent_data"] = True
-                options = dict(snapshot.get("options") or {})
-                options.update({
-                    CONF_MONITORED_ENTITIES: data[CONF_MONITORED_ENTITIES],
-                    "candidate_devices": data["candidate_devices"],
-                    "device_classifications": data["device_classifications"],
-                    "commissioned_devices": data["commissioned_devices"],
-                })
-                return self.async_create_entry(
-                    title="EnergyIQ",
-                    data=data,
-                    options=options,
-                )
-
-            # "Start fresh" is explicit and intentionally replaces the
-            # canonical store during the new entry's first setup.
-            self._candidates = _build_candidates(self.hass, self._power_entity)
-            return self.async_create_entry(
-                title="EnergyIQ",
-                data={
-                    CONF_POWER_ENTITY: self._power_entity,
-                    "candidate_devices": {c["device_id"]: c for c in self._candidates},
-                    CONF_MONITORED_ENTITIES: [],
-                    "device_classifications": {},
-                    "commissioned_devices": {},
-                    "_restore_persistent_data": False,
-                },
-            )
-
-        schema_fields = {
-            vol.Required(CONF_POWER_ENTITY): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="sensor",
-                    device_class="power",
-                    multiple=False,
-                )
-            )
-        }
         if has_saved_data(self._saved_snapshot):
-            schema_fields[vol.Optional("restore_existing", default=True)] = bool
+            if user_input is not None:
+                power = user_input[CONF_POWER_ENTITY]
+                if user_input.get("restore_existing", False):
+                    snapshot = self._saved_snapshot
+                    data = build_entry_data(snapshot, power)
+                    data["_restore_persistent_data"] = True
+                    options = dict(snapshot.get("options") or {})
+                    options.update({
+                        CONF_MONITORED_ENTITIES: data[CONF_MONITORED_ENTITIES],
+                        "candidate_devices": data["candidate_devices"],
+                        "device_classifications": data["device_classifications"],
+                        "commissioned_devices": data["commissioned_devices"],
+                    })
+                    return self.async_create_entry(title="EnergyIQ", data=data, options=options)
+                self._selected_meter = None
+                return await self.async_step_manual_meter()
+            return self.async_show_form(step_id="user", data_schema=vol.Schema({
+                vol.Required(CONF_POWER_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="sensor", device_class="power", multiple=False)
+                ),
+                vol.Optional("restore_existing", default=True): bool,
+            }))
 
-        schema = vol.Schema(schema_fields)
-        return self.async_show_form(step_id="user", data_schema=schema)
+        report = discover_meters(self.hass)
+        self._detected_meters = [c for c in report.get("candidates", []) if c.get("meter_class") == "A" and _commissioning_power_entity(c)]
+        if len(self._detected_meters) == 1:
+            self._selected_meter = self._detected_meters[0]
+            return await self.async_step_commission()
+        if self._detected_meters:
+            return await self.async_step_meter_select()
+        return await self.async_step_manual_meter()
 
-    @staticmethod
-    @callback
-    def async_get_options_flow(config_entry):
-        return OptionsFlowHandler()
+    async def async_step_meter_select(self, user_input=None):
+        if user_input is not None:
+            self._selected_meter = next(c for c in self._detected_meters if c["group_id"] == user_input["meter"])
+            return await self.async_step_commission()
+        return self.async_show_form(step_id="meter_select", data_schema=vol.Schema({
+            vol.Required("meter"): SelectSelector(SelectSelectorConfig(options=_commissioning_options(self._detected_meters), mode=SelectSelectorMode.DROPDOWN))
+        }))
+
+    async def async_step_commission(self, user_input=None):
+        if self._selected_meter is None:
+            return await self.async_step_manual_meter()
+        power = _commissioning_power_entity(self._selected_meter)
+        if user_input is not None:
+            return self._create_commissioned_entry(power, user_input.get("action") != "use") if power else await self.async_step_manual_meter()
+        return self.async_show_form(step_id="commission", data_schema=vol.Schema({
+            vol.Required("action", default="use"): SelectSelector(SelectSelectorConfig(options=[
+                SelectOptionDict(value="use", label="Use this meter — start EnergyIQ"),
+                SelectOptionDict(value="defer", label="Not now — use it and configure later"),
+            ], mode=SelectSelectorMode.DROPDOWN))
+        }), description_placeholders={"meter": _commissioning_meter_label(self._selected_meter), "power": power or "Not available"})
+
+    async def async_step_manual_meter(self, user_input=None):
+        self._candidates = _build_candidates(self.hass)
+        power_candidates = [c for c in self._candidates if c.get("power_count", 0)]
+        if user_input is not None:
+            if user_input.get("source") == "device" and user_input.get("device"):
+                candidate = next(c for c in power_candidates if c["device_id"] == user_input["device"])
+                power_entities = [m["entity_id"] for m in candidate.get("measurements", []) if m.get("kind") == "power"]
+                if power_entities:
+                    self._selected_meter = candidate
+                    return self._create_commissioned_entry(power_entities[0], True)
+            if user_input.get("power_entity"):
+                self._selected_meter = None
+                return self._create_commissioned_entry(user_input["power_entity"], True)
+        return self.async_show_form(step_id="manual_meter", data_schema=vol.Schema({
+            vol.Required("source", default="manual"): SelectSelector(SelectSelectorConfig(options=[
+                SelectOptionDict(value="manual", label="I will choose my meter"),
+                SelectOptionDict(value="device", label="Choose a device EnergyIQ found"),
+            ], mode=SelectSelectorMode.DROPDOWN)),
+            vol.Optional("power_entity"): selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor", device_class="power", multiple=False)),
+            vol.Optional("device"): SelectSelector(SelectSelectorConfig(options=_candidate_options(power_candidates), mode=SelectSelectorMode.DROPDOWN)),
+        }), description_placeholders={"message": "EnergyIQ could not automatically identify your whole-home meter. This does not necessarily mean Home Assistant does not have one. Choose a power entity yourself, or use a device EnergyIQ found for basic functionality."})
+
+
 
 
 class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
@@ -656,6 +694,30 @@ def _training_plan_text(method: str) -> str:
         "Suggested method: Quick ON/OFF test. The system will watch for "
         "consistent transitions and will not assume a fixed number of repeats."
     )
+
+
+def _commissioning_power_entity(candidate: dict[str, Any]) -> str | None:
+    """Choose the best aggregate power entity from a detected Class A source."""
+    entities = [e for e in candidate.get("entities", []) if e.get("kind") == "power"]
+    if not entities:
+        return None
+    def score(entity: dict[str, Any]) -> int:
+        tokens = _tokens(f"{entity.get('name', '')} {entity.get('entity_id', '')}")
+        value = 20 if tokens & {"total","aggregate","whole","home","house","mains","main","grid","service"} else 0
+        if tokens & {"l1","l2","l3","phase","channel","ch1","ch2","ch3"}:
+            value -= 20
+        return value
+    return max(entities, key=score)["entity_id"]
+
+
+def _commissioning_meter_label(candidate: dict[str, Any]) -> str:
+    name = candidate.get("name") or "Detected meter"
+    detail = " · ".join(x for x in (candidate.get("manufacturer") or "", candidate.get("model") or "") if x)
+    return f"{name} — {detail}" if detail else name
+
+
+def _commissioning_options(candidates: list[dict[str, Any]]) -> list[SelectOptionDict]:
+    return [SelectOptionDict(value=c["group_id"], label=_commissioning_meter_label(c)) for c in candidates]
 
 
 def _candidate_category(candidate: dict[str, Any]) -> str:
