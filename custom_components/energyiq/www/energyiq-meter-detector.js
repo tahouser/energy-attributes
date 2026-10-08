@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "41600";
+  const VERSION = "43100";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -14,6 +14,7 @@
       this.probingIds = new Set();
       this.selected = new Set();
       this.timer = null;
+      this.refreshing = false;
       this.brandUrl = "/energyiq-brand/icon@2x.png?v=" + VERSION;
     }
 
@@ -64,12 +65,23 @@
     }
 
     async refresh() {
+      if (this.refreshing || this.probingIds.size) return;
+      this.refreshing = true;
       try {
         this.data = await this.ws({type:"energy_attribution/meter_detector"});
+        this.error = null;
         this.render();
       } catch (e) {
-        this.error = this.formatError(e);
-        this.render();
+        // HA may briefly drop/reconnect the frontend WebSocket. Keep the last
+        // successful discovery visible instead of replacing it with a red
+        // transient "connection lost" panel. The next interval retries.
+        const message = this.formatError(e);
+        if (!this.data || !/^3:\s*Connection lost$/i.test(message)) {
+          this.error = message;
+          this.render();
+        }
+      } finally {
+        this.refreshing = false;
       }
     }
 
@@ -92,12 +104,14 @@
           device_id: deviceId,
         });
         this.probeResults.set(deviceId, result);
+        this.error = null;
         this.render();
       } catch (e) {
         this.probeResults.set(deviceId, { device_id: deviceId, error: this.formatError(e) });
         this.render();
       } finally {
         this.probingIds.delete(deviceId);
+        if (!this.probingIds.size && this.data) this.refresh();
       }
     }
     renderProbe(p) {
