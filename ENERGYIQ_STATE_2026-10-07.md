@@ -1,4 +1,4 @@
-# EnergyIQ Development State — 2026-10-07
+# EnergyIQ Development State — 2026-10-08
 
 ## Purpose of this document
 
@@ -6,7 +6,7 @@ This is the current handoff/state document for the EnergyIQ project. It records 
 
 **Repository:** `tahouser/energy-attributes`  
 **Integration:** EnergyIQ  
-**Current version:** **3.1.420**  
+**Current version:** **3.1.424**  
 **Current focus:** Meter Detector / electrical-source discovery and commissioning  
 **Consumption page:** COMPLETE / LOCKED  
 **Cost page:** 3.1.404 behavior remains the baseline; do not disturb while Meter Detector work is underway unless explicitly requested.
@@ -355,7 +355,7 @@ Important sequence:
 
 **Meter Detector safe point: 3.1.418.**
 
-**Current commissioning revision: 3.1.420.**
+**Current commissioning revision: 3.1.424.**
 
 No GitHub release/tag should be assumed to exist merely because the version number exists. The repository has been updated directly through commits.
 
@@ -389,6 +389,47 @@ Important correction from 3.1.419:
 3.1.420 fixes the commissioning layer with explicit menu choices and a proper reconfigure flow.
 
 The Meter Detector internals remain unchanged.
+
+# 13B. Commissioning correction — 3.1.424
+
+The previous 3.1.423 implementation routed the existing-install reconfigure flow directly to a meter-selection form. That was not the agreed behavior: **Meter Detector discovery and interrogation must happen before the user is asked to choose a meter.**
+
+3.1.424 corrects that sequence.
+
+The commissioning flow is now:
+
+1. **Discover** electrical meter sources from the live Home Assistant registry/state.
+2. **Group** HA records that represent one physical meter.
+3. **Classify** the grouped sources.
+4. **Automatically interrogate every Class A source** for approximately 30 seconds using the existing live-state probe.
+5. Present the **discovery/interrogation results**.
+6. Only then ask the user to choose which source EnergyIQ should use as the whole-home meter.
+7. Continue into the separate EnergyIQ configuration layer.
+
+The Class A interrogation is automatic. There is no manual "Interrogate" button in the commissioning path.
+
+The selection result includes a compact interrogation summary such as:
+- number of active channels
+- number of observed channels
+- channel labels
+- representative live maximums where available
+
+The detector backend's existing interrogation logic was not redesigned; 3.1.424 reuses it from the commissioning flow.
+
+### Permanent detector sidebar removed
+
+3.1.423 removed the permanent **EnergyIQ Meter Detector** sidebar panel. The detector is no longer intended to be a separate always-visible utility.
+
+Its discovery/interrogation capability now belongs to the commissioning/reconfigure workflow.
+
+This is intentional:
+
+**Meter Detector = discovery and investigation**  
+**Commissioning = user chooses the source**  
+**Configuration = user defines how EnergyIQ operates**
+
+The detector should not become a second configuration screen.
+
 # 14. Current backend/frontend components
 
 Meter Detector backend:
@@ -399,13 +440,7 @@ Meter Detector frontend:
 
 `custom_components/energyiq/www/energyiq-meter-detector.js`
 
-Panel:
-- frontend URL: `energyiq-meter-detector`
-- webcomponent: `energyiq-meter-detector`
-- module URL: `/energyiq-static/energyiq-meter-detector.js?v=...`
-- sidebar title: EnergyIQ Meter Detector
-- icon: `mdi:meter-electric-outline`
-- admin requirement: false
+The detector frontend file remains in the repository for the detector UI implementation, but the permanent detector sidebar registration was removed in 3.1.423. Do not restore a permanent sidebar panel unless explicitly requested.
 
 The existing main EnergyIQ card remains:
 
@@ -434,7 +469,7 @@ Do not rush persistence until the detector's source model is approved.
 Before adding more features:
 
 ### A. Freeze the successful Meter Detector behavior
-Treat **3.1.418** as a safe point.
+Treat **3.1.418** as the detector-engine safe point. The commissioning layer may advance independently, but it must preserve the detector's discovery, grouping, classification, and automatic Class A interrogation behavior.
 
 ### B. Verify repeat behavior
 Run another detector scan and confirm:
