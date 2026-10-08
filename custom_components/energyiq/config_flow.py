@@ -665,6 +665,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_existing_meter(self, user_input=None):
         """Ask whether an existing meter should be kept before discovery."""
+        if self._saved_snapshot is None:
+            self._saved_snapshot = migrate_snapshot(await get_store(self.hass).async_load())
         current_power = None
         if self.source == SOURCE_RECONFIGURE:
             current_power = self._get_reconfigure_entry().data.get(CONF_POWER_ENTITY)
