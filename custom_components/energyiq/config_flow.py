@@ -589,7 +589,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             ),
         })
         return self.async_show_form(
-            step_id="init",
+            step_id="meter_properties",
             data_schema=schema,
             description_placeholders={"count": str(len(candidates))},
         )
