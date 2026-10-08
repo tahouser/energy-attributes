@@ -558,3 +558,4 @@ async def ws_meter_detector_probe(hass: HomeAssistant, connection, msg) -> None:
 def async_register(hass: HomeAssistant) -> None:
     """Register the detector WebSocket command."""
     websocket_api.async_register_command(hass, ws_meter_detector)
+    websocket_api.async_register_command(hass, ws_meter_detector_probe)
