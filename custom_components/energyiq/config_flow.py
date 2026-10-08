@@ -494,6 +494,40 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         self._candidates: list[dict[str, Any]] = []
 
     async def async_step_init(self, user_input=None):
+        """Show the EnergyIQ configuration categories."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=[
+                "meter_properties",
+                "general",
+                "consumption_limits",
+                "cost_limits",
+                "peak_time_window",
+                "utility_search",
+            ],
+        )
+
+    async def _configuration_placeholder(self, step_id: str, user_input=None):
+        """Show a framework section until its settings are implemented."""
+        if user_input is not None:
+            return await self.async_step_init()
+        return self.async_show_form(step_id=step_id, data_schema=vol.Schema({}))
+
+    async def async_step_general(self, user_input=None):
+        return await self._configuration_placeholder("general", user_input)
+
+    async def async_step_consumption_limits(self, user_input=None):
+        return await self._configuration_placeholder("consumption_limits", user_input)
+
+    async def async_step_cost_limits(self, user_input=None):
+        return await self._configuration_placeholder("cost_limits", user_input)
+
+    async def async_step_peak_time_window(self, user_input=None):
+        return await self._configuration_placeholder("peak_time_window", user_input)
+
+    async def async_step_utility_search(self, user_input=None):
+        return await self._configuration_placeholder("utility_search", user_input)
+    async def async_step_meter_properties(self, user_input=None):
         discovered = _build_candidates(
             self.hass, self.config_entry.data.get(CONF_POWER_ENTITY)
         )
