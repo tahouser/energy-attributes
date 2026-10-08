@@ -10,9 +10,13 @@
           "restore_existing": "Restore existing EnergyIQ data"
         }
       },
+      "meter_discovery": {
+        "title": "EnergyIQ meter discovery",
+        "description": "EnergyIQ is scanning Home Assistant, grouping physical meter records, classifying electrical sources, and automatically interrogating every Class A meter for 30 seconds. No configuration is changed during this test.",
+      },
       "meter_select": {
         "title": "Choose your whole-home meter",
-        "description": "EnergyIQ found more than one Class A meter source. Choose the one you believe is your whole-home meter. You will then be asked to confirm it.",
+        "description": "{description}",
         "data": {
           "meter": "Whole-home meter"
         }
