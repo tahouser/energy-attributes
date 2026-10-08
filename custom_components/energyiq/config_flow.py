@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -38,6 +39,11 @@ _POWER_CLASSES = {"power"}
 _ENERGY_CLASSES = {"energy"}
 _POWER_UNITS = {"W", "kW", "MW", "w", "kw", "mw"}
 _ENERGY_UNITS = {"Wh", "kWh", "MWh", "GWh", "wh", "kwh", "mwh", "gwh"}
+
+
+def _tokens(text: str) -> set[str]:
+    """Split an entity name into normalized words for meter selection."""
+    return {x for x in re.split(r"[^a-z0-9]+", text.casefold()) if x}
 
 _DERIVED_ENERGY_WORDS = {
     "difference", "saved", "cost", "price", "tariff", "rate", "forecast",
