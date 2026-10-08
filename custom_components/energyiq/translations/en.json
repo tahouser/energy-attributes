@@ -24,7 +24,7 @@
       },
       "meter_properties": {
         "title": "Meter Properties",
-        "description": "Whole-home meter and electrical-source properties."
+        "description": "EnergyIQ is currently using {meter} as its whole-home power source. This meter provides the electrical data used for consumption and cost calculations. Use Meter Detector to change or discover a different meter."
       },
       "general": {
         "title": "General",
@@ -178,7 +178,7 @@
       },
       "general": {
         "title": "General",
-        "description": "Currency, time zone, and other general EnergyIQ settings."
+        "description": "Set the currency used by EnergyIQ. Time zone follows Home Assistant: {time_zone}."
       },
       "consumption_limits": {
         "title": "Consumption Limits",
