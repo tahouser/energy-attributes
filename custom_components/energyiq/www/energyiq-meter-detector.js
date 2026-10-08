@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "40700";
+  const VERSION = "40800";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -21,6 +21,17 @@
       if (value && !this.loading && !this.data) this.load();
     }
     get hass() { return this._hass; }
+
+    formatError(e) {
+      if (e == null) return "Unknown WebSocket error";
+      if (typeof e === "string") return e;
+      const code = e.code || e.error?.code || e.details?.code;
+      const message = e.message || e.error?.message || e.details?.message;
+      if (code && message) return `${code}: ${message}`;
+      if (code) return `WebSocket error code: ${code}`;
+      if (message) return message;
+      try { return JSON.stringify(e); } catch (_) { return String(e); }
+    }
 
     connectedCallback() {
       if (this._hass && !this.loading && !this.data) this.load();
@@ -43,7 +54,7 @@
         if (this.timer) clearInterval(this.timer);
         this.timer = setInterval(() => this.refresh(), 3000);
       } catch (e) {
-        this.error = e?.message || String(e);
+        this.error = this.formatError(e);
         this.render();
       } finally {
         this.loading = false;
@@ -55,7 +66,7 @@
         this.data = await this.ws({type:"energy_attribution/meter_detector"});
         this.render();
       } catch (e) {
-        this.error = e?.message || String(e);
+        this.error = this.formatError(e);
         this.render();
       }
     }
@@ -71,7 +82,7 @@
         this.probe = await this.ws({type:"energy_attribution/meter_detector_probe", device_id:deviceId});
         this.render();
       } catch (e) {
-        this.error = e?.message || String(e);
+        this.error = this.formatError(e);
         this.render();
       } finally {
         this.probing = false;
