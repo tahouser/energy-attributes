@@ -288,6 +288,72 @@ async def ws_list_entries(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/set_power_source",
+    vol.Required("entry_id"): str,
+    vol.Required("entity_ids"): [str],
+    vol.Optional("mode", default="single_channel"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_set_power_source(hass, connection, msg):
+    """Set related active-power entities as one logical meter source."""
+    coordinator = _coordinator(hass, msg["entry_id"])
+    entity_ids = list(dict.fromkeys(str(x).strip() for x in msg["entity_ids"] if str(x).strip()))
+    if not entity_ids:
+        raise ValueError("Choose at least one active power sensor.")
+    mode = str(msg.get("mode") or "single_channel")
+    registry = er.async_get(hass)
+    devices = set()
+    rows = []
+    for entity_id in entity_ids:
+        entity = registry.async_get(entity_id)
+        state = hass.states.get(entity_id)
+        if entity is None or entity.disabled_by is not None or entity.domain != "sensor" or state is None:
+            raise ValueError("Every selected meter channel must be an enabled Home Assistant sensor.")
+        attrs = state.attributes
+        device_class = str(attrs.get("device_class") or "").casefold()
+        unit = str(attrs.get("unit_of_measurement") or "").casefold()
+        if device_class == "apparent_power" or (device_class != "power" and unit not in {"w", "kw"}):
+            raise ValueError("Every selected meter channel must be active power measured in W or kW.")
+        try:
+            numeric = float(state.state)
+        except (TypeError, ValueError):
+            raise ValueError("Every selected meter channel must currently report a numeric value.") from None
+        if numeric != numeric or numeric in (float("inf"), float("-inf")):
+            raise ValueError("Every selected meter channel must currently report a usable value.")
+        role = _power_role(str(attrs.get("friendly_name") or entity.name or entity_id), entity_id)
+        devices.add(entity.device_id)
+        rows.append((entity_id, entity, state, role))
+    if len(entity_ids) > 1:
+        if None in devices or len(devices) != 1:
+            raise ValueError("Combined meter channels must belong to the same Home Assistant device.")
+        mode = "combined_channels"
+    if len(entity_ids) == 1 and rows[0][3] == "phase":
+        raise ValueError("A phase-only reading cannot be used as the whole-home meter by itself.")
+
+    data = dict(coordinator.entry.data)
+    data["power_entity"] = entity_ids[0]
+    data["power_entities"] = entity_ids
+    data["power_source_mode"] = mode
+    options = dict(coordinator.entry.options)
+    options["power_entities"] = entity_ids
+    options["power_source_mode"] = mode
+    hass.config_entries.async_update_entry(coordinator.entry, data=data, options=options)
+    coordinator.power_entity = entity_ids[0]
+    coordinator.power_entities = entity_ids
+    coordinator.power_source_mode = mode
+    await coordinator.async_persist_owned_state(options=options)
+    watts = coordinator._whole_home_power_watts()
+    connection.send_result(msg["id"], {
+        "saved": True,
+        "entity_ids": entity_ids,
+        "entity_id": entity_ids[0],
+        "mode": mode,
+        "whole_home_power": watts,
+    })
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "energy_attribution/set_power_entity",
     vol.Required("entry_id"): str,
     vol.Required("entity_id"): str,
@@ -295,46 +361,11 @@ async def ws_list_entries(hass, connection, msg):
 @websocket_api.require_admin
 @websocket_api.async_response
 async def ws_set_power_entity(hass, connection, msg):
-    """Set the whole-home active-power entity used by EnergyIQ."""
-    coordinator = _coordinator(hass, msg["entry_id"])
-    entity_id = str(msg["entity_id"]).strip()
-    registry = er.async_get(hass)
-    entity = registry.async_get(entity_id)
-    state = hass.states.get(entity_id)
-    if entity is None or entity.disabled_by is not None or entity.domain != "sensor" or state is None:
-        raise ValueError("Choose an enabled Home Assistant power sensor.")
-    attrs = state.attributes
-    device_class = str(attrs.get("device_class") or "").casefold()
-    unit = str(attrs.get("unit_of_measurement") or "").casefold()
-    if device_class == "apparent_power":
-        raise ValueError("Choose active power, not apparent power.")
-    if device_class != "power" and unit not in {"w", "kw"}:
-        raise ValueError("Choose an active power sensor measured in W or kW.")
-    role = _power_role(
-        str(attrs.get("friendly_name") or entity.name or entity_id),
-        entity_id,
-    )
-    if role == "phase":
-        raise ValueError("L1/L2/L3 are individual phases. Choose the meter's Total Active Power entity.")
-    try:
-        numeric = float(state.state)
-    except (TypeError, ValueError):
-        raise ValueError("The selected power sensor is not currently reporting a numeric value.") from None
-    if numeric != numeric or numeric in (float("inf"), float("-inf")):
-        raise ValueError("The selected power sensor is not currently reporting a usable value.")
-
-    data = dict(coordinator.entry.data)
-    data["power_entity"] = entity_id
-    hass.config_entries.async_update_entry(coordinator.entry, data=data)
-    coordinator.power_entity = entity_id
-    await coordinator.async_persist_owned_state()
-    connection.send_result(msg["id"], {
-        "saved": True,
-        "entity_id": entity_id,
-        "name": str(attrs.get("friendly_name") or entity.name or entity_id),
-        "state": state.state,
-        "unit": attrs.get("unit_of_measurement"),
-    })
+    """Legacy single-source selector retained for compatibility."""
+    legacy = dict(msg)
+    legacy["entity_ids"] = [msg["entity_id"]]
+    legacy["mode"] = "single_channel"
+    await ws_set_power_source(hass, connection, legacy)
 
 
 @websocket_api.websocket_command({
