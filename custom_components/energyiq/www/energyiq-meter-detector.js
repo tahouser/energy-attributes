@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "43800";
+  const VERSION = "43900";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -202,7 +202,7 @@
     renderResults(d) {
       const candidates = Array.isArray(d.candidates) ? d.candidates : [];
       return `
-        <div class="selection-bar"><div><strong>${d.candidate_count} sources detected</strong><small>Choose the actual total active-power entity below to make it the EnergyIQ meter.</small></div></div>
+        <div class="selection-bar"><div><strong>${d.candidate_count} sources detected</strong><small>Choose <b>Total Active Power</b> (whole home). L1/L2/L3 readings are individual phases and cannot be used as the EnergyIQ meter.</small></div></div>
         ${candidates.length ? candidates.map((c,i)=>this.renderCandidate(c,i===0)).join("") : `
           <section class="panel"><span class="eyebrow">No strong candidates</span><h2>No whole-home meter candidate found</h2><p>EnergyIQ can still fall back to a manual entity selector later. This test intentionally does not modify configuration.</p></section>`}
         <section class="panel">
@@ -246,14 +246,21 @@
 
     renderEntityRow(e) {
       const value = e.value == null ? e.state : (Number.isFinite(Number(e.value)) ? Number(e.value).toFixed(2) : e.state);
-      const usablePower = e.kind === "power" && ["w","kw"].includes(String(e.unit || "").toLowerCase());
+      const usablePower = e.kind === "power" && ["w","kw"].includes(String(e.unit || "").toLowerCase()) && e.role !== "phase";
       const current = usablePower && e.entity_id === this.currentPowerEntity;
+      const role = e.role === "whole_home"
+        ? '<span class="role whole-home">WHOLE HOME</span>'
+        : e.role === "phase"
+          ? '<span class="role phase-role">PHASE ONLY</span>'
+          : "";
       const action = usablePower
         ? (current
           ? '<button type="button" class="meter-use current" disabled>Current EnergyIQ meter</button>'
           : '<button type="button" class="meter-use primary" data-use-meter="' + this.escape(e.entity_id) + '">Use as EnergyIQ meter</button>')
-        : "";
-      return '<div class="entity-row"><span class="type ' + this.escape(e.kind) + '">' + this.escape(e.kind) + '</span><span><strong>' + this.escape(e.name) + '</strong><small>' + this.escape(e.entity_id) + '</small></span><span>' + this.escape(value) + '</span><span>' + this.escape(e.unit || "—") + '</span><span>' + action + '</span></div>';
+        : (e.role === "phase"
+          ? '<span class="phase-note">Not a whole-home source</span>'
+          : "");
+      return '<div class="entity-row"><span class="type ' + this.escape(e.kind) + '">' + this.escape(e.kind) + '</span><span><strong>' + this.escape(e.name) + '</strong><small>' + role + ' ' + this.escape(e.entity_id) + '</small></span><span>' + this.escape(value) + '</span><span>' + this.escape(e.unit || "—") + '</span><span>' + action + '</span></div>';
     }
     renderEntity(e) {
       return `<div class="simple-row"><span><strong>${this.escape(e.name)}</strong><small>${this.escape(e.entity_id)}</small></span><strong>${this.escape(e.state)} ${this.escape(e.unit||"")}</strong></div>`;
@@ -280,9 +287,8 @@
           entity_id:entityId,
         });
         this.currentPowerEntity = result.entity_id;
-        this.notice = "EnergyIQ meter updated. Returning to EnergyIQ…";
+        this.notice = "EnergyIQ meter saved. You can stay here and verify the selected whole-home reading.";
         this.render();
-        setTimeout(() => { window.location.href = "/energyiq"; }, 650);
       } catch (e) {
         this.notice = this.formatError(e);
         this.render();
@@ -302,7 +308,7 @@
       .probe-action{margin:12px 0}.secondary{font-weight:700}.probe{margin:12px 0;padding:12px;border:1px solid rgba(54,200,255,.25);border-radius:11px;background:rgba(54,200,255,.035)}.probe-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.probe-head strong{display:block}.probe-head small{display:block;color:var(--secondary-text-color);margin-top:3px}.probe-count{font-size:10px;text-transform:uppercase;color:#35e7b0;white-space:nowrap}.channel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.channel-card{border:1px solid var(--divider-color);border-radius:9px;padding:9px;background:rgba(255,255,255,.02)}.channel-card.active{border-color:rgba(20,242,184,.45)}.channel-top{display:flex;justify-content:space-between}.channel-top span{font-size:9px;color:var(--secondary-text-color)}.channel-assessment{font-size:10px;color:var(--secondary-text-color);margin:6px 0}.probe-row{display:grid;grid-template-columns:55px 1fr auto;gap:5px;border-top:1px solid var(--divider-color);padding-top:5px;margin-top:5px;font-size:9px}.probe-row small{color:var(--secondary-text-color)}.probe-note{margin-top:9px;color:var(--secondary-text-color);font-size:9px;line-height:1.45}.chips,.evidence>div{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.chip,.evidence span{padding:5px 8px;border-radius:999px;background:rgba(54,200,255,.08);border:1px solid rgba(54,200,255,.16);font-size:10px;color:var(--secondary-text-color)}.evidence{margin:12px 0}.evidence>strong{font-size:11px}.inference{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px;border-radius:10px;margin:13px 0;border:1px solid var(--divider-color);background:rgba(255,255,255,.025)}.inference.promising{border-color:rgba(20,242,184,.4)}.inference.limited{border-color:rgba(255,193,7,.38)}.inference strong{display:block;font-size:15px}.confidence{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}
       .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:13px}.stats>div{padding:9px;border:1px solid rgba(255,255,255,.05);border-radius:8px;background:rgba(255,255,255,.03)}.stats span{display:block;font-size:9px;text-transform:uppercase;color:var(--secondary-text-color)}.stats strong{display:block;margin-top:3px;font-size:17px}
       details{border-top:1px solid var(--divider-color);padding-top:10px;margin-top:10px}summary{cursor:pointer;font-weight:700;font-size:12px;color:var(--primary-text-color)}.entity-table{margin-top:9px;border:1px solid var(--divider-color);border-radius:9px;overflow:hidden}.entity-row{display:grid;grid-template-columns:90px minmax(180px,1fr) 90px 65px minmax(130px,auto);gap:8px;align-items:center;padding:8px 10px;border-top:1px solid var(--divider-color);font-size:11px}.entity-row:first-child{border-top:0}.entity-head{background:rgba(255,255,255,.03);font-size:9px;text-transform:uppercase;color:var(--secondary-text-color);letter-spacing:.06em}.entity-row small,.simple-row small{display:block;color:var(--secondary-text-color);font-size:9px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.type{font-size:9px;text-transform:uppercase;font-weight:800}.type.power{color:#36c8ff}.type.energy{color:#35e7b0}.type.voltage{color:#ffd166}.type.current{color:#ff9f68}.registry{display:grid;gap:5px;margin-top:8px}.registry code{font-size:10px;overflow-wrap:anywhere}.notes{margin:8px 0 0;padding-left:19px;color:var(--secondary-text-color);line-height:1.5;font-size:12px}.simple-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--divider-color);font-size:11px}
-      .meter-use{white-space:nowrap;font-size:10px;padding:6px 8px}.meter-use.current{opacity:.7;cursor:default}.notice{border-color:rgba(20,242,184,.4)}
+      .meter-use{white-space:nowrap;font-size:10px;padding:6px 8px}.meter-use.current{opacity:.7;cursor:default}.notice{border-color:rgba(20,242,184,.4)}.role{display:inline-block;margin-right:5px;padding:2px 5px;border-radius:5px;font-size:8px;font-weight:900;letter-spacing:.04em}.whole-home{color:#35e7b0;background:rgba(53,231,176,.10)}.phase-role{color:#ffd166;background:rgba(255,209,102,.10)}.phase-note{font-size:9px;color:var(--secondary-text-color)}
       .selection-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid rgba(54,200,255,.20);border-radius:9px;background:rgba(54,200,255,.04)}.selection-bar strong{font-size:12px}.selection-bar small{display:block;margin-top:2px;color:var(--secondary-text-color);font-size:10px}.meter-select{width:18px;height:18px;accent-color:#36c8ff;flex:0 0 auto}.meter-select-placeholder{display:grid;place-items:center;width:18px;height:18px;color:var(--secondary-text-color);font-size:14px}.unsupported-note{padding:8px 10px;margin-bottom:8px;border-radius:8px;background:rgba(160,160,160,.08);color:var(--secondary-text-color);font-size:10px}.meter-item{border:1px solid var(--divider-color);border-radius:12px;margin:8px 0;overflow:hidden;background:rgba(255,255,255,.025)}
       .meter-item.tier-a{background:rgba(53,231,176,.11);border-color:rgba(53,231,176,.35)}
       .meter-item.tier-b{background:rgba(54,200,255,.09);border-color:rgba(54,200,255,.30)}
