@@ -274,7 +274,6 @@ def _summarize_meter_source(candidate: dict, probe: list[dict]) -> dict:
         row for row in probe
         if row.get("kind") == "power" and row.get("status") == "active signal"
     ]
-    active_power = [row for row in active_power if row.get("role") != "phase" or True]
     phase_power = [row for row in active_power if row.get("role") == "phase"]
     whole_home_power = [row for row in active_power if row.get("role") == "whole_home"]
     active_voltage = [
@@ -309,9 +308,9 @@ def _summarize_meter_source(candidate: dict, probe: list[dict]) -> dict:
         "phase_power_channels": len(phase_power),
         "active_voltage_channels": len(active_voltage),
         "active_current_channels": len(active_current),
-        "combined_current_w": round(sum(
+        "current_w": round(sum(
             (row.get("max") or 0) for row in phase_power
-        ), 2) if phase_power else None,
+        ), 2) if phase_power else round((whole_home_power[0].get("max") or 0), 2) if whole_home_power else round((active_power[0].get("max") or 0), 2) if len(active_power) == 1 else None,
         "confidence": "high" if whole_home_power or len(phase_power) >= 2 else "medium" if len(active_power) == 1 else "low",
     }
 
