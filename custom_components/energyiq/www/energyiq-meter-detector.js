@@ -166,12 +166,7 @@
     renderResults(d) {
       const candidates = Array.isArray(d.candidates) ? d.candidates : [];
       return `
-        <section class="summary-grid">
-          <div class="selection-bar"><div><span class="eyebrow">EnergyIQ source selection</span><strong><span id="selected-count">${this.selected.size}</span> selected</strong><small>Select the electrical sources EnergyIQ should work with. Class D devices are informational only.</small></div><button id="clear-selection" class="secondary" ${this.selected.size ? "" : "disabled"}>Clear</button></div>
-          <div class="metric"><span>Likely meters</span><strong>${d.candidate_count}</strong><small>Ranked from HA metadata</small></div>
-          <div class="metric"><span>Detection depth</span><strong>Device + entity</strong><small>Registry, metadata & live state</small></div>
-          <div class="metric"><span>Saved</span><strong>Nothing</strong><small>Diagnostic only</small></div>
-        </section>
+        <div class="selection-bar"><div><strong>${d.candidate_count} sources · <span id="selected-count">${this.selected.size}</span> selected</strong></div><button id="clear-selection" class="secondary" ${this.selected.size ? "" : "disabled"}>Clear</button></div>
         ${candidates.length ? candidates.map((c,i)=>this.renderCandidate(c,i===0)).join("") : `
           <section class="panel"><span class="eyebrow">No strong candidates</span><h2>No whole-home meter candidate found</h2><p>EnergyIQ can still fall back to a manual entity selector later. This test intentionally does not modify configuration.</p></section>`}
         <section class="panel">
@@ -185,12 +180,10 @@
     renderCandidate(c, top) {
       const tier = String(c.meter_class || "C").toLowerCase();
       const selected = this.selected.has(c.device_id);
-      const inf = c.inference || {};
       const power = c.entities.filter(e => e.kind === "power").length;
       const energy = c.entities.filter(e => e.kind === "energy").length;
       const voltage = c.entities.filter(e => e.kind === "voltage").length;
       const current = c.entities.filter(e => e.kind === "current").length;
-      const label = tier === "a" ? "Class A · multi-channel meter" : tier === "b" ? "Class B · load meter" : tier === "c" ? "Class C · limited measurement" : "Class D · unsupported";
       return `
         <details class="meter-item tier-${tier}" ${top ? "open" : ""}>
           <summary class="meter-summary">
@@ -203,10 +196,8 @@
             </div>
           </summary>
           <div class="meter-detail">
-            <div class="meter-detail-head"><div><span class="eyebrow">${this.escape(label)}</span><strong>${c.member_device_ids?.length > 1 ? `Grouped physical source · ${c.member_device_ids.length} HA records` : this.escape(inf.inference || "Electrical measurement source")}</strong></div><span class="score-mini">${c.score} match</span></div>
-            <div class="meter-actions">${tier === "d" ? `<div class="unsupported-note">This device is retained for discovery, but it is not a usable EnergyIQ electrical source.</div>` : ""}</div>
+            ${tier === "d" ? `<div class="unsupported-note">Not an EnergyIQ measurement source.</div>` : ""}
             ${this.probeResults.get(c.device_id) ? this.renderProbe(this.probeResults.get(c.device_id)) : this.probingIds.has(c.device_id) ? `<div class="probe"><span class="eyebrow">Automatic interrogation</span><strong>Analyzing channels for 30 seconds…</strong><small>This Class A source is being observed automatically.</small></div>` : ""}
-            <div class="evidence compact-evidence">${(c.evidence||[]).slice(0,4).map(x=>`<span>${this.escape(x)}</span>`).join("")}</div>
             <details class="subdetails"><summary>Show Home Assistant entities (${c.entities.length})</summary>
               <div class="entity-table">
                 <div class="entity-row entity-head"><span>Type</span><span>Name</span><span>Value</span><span>Unit</span></div>
@@ -250,7 +241,7 @@
       .probe-action{margin:12px 0}.secondary{font-weight:700}.probe{margin:12px 0;padding:12px;border:1px solid rgba(54,200,255,.25);border-radius:11px;background:rgba(54,200,255,.035)}.probe-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.probe-head strong{display:block}.probe-head small{display:block;color:var(--secondary-text-color);margin-top:3px}.probe-count{font-size:10px;text-transform:uppercase;color:#35e7b0;white-space:nowrap}.channel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.channel-card{border:1px solid var(--divider-color);border-radius:9px;padding:9px;background:rgba(255,255,255,.02)}.channel-card.active{border-color:rgba(20,242,184,.45)}.channel-top{display:flex;justify-content:space-between}.channel-top span{font-size:9px;color:var(--secondary-text-color)}.channel-assessment{font-size:10px;color:var(--secondary-text-color);margin:6px 0}.probe-row{display:grid;grid-template-columns:55px 1fr auto;gap:5px;border-top:1px solid var(--divider-color);padding-top:5px;margin-top:5px;font-size:9px}.probe-row small{color:var(--secondary-text-color)}.probe-note{margin-top:9px;color:var(--secondary-text-color);font-size:9px;line-height:1.45}.chips,.evidence>div{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.chip,.evidence span{padding:5px 8px;border-radius:999px;background:rgba(54,200,255,.08);border:1px solid rgba(54,200,255,.16);font-size:10px;color:var(--secondary-text-color)}.evidence{margin:12px 0}.evidence>strong{font-size:11px}.inference{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px;border-radius:10px;margin:13px 0;border:1px solid var(--divider-color);background:rgba(255,255,255,.025)}.inference.promising{border-color:rgba(20,242,184,.4)}.inference.limited{border-color:rgba(255,193,7,.38)}.inference strong{display:block;font-size:15px}.confidence{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}
       .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:13px}.stats>div{padding:9px;border:1px solid rgba(255,255,255,.05);border-radius:8px;background:rgba(255,255,255,.03)}.stats span{display:block;font-size:9px;text-transform:uppercase;color:var(--secondary-text-color)}.stats strong{display:block;margin-top:3px;font-size:17px}
       details{border-top:1px solid var(--divider-color);padding-top:10px;margin-top:10px}summary{cursor:pointer;font-weight:700;font-size:12px;color:var(--primary-text-color)}.entity-table{margin-top:9px;border:1px solid var(--divider-color);border-radius:9px;overflow:hidden}.entity-row{display:grid;grid-template-columns:90px minmax(220px,1fr) 120px 80px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid var(--divider-color);font-size:11px}.entity-row:first-child{border-top:0}.entity-head{background:rgba(255,255,255,.03);font-size:9px;text-transform:uppercase;color:var(--secondary-text-color);letter-spacing:.06em}.entity-row small,.simple-row small{display:block;color:var(--secondary-text-color);font-size:9px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.type{font-size:9px;text-transform:uppercase;font-weight:800}.type.power{color:#36c8ff}.type.energy{color:#35e7b0}.type.voltage{color:#ffd166}.type.current{color:#ff9f68}.registry{display:grid;gap:5px;margin-top:8px}.registry code{font-size:10px;overflow-wrap:anywhere}.notes{margin:8px 0 0;padding-left:19px;color:var(--secondary-text-color);line-height:1.5;font-size:12px}.simple-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--divider-color);font-size:11px}
-      .selection-bar{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid rgba(54,200,255,.28);border-radius:12px;background:rgba(54,200,255,.06)}.selection-bar strong{display:block;font-size:18px}.selection-bar small{display:block;color:var(--secondary-text-color);font-size:10px;margin-top:3px}.meter-select{width:18px;height:18px;accent-color:#36c8ff;flex:0 0 auto}.meter-select-placeholder{display:grid;place-items:center;width:18px;height:18px;color:var(--secondary-text-color);font-size:14px}.unsupported-note{padding:8px 10px;margin-bottom:8px;border-radius:8px;background:rgba(160,160,160,.08);color:var(--secondary-text-color);font-size:10px}.meter-item{border:1px solid var(--divider-color);border-radius:12px;margin:8px 0;overflow:hidden;background:rgba(255,255,255,.025)}
+      .selection-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 10px;border:1px solid rgba(54,200,255,.20);border-radius:9px;background:rgba(54,200,255,.04)}.selection-bar strong{font-size:12px}.meter-select{width:18px;height:18px;accent-color:#36c8ff;flex:0 0 auto}.meter-select-placeholder{display:grid;place-items:center;width:18px;height:18px;color:var(--secondary-text-color);font-size:14px}.unsupported-note{padding:8px 10px;margin-bottom:8px;border-radius:8px;background:rgba(160,160,160,.08);color:var(--secondary-text-color);font-size:10px}.meter-item{border:1px solid var(--divider-color);border-radius:12px;margin:8px 0;overflow:hidden;background:rgba(255,255,255,.025)}
       .meter-item.tier-a{background:rgba(53,231,176,.11);border-color:rgba(53,231,176,.35)}
       .meter-item.tier-b{background:rgba(54,200,255,.09);border-color:rgba(54,200,255,.30)}
       .meter-item.tier-c{background:rgba(255,209,102,.09);border-color:rgba(255,209,102,.28)}
