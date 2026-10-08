@@ -287,6 +287,28 @@ def _is_meter_candidate(device, entities: list[dict], config_entries: list[dict]
     return False
 
 
+def _meter_class(device, entities: list[dict], config_entries: list[dict]) -> str:
+    """Classify the quality/depth of an electrical measurement source."""
+    kinds = {e["kind"] for e in entities}
+    power_count = sum(1 for e in entities if e["kind"] == "power")
+    energy_count = sum(1 for e in entities if e["kind"] == "energy")
+    voltage_count = sum(1 for e in entities if e["kind"] == "voltage")
+    current_count = sum(1 for e in entities if e["kind"] == "current")
+    text = " ".join([
+        str(device.name or ""), str(device.name_by_user or ""),
+        str(device.manufacturer or ""), str(device.model or ""),
+        " ".join(e["name"] for e in entities),
+        " ".join(f"{x['domain']} {x['title']}" for x in config_entries),
+    ]).casefold()
+    if power_count >= 3 or (voltage_count >= 2 and current_count >= 2):
+        return "A"
+    if "power" in kinds and energy_count > 0:
+        return "B"
+    if "power" in kinds or "energy" in kinds or current_count or voltage_count:
+        return "C"
+    return "D"
+
+
 def discover_meters(hass: HomeAssistant) -> dict:
     registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
@@ -338,8 +360,6 @@ def discover_meters(hass: HomeAssistant) -> dict:
                     config_entries.append(info)
 
         score, evidence = _score_device(device, entities, config_entries)
-        if not _is_meter_candidate(device, entities, config_entries, score):
-            continue
 
         candidates.append({
             "device_id": device.id,
@@ -354,6 +374,7 @@ def discover_meters(hass: HomeAssistant) -> dict:
             "config_entries": config_entries,
             "entities": sorted(entities, key=lambda x: (x["kind"], x["name"].casefold())),
             "score": score,
+            "meter_class": _meter_class(device, entities, config_entries),
             "evidence": evidence,
             "inference": _infer_electrical_system(device, entities),
         })
