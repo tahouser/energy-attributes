@@ -12,7 +12,15 @@
       },
       "configuration_menu": {
         "title": "EnergyIQ Configuration",
-        "description": "Choose a configuration area. Settings are grouped so each area can expand independently as the configuration framework grows."
+        "description": "Choose a configuration area. Settings are grouped so each area can expand independently as the configuration framework grows.",
+        "menu_options": {
+          "meter_properties": "Meter Properties",
+          "general": "General",
+          "consumption_limits": "Consumption Limits",
+          "cost_limits": "Cost Limits",
+          "peak_time_window": "Peak Time Window",
+          "utility_search": "Utility Search"
+        }
       },
       "meter_properties": {
         "title": "Meter Properties",
@@ -38,16 +46,6 @@
         "title": "Utility Search",
         "description": "Find utility rates by ZIP code, or enter utility rate information manually."
       }
-    },
-    "menu_options": {
-      "configuration_menu": {
-        "meter_properties": "Meter Properties",
-        "general": "General",
-        "consumption_limits": "Consumption Limits",
-        "cost_limits": "Cost Limits",
-        "peak_time_window": "Peak Time Window",
-        "utility_search": "Utility Search"
-      }
     }
   },
   "options": {
@@ -58,6 +56,14 @@
         "data": {
           "monitored_devices": "Devices to monitor",
           "action": "Training / save action"
+        },
+        "menu_options": {
+          "meter_properties": "Meter Properties",
+          "general": "General",
+          "consumption_limits": "Consumption Limits",
+          "cost_limits": "Cost Limits",
+          "peak_time_window": "Peak Time Window",
+          "utility_search": "Utility Search"
         }
       },
       "consumption_thresholds": {
@@ -193,16 +199,6 @@
       "meter_properties": {
         "title": "Meter Properties",
         "description": "Select and manage the electrical loads and meter-related properties currently used by EnergyIQ."
-      }
-    },
-    "menu_options": {
-      "init": {
-        "meter_properties": "Meter Properties",
-        "general": "General",
-        "consumption_limits": "Consumption Limits",
-        "cost_limits": "Cost Limits",
-        "peak_time_window": "Peak Time Window",
-        "utility_search": "Utility Search"
       }
     }
   },
