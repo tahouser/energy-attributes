@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "41200";
+  const VERSION = "41300";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -186,14 +186,14 @@
           <summary class="meter-summary">
             <div class="meter-name">${tier !== "d" ? `<input class="meter-select" type="checkbox" data-select="${this.escape(c.device_id)}" ${selected ? "checked" : ""} aria-label="Select ${this.escape(c.name)}">` : `<span class="meter-select-placeholder" title="Not an EnergyIQ source">—</span>`}
               <span class="tier-badge">${this.escape(tier.toUpperCase())}</span>
-              <div><strong>${this.escape(c.name)}</strong><small>${this.escape(c.manufacturer || "Unknown")} ${c.model ? "· " + this.escape(c.model) : ""}</small></div>
+              <div><strong>${this.escape(c.name)}</strong><small>${this.escape(c.manufacturer || "Unknown")} ${c.model ? "· " + this.escape(c.model) : ""}${c.member_device_ids?.length > 1 ? ` · ${c.member_device_ids.length} HA records grouped` : ""}</small></div>
             </div>
             <div class="meter-counts">
               <span>${power} W</span><span>${energy} kWh</span><span>${voltage} V</span><span>${current} A</span>
             </div>
           </summary>
           <div class="meter-detail">
-            <div class="meter-detail-head"><div><span class="eyebrow">${this.escape(label)}</span><strong>${this.escape(inf.inference || "Electrical measurement source")}</strong></div><span class="score-mini">${c.score} match</span></div>
+            <div class="meter-detail-head"><div><span class="eyebrow">${this.escape(label)}</span><strong>${c.member_device_ids?.length > 1 ? `Grouped physical source · ${c.member_device_ids.length} HA records` : this.escape(inf.inference || "Electrical measurement source")}</strong></div><span class="score-mini">${c.score} match</span></div>
             <div class="meter-actions">${tier === "d" ? `<div class="unsupported-note">This device is retained for discovery, but it is not a usable EnergyIQ electrical source.</div>` : ""}<button class="secondary probe-button" data-probe="${this.escape(c.device_id)}" ${this.probing ? "disabled" : ""}>${this.probing ? "Interrogating…" : "Interrogate channels (30 sec)"}</button></div>
             ${this.probe && this.probe.device_id===c.device_id ? this.renderProbe(this.probe) : ""}
             <div class="evidence compact-evidence">${(c.evidence||[]).slice(0,4).map(x=>`<span>${this.escape(x)}</span>`).join("")}</div>
