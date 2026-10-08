@@ -652,7 +652,25 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         )
 
     async def async_step_consumption_limits(self, user_input=None):
-        return await self._configuration_placeholder("consumption_limits", user_input)
+        options = dict(self.config_entry.options)
+        saved = options.get("consumption_limits", {})
+        peak = dict(saved.get("peak", {})) if isinstance(saved, dict) else {}
+        off_peak = dict(saved.get("off_peak", {})) if isinstance(saved, dict) else {}
+        if user_input is not None:
+            options["consumption_limits"] = {
+                "peak": {"yellow": float(user_input["peak_green_yellow"]), "red": float(user_input["peak_yellow_red"])},
+                "off_peak": {"yellow": float(user_input["off_peak_green_yellow"]), "red": float(user_input["off_peak_yellow_red"])},
+            }
+            return self.async_create_entry(data=options)
+        return self.async_show_form(
+            step_id="consumption_limits",
+            data_schema=vol.Schema({
+                vol.Required("peak_green_yellow", default=float(peak.get("yellow", 1.0))): NumberSelector(NumberSelectorConfig(min=0, max=50, step=0.1, mode=NumberSelectorMode.BOX)),
+                vol.Required("peak_yellow_red", default=float(peak.get("red", 2.0))): NumberSelector(NumberSelectorConfig(min=0, max=50, step=0.1, mode=NumberSelectorMode.BOX)),
+                vol.Required("off_peak_green_yellow", default=float(off_peak.get("yellow", 1.0))): NumberSelector(NumberSelectorConfig(min=0, max=50, step=0.1, mode=NumberSelectorMode.BOX)),
+                vol.Required("off_peak_yellow_red", default=float(off_peak.get("red", 2.0))): NumberSelector(NumberSelectorConfig(min=0, max=50, step=0.1, mode=NumberSelectorMode.BOX)),
+            }),
+        )
 
     async def async_step_cost_limits(self, user_input=None):
         return await self._configuration_placeholder("cost_limits", user_input)
