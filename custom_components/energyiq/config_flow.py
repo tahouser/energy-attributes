@@ -361,7 +361,7 @@ def _device_data(candidates: list[dict[str, Any]], selected: set[str]) -> dict[s
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Commission EnergyIQ with the simplest useful path first."""
 
-    VERSION = 5
+    VERSION = 4
 
     def __init__(self) -> None:
         self._power_entity: str | None = None
