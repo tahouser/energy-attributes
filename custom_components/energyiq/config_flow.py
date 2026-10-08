@@ -494,9 +494,13 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         self._candidates: list[dict[str, Any]] = []
 
     async def async_step_init(self, user_input=None):
+        """Enter the EnergyIQ configuration categories."""
+        return await self.async_step_configuration_menu()
+
+    async def async_step_configuration_menu(self, user_input=None):
         """Show the EnergyIQ configuration categories."""
         return self.async_show_menu(
-            step_id="init",
+            step_id="configuration_menu",
             menu_options=[
                 "meter_properties",
                 "general",
@@ -510,7 +514,7 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
     async def _configuration_placeholder(self, step_id: str, user_input=None):
         """Show a framework section until its settings are implemented."""
         if user_input is not None:
-            return await self.async_step_init()
+            return await self.async_step_configuration_menu()
         return self.async_show_form(step_id=step_id, data_schema=vol.Schema({}))
 
     async def async_step_general(self, user_input=None):
