@@ -441,7 +441,7 @@ def _utility_cost_schema(*, utility_name: str, average_rate: Any, zip_code: str,
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Initial setup only: choose the aggregate meter and create the entry."""
 
-    VERSION = 5
+    VERSION = 4
 
     def __init__(self) -> None:
         self._power_entity: str | None = None
