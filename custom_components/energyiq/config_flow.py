@@ -694,7 +694,48 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         )
 
     async def async_step_peak_time_window(self, user_input=None):
-        return await self._configuration_placeholder("peak_time_window", user_input)
+        options = dict(self.config_entry.options)
+        saved = options.get("peak_time_windows", [])
+        if not isinstance(saved, list) or not saved:
+            legacy = options.get("consumption_peak_schedule", {})
+            saved = [legacy] if isinstance(legacy, dict) and legacy else []
+        first = saved[0] if saved else _PEAK_SCHEDULE_DEFAULTS
+        second = saved[1] if len(saved) > 1 else {}
+        errors = {}
+        if user_input is not None:
+            windows = [{
+                "start": str(user_input["period1_start"]),
+                "end": str(user_input["period1_end"]),
+                "days": [int(day) for day in user_input["period1_days"]],
+            }]
+            if user_input.get("period2_enabled"):
+                windows.append({
+                    "start": str(user_input["period2_start"]),
+                    "end": str(user_input["period2_end"]),
+                    "days": [int(day) for day in user_input["period2_days"]],
+                })
+            if any(window["start"] == window["end"] for window in windows):
+                errors["base"] = "peak_start_end_must_differ"
+            elif any(not window["days"] for window in windows):
+                errors["base"] = "peak_days_required"
+            else:
+                options["peak_time_windows"] = windows
+                options["consumption_peak_schedule"] = windows[0]
+                return self.async_create_entry(data=options)
+        weekday_options = [SelectOptionDict(value=str(i), label=label) for i, label in enumerate(("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))]
+        return self.async_show_form(
+            step_id="peak_time_window",
+            data_schema=vol.Schema({
+                vol.Required("period1_start", default=str(first.get("start", "15:00:00"))): selector.TimeSelector(),
+                vol.Required("period1_end", default=str(first.get("end", "19:00:00"))): selector.TimeSelector(),
+                vol.Required("period1_days", default=[str(day) for day in first.get("days", [1,2,3,4,5])]): SelectSelector(SelectSelectorConfig(options=weekday_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)),
+                vol.Optional("period2_enabled", default=bool(second)): BooleanSelector(),
+                vol.Optional("period2_start", default=str(second.get("start", "17:00:00"))): selector.TimeSelector(),
+                vol.Optional("period2_end", default=str(second.get("end", "20:00:00"))): selector.TimeSelector(),
+                vol.Optional("period2_days", default=[str(day) for day in second.get("days", [1,2,3,4,5])]): SelectSelector(SelectSelectorConfig(options=weekday_options, multiple=True, mode=SelectSelectorMode.DROPDOWN)),
+            }),
+            errors=errors,
+        )
 
     async def async_step_utility_search(self, user_input=None):
         return await self._configuration_placeholder("utility_search", user_input)
