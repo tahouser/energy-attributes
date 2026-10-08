@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v339";
-  const VERSION = "43000";
-  const UI_VERSION = "3.1.430";
+  const VERSION = "43100";
+  const UI_VERSION = "3.1.431";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon@2x.png?v=43000";
+      this.brandUrl = "/energyiq-brand/icon@2x.png?v=43100";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -266,7 +266,7 @@ hasPendingChanges() {
         ["utility_search", "Utility Search", "Find utility rates by ZIP code, including manual entry when a utility cannot be found automatically."]
       ];
       const active = sections.find(item => item[0] === this.configurationSection);
-      const body = active ? '<div class="config-detail"><strong>' + active[1] + '</strong><p>' + active[2] + '</p>' + (active[0] === "general" ? "<p>Currency · Time zone · General display settings</p>" : "") + (active[0] === "utility_search" ? "<p>ZIP code search · Manual utility/rate entry</p>" : "") + "</div>" : "";
+      const body = active ? '<div class="config-detail"><p>Configuration settings for this area will appear here.</p></div>' : "";
       return '<div class="config-backdrop"><div class="config-dialog" role="dialog" aria-modal="true" aria-label="EnergyIQ Configuration"><div class="config-head"><div><span class="eyebrow">ENERGYIQ</span><h2>Configuration</h2></div><button id="close-config" type="button" aria-label="Close">×</button></div><div class="config-list">' + sections.map(item => '<button type="button" class="config-row ' + (this.configurationSection === item[0] ? "expanded" : "") + '" data-config-section="' + item[0] + '"><span class="config-chevron">' + (this.configurationSection === item[0] ? "▾" : "▸") + '</span><span><strong>' + item[1] + '</strong><small>' + item[2] + '</small></span></button>' + (this.configurationSection === item[0] ? body : "")).join("") + "</div></div></div>";
     }
     renderLoading() { this.innerHTML = `<ha-card class="loading"><h2>EnergyIQ</h2><p>Loading workspace…</p></ha-card>`; }
