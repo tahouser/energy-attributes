@@ -169,6 +169,40 @@
             }
           }
         }
+      },
+      "general": {
+        "title": "General",
+        "description": "Currency, time zone, and other general EnergyIQ settings."
+      },
+      "consumption_limits": {
+        "title": "Consumption Limits",
+        "description": "The consumption-limit configuration section will be built here."
+      },
+      "cost_limits": {
+        "title": "Cost Limits",
+        "description": "The cost-limit configuration section will be built here."
+      },
+      "peak_time_window": {
+        "title": "Peak Time Window",
+        "description": "The Peak time-window configuration section will be built here."
+      },
+      "utility_search": {
+        "title": "Utility Search",
+        "description": "Search for utility rates by ZIP code, with manual entry available."
+      },
+      "meter_properties": {
+        "title": "Meter Properties",
+        "description": "Select and manage the electrical loads and meter-related properties currently used by EnergyIQ."
+      }
+    },
+    "menu_options": {
+      "init": {
+        "meter_properties": "Meter Properties",
+        "general": "General",
+        "consumption_limits": "Consumption Limits",
+        "cost_limits": "Cost Limits",
+        "peak_time_window": "Peak Time Window",
+        "utility_search": "Utility Search"
       }
     }
   },
