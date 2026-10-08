@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "40800";
+  const VERSION = "40900";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -171,47 +171,41 @@
     }
 
     renderCandidate(c, top) {
+      const tier = String(c.meter_class || "C").toLowerCase();
       const inf = c.inference || {};
-      const status = inf.confidence === "medium" ? "promising" : inf.confidence === "low" ? "limited" : "unknown";
+      const power = c.entities.filter(e => e.kind === "power").length;
+      const energy = c.entities.filter(e => e.kind === "energy").length;
+      const voltage = c.entities.filter(e => e.kind === "voltage").length;
+      const current = c.entities.filter(e => e.kind === "current").length;
+      const label = tier === "a" ? "Class A · multi-channel meter" : tier === "b" ? "Class B · load meter" : tier === "c" ? "Class C · limited measurement" : "Class D · unsupported";
       return `
-        <section class="panel candidate ${top ? "top" : ""}">
-          <div class="candidate-head">
-            <div>
-              <span class="eyebrow">${top ? "Best current candidate" : "Candidate"}</span>
-              <h2>${this.escape(c.name)}</h2>
-              <p>${this.escape(c.manufacturer || "Unknown manufacturer")} ${c.model ? "· " + this.escape(c.model) : ""}</p>
+        <details class="meter-item tier-${tier}" ${top ? "open" : ""}>
+          <summary class="meter-summary">
+            <div class="meter-name">
+              <span class="tier-badge">${this.escape(tier.toUpperCase())}</span>
+              <div><strong>${this.escape(c.name)}</strong><small>${this.escape(c.manufacturer || "Unknown")} ${c.model ? "· " + this.escape(c.model) : ""}</small></div>
             </div>
-            <div class="score"><strong>${c.score}</strong><span>match score</span></div>
+            <div class="meter-counts">
+              <span>${power} W</span><span>${energy} kWh</span><span>${voltage} V</span><span>${current} A</span>
+            </div>
+          </summary>
+          <div class="meter-detail">
+            <div class="meter-detail-head"><div><span class="eyebrow">${this.escape(label)}</span><strong>${this.escape(inf.inference || "Electrical measurement source")}</strong></div><span class="score-mini">${c.score} match</span></div>
+            <div class="meter-actions"><button class="secondary probe-button" data-probe="${this.escape(c.device_id)}" ${this.probing ? "disabled" : ""}>${this.probing ? "Interrogating…" : "Interrogate channels (30 sec)"}</button></div>
+            ${this.probe && this.probe.device_id===c.device_id ? this.renderProbe(this.probe) : ""}
+            <div class="evidence compact-evidence">${(c.evidence||[]).slice(0,4).map(x=>`<span>${this.escape(x)}</span>`).join("")}</div>
+            <details class="subdetails"><summary>Show Home Assistant entities (${c.entities.length})</summary>
+              <div class="entity-table">
+                <div class="entity-row entity-head"><span>Type</span><span>Name</span><span>Value</span><span>Unit</span></div>
+                ${c.entities.map(e=>this.renderEntityRow(e)).join("")}
+              </div>
+            </details>
           </div>
+        </details>
+      `;
+    }
 
-          <div class="chips">
-            ${c.config_entries.map(x=>`<span class="chip">${this.escape(x.domain)} · ${this.escape(x.title)}</span>`).join("")}
-            ${c.sw_version ? `<span class="chip">FW ${this.escape(c.sw_version)}</span>` : ""}
-            ${c.hw_version ? `<span class="chip">HW ${this.escape(c.hw_version)}</span>` : ""}
-          </div>
-
-          <div class="probe-action"><button class="secondary probe-button" data-probe="${this.escape(c.device_id)}" ${this.probing ? "disabled" : ""}>${this.probing ? "Interrogating…" : "Interrogate channels (30 sec)"}</button></div>
-          ${this.probe && this.probe.device_id===c.device_id ? this.renderProbe(this.probe) : ""}
-
-          <div class="inference ${status}">
-            <div><span class="eyebrow">Electrical-system inference</span><strong>${this.escape(inf.inference || "Unknown")}</strong></div>
-            <div class="confidence">${this.escape(inf.confidence || "unknown")} confidence</div>
-          </div>
-
-          <div class="evidence"><strong>Why it matched</strong><div>${(c.evidence||[]).map(x=>`<span>${this.escape(x)}</span>`).join("")}</div></div>
-
-          <div class="stats">
-            <div><span>Power</span><strong>${c.entities.filter(e=>e.kind==="power").length}</strong></div>
-            <div><span>Energy</span><strong>${c.entities.filter(e=>e.kind==="energy").length}</strong></div>
-            <div><span>Voltage</span><strong>${inf.voltage_channels || 0}</strong></div>
-            <div><span>Current</span><strong>${c.entities.filter(e=>e.kind==="current").length}</strong></div>
-          </div>
-
-          <details open>
-            <summary>Home Assistant data exposed by this device</summary>
-            <div class="entity-table">
-              <div class="entity-row entity-head"><span>Type</span><span>Name</span><span>Value</span><span>Unit</span></div>
-              ${c.entities.map(e=>this.renderEntityRow(e)).join("")}
+    renderEntityRow(e)).join("")}
             </div>
           </details>
 
@@ -250,6 +244,17 @@
       .probe-action{margin:12px 0}.secondary{font-weight:700}.probe{margin:12px 0;padding:12px;border:1px solid rgba(54,200,255,.25);border-radius:11px;background:rgba(54,200,255,.035)}.probe-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.probe-head strong{display:block}.probe-head small{display:block;color:var(--secondary-text-color);margin-top:3px}.probe-count{font-size:10px;text-transform:uppercase;color:#35e7b0;white-space:nowrap}.channel-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.channel-card{border:1px solid var(--divider-color);border-radius:9px;padding:9px;background:rgba(255,255,255,.02)}.channel-card.active{border-color:rgba(20,242,184,.45)}.channel-top{display:flex;justify-content:space-between}.channel-top span{font-size:9px;color:var(--secondary-text-color)}.channel-assessment{font-size:10px;color:var(--secondary-text-color);margin:6px 0}.probe-row{display:grid;grid-template-columns:55px 1fr auto;gap:5px;border-top:1px solid var(--divider-color);padding-top:5px;margin-top:5px;font-size:9px}.probe-row small{color:var(--secondary-text-color)}.probe-note{margin-top:9px;color:var(--secondary-text-color);font-size:9px;line-height:1.45}.chips,.evidence>div{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px}.chip,.evidence span{padding:5px 8px;border-radius:999px;background:rgba(54,200,255,.08);border:1px solid rgba(54,200,255,.16);font-size:10px;color:var(--secondary-text-color)}.evidence{margin:12px 0}.evidence>strong{font-size:11px}.inference{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:12px;border-radius:10px;margin:13px 0;border:1px solid var(--divider-color);background:rgba(255,255,255,.025)}.inference.promising{border-color:rgba(20,242,184,.4)}.inference.limited{border-color:rgba(255,193,7,.38)}.inference strong{display:block;font-size:15px}.confidence{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--secondary-text-color);white-space:nowrap}
       .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-bottom:13px}.stats>div{padding:9px;border:1px solid rgba(255,255,255,.05);border-radius:8px;background:rgba(255,255,255,.03)}.stats span{display:block;font-size:9px;text-transform:uppercase;color:var(--secondary-text-color)}.stats strong{display:block;margin-top:3px;font-size:17px}
       details{border-top:1px solid var(--divider-color);padding-top:10px;margin-top:10px}summary{cursor:pointer;font-weight:700;font-size:12px;color:var(--primary-text-color)}.entity-table{margin-top:9px;border:1px solid var(--divider-color);border-radius:9px;overflow:hidden}.entity-row{display:grid;grid-template-columns:90px minmax(220px,1fr) 120px 80px;gap:8px;align-items:center;padding:8px 10px;border-top:1px solid var(--divider-color);font-size:11px}.entity-row:first-child{border-top:0}.entity-head{background:rgba(255,255,255,.03);font-size:9px;text-transform:uppercase;color:var(--secondary-text-color);letter-spacing:.06em}.entity-row small,.simple-row small{display:block;color:var(--secondary-text-color);font-size:9px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.type{font-size:9px;text-transform:uppercase;font-weight:800}.type.power{color:#36c8ff}.type.energy{color:#35e7b0}.type.voltage{color:#ffd166}.type.current{color:#ff9f68}.registry{display:grid;gap:5px;margin-top:8px}.registry code{font-size:10px;overflow-wrap:anywhere}.notes{margin:8px 0 0;padding-left:19px;color:var(--secondary-text-color);line-height:1.5;font-size:12px}.simple-row{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--divider-color);font-size:11px}
+      .meter-item{border:1px solid var(--divider-color);border-radius:12px;margin:8px 0;overflow:hidden;background:rgba(255,255,255,.025)}
+      .meter-item.tier-a{background:rgba(53,231,176,.11);border-color:rgba(53,231,176,.35)}
+      .meter-item.tier-b{background:rgba(54,200,255,.09);border-color:rgba(54,200,255,.30)}
+      .meter-item.tier-c{background:rgba(255,209,102,.09);border-color:rgba(255,209,102,.28)}
+      .meter-item.tier-d{background:rgba(160,160,160,.07);border-color:rgba(160,160,160,.22)}
+      .meter-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 13px;cursor:pointer;list-style:none}
+      .meter-summary::-webkit-details-marker{display:none}.meter-name{display:flex;align-items:center;gap:10px;min-width:0}.meter-name strong{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}.meter-name small{display:block;color:var(--secondary-text-color);font-size:10px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .tier-badge{display:grid;place-items:center;min-width:30px;height:26px;border-radius:7px;background:rgba(0,0,0,.16);font-size:11px;font-weight:900}.tier-a .tier-badge{color:#35e7b0}.tier-b .tier-badge{color:#36c8ff}.tier-c .tier-badge{color:#ffd166}.tier-d .tier-badge{color:#aaa}
+      .meter-counts{display:flex;gap:5px;flex-wrap:wrap;justify-content:flex-end}.meter-counts span{font-size:9px;padding:4px 6px;border-radius:6px;background:rgba(0,0,0,.13);color:var(--secondary-text-color)}
+      .meter-detail{padding:0 13px 13px;border-top:1px solid rgba(255,255,255,.06)}.meter-detail-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:11px 0}.meter-detail-head strong{display:block;font-size:12px}.score-mini{font-size:10px;color:var(--secondary-text-color)}.meter-actions{margin-bottom:9px}.compact-evidence{margin:8px 0}.subdetails{margin-top:9px}.subdetails summary{font-size:10px}
+      @media(max-width:600px){.meter-summary{align-items:flex-start}.meter-counts{max-width:155px}.meter-counts span{font-size:8px}.meter-name strong{max-width:190px}}
       .error{padding:17px;border-color:rgba(255,77,95,.5)}.error p{margin:5px 0 0}.empty{min-height:180px;display:grid;place-items:center;gap:8px;padding:20px}.spinner{width:24px;height:24px;border:3px solid var(--divider-color);border-top-color:#36c8ff;border-radius:50%;animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
       @media(max-width:800px){.channel-grid{grid-template-columns:1fr}.probe-head{flex-direction:column}.shell{padding:105px 12px 18px}.hero{align-items:stretch;flex-direction:column}.summary-grid{grid-template-columns:1fr 1fr}.entity-row{grid-template-columns:70px minmax(150px,1fr) 90px 55px}.stats{grid-template-columns:repeat(2,1fr)}header{left:0;right:0;padding:12px 14px 13px}.title-row{display:grid;grid-template-columns:34px 46px minmax(0,1fr);gap:9px}.back{width:34px;height:34px}.logo{width:46px;height:46px}.name-row{gap:8px}.name-row h1{font-size:24px}.name-row span{font-size:15px}.copy p{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
       @media(max-width:520px){.summary-grid{grid-template-columns:1fr}.entity-row{grid-template-columns:62px minmax(120px,1fr) 70px 45px;padding:7px 6px}.entity-row{font-size:10px}.candidate-head{flex-direction:column}.score{align-self:flex-start}.chips{max-height:100px;overflow:auto}}
