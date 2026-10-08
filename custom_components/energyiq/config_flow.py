@@ -442,28 +442,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._saved_snapshot = migrate_snapshot(await get_store(self.hass).async_load())
 
         if has_saved_data(self._saved_snapshot):
-            if user_input is not None:
-                power = user_input[CONF_POWER_ENTITY]
-                if user_input.get("restore_existing", False):
-                    snapshot = self._saved_snapshot
-                    data = build_entry_data(snapshot, power)
-                    data["_restore_persistent_data"] = True
-                    options = dict(snapshot.get("options") or {})
-                    options.update({
-                        CONF_MONITORED_ENTITIES: data[CONF_MONITORED_ENTITIES],
-                        "candidate_devices": data["candidate_devices"],
-                        "device_classifications": data["device_classifications"],
-                        "commissioned_devices": data["commissioned_devices"],
-                    })
-                    return self.async_create_entry(title="EnergyIQ", data=data, options=options)
-                self._selected_meter = None
-                return await self.async_step_manual_meter()
-            return self.async_show_form(step_id="user", data_schema=vol.Schema({
-                vol.Required(CONF_POWER_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="sensor", device_class="power", multiple=False)
-                ),
-                vol.Optional("restore_existing", default=True): bool,
-            }))
+            return await self.async_step_existing_meter()
 
         # Meter Detector is the installation/commissioning step. Discovery
         # and Class A interrogation happen before the user is asked to choose.
@@ -684,9 +663,69 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
+    async def async_step_existing_meter(self, user_input=None):
+        """Ask whether an existing meter should be kept before discovery."""
+        current_power = None
+        if self.source == SOURCE_RECONFIGURE:
+            current_power = self._get_reconfigure_entry().data.get(CONF_POWER_ENTITY)
+        elif self._saved_snapshot:
+            current_power = self._saved_snapshot.get("power_entity")
+
+        if user_input is not None:
+            action = user_input.get("action")
+            if action == "keep":
+                if self.source == SOURCE_RECONFIGURE:
+                    return self.async_update_reload_and_abort(
+                        self._get_reconfigure_entry(),
+                        data_updates={},
+                        reload_even_if_entry_is_unchanged=False,
+                    )
+                snapshot = self._saved_snapshot or {}
+                data = build_entry_data(snapshot)
+                data["_restore_persistent_data"] = True
+                options = dict(snapshot.get("options") or {})
+                options.update({
+                    CONF_MONITORED_ENTITIES: data[CONF_MONITORED_ENTITIES],
+                    "candidate_devices": data["candidate_devices"],
+                    "device_classifications": data["device_classifications"],
+                    "commissioned_devices": data["commissioned_devices"],
+                })
+                return self.async_create_entry(title="EnergyIQ", data=data, options=options)
+
+            if action == "new":
+                return await self.async_step_meter_discovery()
+
+            if action == "restore" and self._saved_snapshot:
+                snapshot = self._saved_snapshot
+                saved_power = snapshot.get("power_entity")
+                if saved_power:
+                    if self.source == SOURCE_RECONFIGURE:
+                        return self.async_update_reload_and_abort(
+                            self._get_reconfigure_entry(),
+                            data_updates={CONF_POWER_ENTITY: saved_power},
+                        )
+                    data = build_entry_data(snapshot)
+                    data["_restore_persistent_data"] = True
+                    options = dict(snapshot.get("options") or {})
+                    options.update({
+                        CONF_MONITORED_ENTITIES: data[CONF_MONITORED_ENTITIES],
+                        "candidate_devices": data["candidate_devices"],
+                        "device_classifications": data["device_classifications"],
+                        "commissioned_devices": data["commissioned_devices"],
+                    })
+                    return self.async_create_entry(title="EnergyIQ", data=data, options=options)
+
+        return self.async_show_menu(
+            step_id="existing_meter",
+            menu_options=["existing_keep", "existing_new", "existing_restore"],
+            description_placeholders={
+                "meter": current_power or "No previously saved meter entity",
+            },
+        )
+
     async def async_step_reconfigure(self, user_input=None):
-        """Re-run the Meter Detector for an existing EnergyIQ entry."""
-        return await self.async_step_meter_discovery()
+        """Offer to keep the current meter or run fresh discovery."""
+        return await self.async_step_existing_meter(user_input)
 
     async def _interrogate_class_a_meters(self) -> None:
         """Discover, group, classify, and automatically interrogate every Class A source."""
@@ -1004,9 +1043,17 @@ def _commissioning_power_entity(candidate: dict[str, Any]) -> str | None:
         return None
     def score(entity: dict[str, Any]) -> int:
         tokens = _tokens(f"{entity.get('name', '')} {entity.get('entity_id', '')}")
-        value = 20 if tokens & {"total","aggregate","whole","home","house","mains","main","grid","service"} else 0
-        if tokens & {"l1","l2","l3","phase","channel","ch1","ch2","ch3"}:
-            value -= 20
+        value = 0
+        if tokens & {"total", "aggregate", "whole", "home", "house", "mains", "main", "grid", "service"}:
+            value += 100
+        if tokens & {"l1", "l2", "l3", "phase", "channel", "ch1", "ch2", "ch3"}:
+            value -= 40
+        try:
+            current = float(entity.get("value"))
+        except (TypeError, ValueError):
+            current = 0.0
+        if current > 0:
+            value += 5
         return value
     return max(entities, key=score)["entity_id"]
 
@@ -1018,7 +1065,29 @@ def _commissioning_meter_label(candidate: dict[str, Any]) -> str:
 
 
 def _commissioning_options(candidates: list[dict[str, Any]]) -> list[SelectOptionDict]:
-    return [SelectOptionDict(value=c["group_id"], label=_commissioning_meter_label(c)) for c in candidates]
+    """Create meter choices that expose the detector's classification."""
+    options: list[SelectOptionDict] = []
+    for candidate in candidates:
+        meter_class = str(candidate.get("meter_class") or "C").upper()
+        entity_count = len(candidate.get("entities") or [])
+        power_count = sum(
+            1 for entity in candidate.get("entities", []) if entity.get("kind") == "power"
+        )
+        energy_count = sum(
+            1 for entity in candidate.get("entities", []) if entity.get("kind") == "energy"
+        )
+        grouping = (
+            f"{len(candidate.get('member_device_ids') or [])} HA records"
+            if len(candidate.get("member_device_ids") or []) > 1
+            else "1 HA record"
+        )
+        label = (
+            f"CLASS {meter_class} — {_commissioning_meter_label(candidate)}"
+            f" · {grouping} · {entity_count} measurements"
+            f" · {power_count} power / {energy_count} energy"
+        )
+        options.append(SelectOptionDict(value=candidate["group_id"], label=label))
+    return options
 
 
 def _candidate_category(candidate: dict[str, Any]) -> str:
