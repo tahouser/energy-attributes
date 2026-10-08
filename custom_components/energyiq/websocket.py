@@ -106,12 +106,23 @@ def _meter_summary(hass: HomeAssistant, coordinator) -> list[dict]:
         configured_power_entities = [coordinator.power_entity]
     source_entries = [registry.async_get(entity_id) for entity_id in configured_power_entities]
     device_ids = {entry.device_id for entry in source_entries if entry is not None and entry.device_id}
-    if not device_ids:
-        return []
-
+    # Multi-channel meters may expose phase readings under separate HA devices.
+    # Find sibling entities by their stable entity-id prefix without sweeping
+    # in unrelated devices.
+    import re
+    source_prefixes = set()
+    for entity_id in configured_power_entities:
+        prefix = re.sub(
+            r"_(?:(?:energy_)?meter_\\d+|(?:active_)?power)(?:_.*)?$",
+            "",
+            entity_id.casefold(),
+        )
+        if prefix and prefix != entity_id.casefold():
+            source_prefixes.add(prefix)
     entities = []
     for entry in registry.entities.values():
-        if entry.device_id not in device_ids or entry.domain != "sensor" or entry.disabled_by is not None:
+        related_by_prefix = any(entry.entity_id.casefold().startswith(prefix) for prefix in source_prefixes)
+        if (entry.device_id not in device_ids and not related_by_prefix) or entry.domain != "sensor" or entry.disabled_by is not None:
             continue
         state = hass.states.get(entry.entity_id)
         if state is None:
@@ -129,12 +140,18 @@ def _meter_summary(hass: HomeAssistant, coordinator) -> list[dict]:
             return None
 
     def meter_key(name: str):
-        text = name.casefold()
-        match = __import__("re").search(r"(?:meter|phase|leg)[ _-]*(\d+)", text)
+        text = name.casefold().replace("_", " ").replace("-", " ")
+        match = re.search(r"(?:meter|phase|leg)[ ]*(\\d+)", text)
         if match:
             return f"meter-{match.group(1)}"
+        if re.search(r"\\bphase[ ]*a\\b", text):
+            return "l1"
+        if re.search(r"\\bphase[ ]*b\\b", text):
+            return "l2"
+        if re.search(r"\\bphase[ ]*c\\b", text):
+            return "l3"
         for token in ("l1", "l2", "l3"):
-            if token in text:
+            if re.search(rf"\\b{token}\\b", text):
                 return token
         return None
 
