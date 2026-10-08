@@ -12,28 +12,45 @@
       },
       "meter_select": {
         "title": "Choose your whole-home meter",
-        "description": "EnergyIQ found more than one Class A meter source. Choose the one that represents total home consumption.",
+        "description": "EnergyIQ found more than one Class A meter source. Choose the one you believe is your whole-home meter. You will then be asked to confirm it.",
         "data": {
           "meter": "Whole-home meter"
         }
       },
       "commission": {
         "title": "Whole-home meter found",
-        "description": "{meter}\\n\\nPrimary power: {power}\\n\\nYou can start EnergyIQ now. The remaining configuration can be completed later from Configure.",
-        "data": {
-          "action": "Setup"
+        "description": "{meter}\\n\\nPrimary power: {power}\\n\\nIs this your whole-home meter?",
+        "menu_options": {
+          "commission_use": "YES — USE THIS METER",
+          "commission_choose": "NO — CHOOSE A DIFFERENT METER",
+          "commission_manual": "ADD MY METER MANUALLY"
+        },
+        "menu_option_descriptions": {
+          "commission_use": "Start EnergyIQ with this detected meter.",
+          "commission_choose": "See the other electrical sources EnergyIQ found.",
+          "commission_manual": "Pick any Home Assistant power sensor yourself."
         }
       },
       "manual_meter": {
-        "title": "Choose your meter",
-        "description": "EnergyIQ could not automatically identify your whole-home meter. This does not necessarily mean Home Assistant does not have one. Choose your own power entity, or choose a device EnergyIQ found for basic functionality.",
+        "title": "Add my meter manually",
+        "description": "EnergyIQ could not identify the meter you want to use. Choose any Home Assistant power sensor. You can configure the remaining settings later.",
         "data": {
-          "source": "Meter source",
-          "power_entity": "My power entity",
-          "device": "Device found by EnergyIQ"
+          "power_entity": "Home Assistant power sensor"
         }
+      },
+      "choose_meter": {
+        "title": "Choose a different meter",
+        "description": "EnergyIQ found these usable electrical sources. Select the one you want to use as your EnergyIQ meter.",
+        "data": {
+          "meter": "Meter"
+        }
+      },
+      "reconfigure": {
+        "title": "Re-select EnergyIQ meter",
+        "description": "Choose the whole-home meter EnergyIQ should use. Existing EnergyIQ settings and training data will be preserved."
       }
-    }
+    },
+    "abort": {}
   },
   "options": {
     "step": {
