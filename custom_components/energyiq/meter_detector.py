@@ -318,6 +318,34 @@ def _meter_class(device, entities: list[dict], config_entries: list[dict]) -> st
     return "D"
 
 
+def _physical_group_key(candidate: dict) -> tuple[str, str, str]:
+    """Build a conservative logical-source key for HA device records.
+
+    HA can expose one physical meter as several device records. Prefer an
+    explicit physical serial-like identity for known multi-channel meters;
+    otherwise normalize only obvious channel suffixes and require the same
+    manufacturer/model/name family.
+    """
+    manufacturer = str(candidate["manufacturer"]).casefold().strip()
+    model = str(candidate["model"]).casefold().strip()
+    name = str(candidate["name"]).casefold().strip()
+
+    # Shelly Pro 3EM channel records commonly retain the same physical
+    # device serial in the generated name. Group those records even when HA
+    # appends a channel/phase suffix to the device name.
+    shelly_3em = re.search(r"(shellypro3em[-_][0-9a-f]{12})", name)
+    if "shelly" in manufacturer and ("3em" in model or "3em" in name) and shelly_3em:
+        return (manufacturer, model, shelly_3em.group(1))
+
+    normalized = re.sub(r"[._-]+", " ", name)
+    normalized = re.sub(r"\b(?:phase|channel|ch|l)\s*[123]\b", "", normalized)
+    normalized = re.sub(r"\b[abc]\b$", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return (manufacturer, model, normalized)
+
+
+
+
 def discover_meters(hass: HomeAssistant) -> dict:
     registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
@@ -387,32 +415,6 @@ def discover_meters(hass: HomeAssistant) -> dict:
             "evidence": evidence,
             "inference": _infer_electrical_system(device, entities),
         })
-
-def _physical_group_key(candidate: dict) -> tuple[str, str, str]:
-    """Build a conservative logical-source key for HA device records.
-
-    HA can expose one physical meter as several device records. Prefer an
-    explicit physical serial-like identity for known multi-channel meters;
-    otherwise normalize only obvious channel suffixes and require the same
-    manufacturer/model/name family.
-    """
-    manufacturer = str(candidate["manufacturer"]).casefold().strip()
-    model = str(candidate["model"]).casefold().strip()
-    name = str(candidate["name"]).casefold().strip()
-
-    # Shelly Pro 3EM channel records commonly retain the same physical
-    # device serial in the generated name. Group those records even when HA
-    # appends a channel/phase suffix to the device name.
-    shelly_3em = re.search(r"(shellypro3em[-_][0-9a-f]{12})", name)
-    if "shelly" in manufacturer and ("3em" in model or "3em" in name) and shelly_3em:
-        return (manufacturer, model, shelly_3em.group(1))
-
-    normalized = re.sub(r"[._-]+", " ", name)
-    normalized = re.sub(r"\b(?:phase|channel|ch|l)\s*[123]\b", "", normalized)
-    normalized = re.sub(r"\b[abc]\b$", "", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return (manufacturer, model, normalized)
-
 
     # Group HA device records that represent the same physical electrical source.
     # A physical meter can appear as multiple HA device records for channels.
