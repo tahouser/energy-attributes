@@ -518,29 +518,24 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
         return self.async_show_form(step_id=step_id, data_schema=vol.Schema({}))
 
     async def async_step_meter_properties(self, user_input=None):
-        """Manage only the whole-home EnergyIQ meter."""
+        """Show the current whole-home meter without exposing unsafe shortcuts."""
         current = self.config_entry.data.get(CONF_POWER_ENTITY)
-        if user_input is not None:
-            selected = user_input[CONF_POWER_ENTITY]
-            data = dict(self.config_entry.data)
-            data[CONF_POWER_ENTITY] = selected
-            options = dict(self.config_entry.options)
-            options[CONF_POWER_ENTITY] = selected
-            self.hass.config_entries.async_update_entry(self.config_entry, data=data)
-            return self.async_create_entry(data=options)
+        state = self.hass.states.get(current) if current else None
+        meter_name = (
+            state.attributes.get("friendly_name")
+            if state is not None
+            else current
+        ) or "No whole-home meter is currently selected"
 
-        schema = vol.Schema({
-            vol.Required(CONF_POWER_ENTITY, default=current): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="sensor",
-                    device_class="power",
-                    multiple=False,
-                )
-            ),
-        })
+        if user_input is not None:
+            return await self.async_step_configuration_menu()
+
         return self.async_show_form(
             step_id="meter_properties",
-            data_schema=schema,
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "meter": str(meter_name),
+            },
         )
 
     async def async_step_general(self, user_input=None):
