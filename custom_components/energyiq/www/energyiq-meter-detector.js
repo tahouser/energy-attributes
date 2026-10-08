@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "40900";
+  const VERSION = "41000";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -202,15 +202,6 @@
             </details>
           </div>
         </details>
-      `;
-    }
-
-    renderEntityRow(e)).join("")}
-            </div>
-          </details>
-
-          ${c.identifiers.length ? `<details><summary>Device registry identifiers</summary><div class="registry">${c.identifiers.map(x=>`<code>${this.escape(x[0])}: ${this.escape(x[1])}</code>`).join("")}</div></details>` : ""}
-        </section>
       `;
     }
 
