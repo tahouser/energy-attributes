@@ -10,6 +10,20 @@
           "restore_existing": "Restore existing EnergyIQ data"
         }
       },
+      "existing_meter": {
+        "title": "EnergyIQ meter already configured",
+        "description": "EnergyIQ already has a meter selected: {meter}. You can keep that meter and continue, or run Meter Detector again to choose a different meter.",
+        "menu_options": {
+          "existing_keep": "KEEP CURRENT METER",
+          "existing_new": "DISCOVER A NEW METER",
+          "existing_restore": "RESTORE PREVIOUSLY SAVED METER"
+        },
+        "menu_option_descriptions": {
+          "existing_keep": "Leave the current whole-home meter exactly as it is.",
+          "existing_new": "Run discovery, classification, and automatic Class A interrogation.",
+          "existing_restore": "Restore the meter stored in EnergyIQ's persistent backup, if available."
+        }
+      },
       "meter_discovery": {
         "title": "EnergyIQ meter discovery",
         "description": "EnergyIQ is scanning Home Assistant, grouping physical meter records, classifying electrical sources, and automatically interrogating every Class A meter for 30 seconds. No configuration is changed during this test."
