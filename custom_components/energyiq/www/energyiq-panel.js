@@ -37,6 +37,7 @@
       this.upperSectionsCollapsed = false;      this.sortColumn = "name";
       this.sortDirection = "asc";
       this.configurationSection = null;
+      this.configurationOpen = false;
     }
 
     setConfig() {}
@@ -251,10 +252,11 @@ hasPendingChanges() {
     }
     closeConfiguration() {
       this.configurationSection = null;
+      this.configurationOpen = false;
       this.render();
     }
     renderConfigurationDialog() {
-      if (!this.configurationSection) return "";
+      if (!this.configurationOpen) return "";
       const sections = [
         ["meter_properties", "Meter Properties", "Whole-home meter and electrical-source properties."],
         ["general", "General", "Currency, time zone, and other general EnergyIQ settings."],
@@ -448,7 +450,7 @@ ${selected ? `<div class="selection-bar"><div class="selection-count"><span clas
     bind() {
       this.bindTableScrollTouch();
       this.querySelector("#back")?.addEventListener("click",()=>{if(window.history.length>1)window.history.back();else window.location.href="/";});
-      this.querySelector("#config")?.addEventListener("click",()=>{this.configurationSection="meter_properties";this.render();});
+      this.querySelector("#config")?.addEventListener("click",()=>{this.configurationOpen=true;this.configurationSection=null;this.render();});
       this.querySelector("#close-config")?.addEventListener("click",()=>this.closeConfiguration());
       this.querySelector(".config-backdrop")?.addEventListener("click",event=>{if(event.target.classList.contains("config-backdrop"))this.closeConfiguration();});
       this.querySelectorAll("[data-config-section]").forEach(button=>button.addEventListener("click",()=>this.toggleConfiguration(button.dataset.configSection)));
