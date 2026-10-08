@@ -19,11 +19,11 @@ from .response_migration import migrate_response_log
 
 PLATFORMS = ["sensor"]
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "44800"
+FRONTEND_VERSION = "44900"
 
 _MANIFEST_PATH = Path(__file__).with_name("manifest.json")
 INTEGRATION_VERSION = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))["version"]
-CARD_PATH = f"{URL_BASE}/energyiq-card-3.1.448.js"
+CARD_PATH = f"{URL_BASE}/energyiq-card-3.1.449.js"
 CARD_URL = f"{CARD_PATH}?v={FRONTEND_VERSION}"
 
 
