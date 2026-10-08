@@ -39,8 +39,10 @@ def _kind(state) -> str | None:
     attrs = state.attributes
     device_class = str(attrs.get("device_class") or "").casefold()
     unit = str(attrs.get("unit_of_measurement") or "").casefold()
-    if device_class in {"power", "apparent_power"} or unit in _POWER_UNITS:
+    if device_class == "power" or unit in _POWER_UNITS:
         return "power"
+    if device_class == "apparent_power":
+        return "apparent_power"
     if device_class == "energy" or unit in _ENERGY_UNITS:
         return "energy"
     if device_class == "voltage" or unit in _VOLTAGE_UNITS:
@@ -72,6 +74,10 @@ def _entity_summary(hass: HomeAssistant, entry, device) -> list[dict]:
             "name": str(attrs.get("friendly_name") or entity.name or entity.entity_id),
             "domain": entity.domain,
             "kind": kind,
+            "role": _power_role(
+                str(attrs.get("friendly_name") or entity.name or entity.entity_id),
+                entity.entity_id,
+            ) if kind == "power" else "",
             "device_class": attrs.get("device_class"),
             "unit": attrs.get("unit_of_measurement"),
             "state_class": attrs.get("state_class"),
@@ -214,6 +220,23 @@ def _channel_label(row: dict) -> str:
     if match:
         return re.sub(r"[_ -]+", " ", match.group(1)).upper()
     return "unlabeled"
+
+def _power_role(name: str, entity_id: str) -> str:
+    """Classify a power sensor as whole-home, phase-specific, or generic."""
+    text = f"{name} {entity_id}".casefold()
+    phase_match = re.search(
+        r"(?:^|[^a-z0-9])(?:l[123]|phase[_ -]?[abc123]|channel[_ -]?[123]|ch[123])(?:$|[^a-z0-9])",
+        text,
+    )
+    if phase_match:
+        return "phase"
+    total_words = (
+        "total", "whole", "house", "home", "mains", "main", "grid",
+        "utility", "service", "combined", "aggregate", "sum",
+    )
+    if any(word in _tokens(text) for word in total_words):
+        return "whole_home"
+    return "power"
 
 async def _probe_entities(hass: HomeAssistant, entities: list[dict]) -> list[dict]:
     """Sample HA live meter entities so channel activity is observed, not guessed."""
