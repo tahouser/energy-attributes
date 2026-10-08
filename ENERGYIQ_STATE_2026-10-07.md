@@ -6,7 +6,7 @@ This is the current handoff/state document for the EnergyIQ project. It records 
 
 **Repository:** `tahouser/energy-attributes`  
 **Integration:** EnergyIQ  
-**Current version:** **3.1.425**  
+**Current version:** **3.1.426**  
 **Current focus:** Meter Detector / electrical-source discovery and commissioning  
 **Consumption page:** COMPLETE / LOCKED  
 **Cost page:** 3.1.404 behavior remains the baseline; do not disturb while Meter Detector work is underway unless explicitly requested.
@@ -355,7 +355,7 @@ Important sequence:
 
 **Meter Detector safe point: 3.1.418.**
 
-**Current commissioning revision: 3.1.425.**
+**Current commissioning revision: 3.1.426.**
 
 No GitHub release/tag should be assumed to exist merely because the version number exists. The repository has been updated directly through commits.
 
@@ -429,6 +429,40 @@ This is intentional:
 **Configuration = user defines how EnergyIQ operates**
 
 The detector should not become a second configuration screen.
+
+
+# 13C. Meter-selection safety correction — 3.1.426
+
+3.1.426 corrects a serious commissioning UX problem exposed during testing.
+
+For an EnergyIQ installation that already has a previously selected meter, the flow must **not** silently present a new meter list with the existing/first candidate effectively preselected. Submitting that form can replace the working whole-home power entity with a phase/channel entity and stop EnergyIQ readings.
+
+The corrected existing-meter flow presents explicit choices:
+
+- **KEEP CURRENT METER**
+- **DISCOVER A NEW METER**
+- **RESTORE PREVIOUSLY SAVED METER** when a persistent snapshot is available
+
+The existing meter is never changed by simply entering the flow.
+
+Fresh installation with no prior EnergyIQ state continues directly into:
+
+**Discovery → grouping → classification → automatic Class A interrogation → meter selection**
+
+Meter choices now explicitly show their detector classification (A/B/C/D), HA record count, measurement count, and power/energy counts.
+
+The aggregate power-entity chooser was also strengthened to prefer explicit total/aggregate/whole-home/mains entities over L1/L2/L3/phase/channel entities.
+
+### Important Home Assistant platform constraint
+
+Home Assistant's native reconfigure flow is explicitly designed to be started by the frontend/user; custom integrations are not supposed to force-start a reconfigure flow during an ordinary update. Therefore an integration cannot safely guarantee a native modal automatically popping merely because HACS updated the files.
+
+The intended safe behavior is:
+- fresh install: commissioning flow opens normally;
+- existing installation: current meter is protected and reconfigure offers Keep vs Discover;
+- if automatic update-time prompting is required, it must be implemented as a separate EnergyIQ frontend/repair workflow rather than by improperly forcing a native reconfigure flow from integration startup.
+
+Do not overwrite an existing meter during update/setup merely to make the flow appear.
 
 # 14. Current backend/frontend components
 
