@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import asyncio
+from types import SimpleNamespace
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
@@ -387,6 +388,72 @@ def discover_meters(hass: HomeAssistant) -> dict:
             "inference": _infer_electrical_system(device, entities),
         })
 
+    # Group HA device records that represent the same physical electrical source.
+    # Shelly Pro 3EM can appear as multiple HA device records for its channels.
+    grouped: dict[tuple[str, str, str], list[dict]] = {}
+    for candidate in candidates:
+        key = (
+            str(candidate["manufacturer"]).casefold().strip(),
+            str(candidate["model"]).casefold().strip(),
+            str(candidate["name"]).casefold().strip(),
+        )
+        grouped.setdefault(key, []).append(candidate)
+
+    merged_candidates = []
+    for members in grouped.values():
+        if len(members) == 1:
+            item = members[0]
+            item["group_id"] = item["device_id"]
+            item["member_device_ids"] = [item["device_id"]]
+            merged_candidates.append(item)
+            continue
+
+        primary = members[0]
+        all_entities = []
+        all_configs = []
+        member_ids = []
+        evidence = []
+        seen_entities = set()
+        seen_configs = set()
+        for member in members:
+            member_ids.append(member["device_id"])
+            for entity in member["entities"]:
+                if entity["entity_id"] not in seen_entities:
+                    seen_entities.add(entity["entity_id"])
+                    all_entities.append(entity)
+            for config in member["config_entries"]:
+                if config["entry_id"] not in seen_configs:
+                    seen_configs.add(config["entry_id"])
+                    all_configs.append(config)
+            for note in member["evidence"]:
+                if note not in evidence:
+                    evidence.append(note)
+
+        score = max(member["score"] for member in members)
+        if len([e for e in all_entities if e["kind"] == "power"]) >= 3:
+            score += 3
+            if "multiple power channels" not in evidence:
+                evidence.append("multiple power channels")
+
+        group_id = "group:" + primary["device_id"]
+        group_device = SimpleNamespace(
+            name=primary["name"], name_by_user=primary["name"],
+            manufacturer=primary["manufacturer"], model=primary["model"],
+        )
+        merged_candidates.append({
+            **primary,
+            "device_id": group_id,
+            "group_id": group_id,
+            "member_device_ids": member_ids,
+            "config_entries": all_configs,
+            "entities": sorted(all_entities, key=lambda x: (x["kind"], x["name"].casefold(), x["entity_id"])),
+            "score": score,
+            "meter_class": _meter_class(group_device, all_entities, all_configs),
+            "evidence": evidence + [f"{len(members)} HA device records grouped as one physical source"],
+            "inference": _infer_electrical_system(group_device, all_entities),
+        })
+
+    candidates = merged_candidates
     candidates.sort(key=lambda x: (-x["score"], x["name"].casefold()))
 
     unattached_rows = []
@@ -448,7 +515,7 @@ async def ws_meter_detector_probe(hass: HomeAssistant, connection, msg) -> None:
     report = discover_meters(hass)
     candidates = report.get("candidates", [])
     device_id = msg.get("device_id")
-    candidate = next((c for c in candidates if c["device_id"] == device_id), None) if device_id else (candidates[0] if candidates else None)
+    candidate = next((c for c in candidates if c.get("group_id", c["device_id"]) == device_id or c["device_id"] == device_id), None) if device_id else (candidates[0] if candidates else None)
     if candidate is None:
         raise ValueError("No meter candidate is available to interrogate")
     probe = await _probe_entities(hass, candidate["entities"])
