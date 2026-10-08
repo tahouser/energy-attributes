@@ -230,7 +230,9 @@ def _coordinator(hass: HomeAssistant, entry_id: str):
     entry = hass.config_entries.async_get_entry(entry_id)
     if entry is None:
         raise LookupError("Energy Attribution config entry not found")
-    coordinator = entry.runtime_data
+    coordinator = getattr(entry, "runtime_data", None)
+    if coordinator is None:
+        coordinator = hass.data.get(DOMAIN, {}).get("_coordinators", {}).get(entry_id)
     if coordinator is None or not hasattr(coordinator, "entry"):
         raise LookupError("Energy Attribution config entry is not loaded")
     return coordinator
@@ -276,7 +278,9 @@ async def ws_delete_data(hass, connection, msg):
 async def ws_list_entries(hass, connection, msg):
     entries = []
     for entry in hass.config_entries.async_entries(DOMAIN):
-        coordinator = entry.runtime_data
+        coordinator = getattr(entry, "runtime_data", None)
+        if coordinator is None:
+            coordinator = hass.data.get(DOMAIN, {}).get("_coordinators", {}).get(entry.entry_id)
         if coordinator is None or not hasattr(coordinator, "entry"):
             continue
         entries.append({"entry_id": entry.entry_id, "title": entry.title})
