@@ -549,6 +549,7 @@ async def ws_workspace(hass, connection, msg):
             "category": candidate.get("category", ""),
             "evidence": candidate.get("evidence", ""),
             "controls": candidate.get("controls", []),
+            "measurements": candidate.get("measurements", []),
             "classification": coordinator.device_classifications.get(did, "ignore"),
             "training": coordinator.training_state.get(did, {}),
             "current_power": _candidate_current_power(hass, candidate, coordinator.training_state.get(did, {})),
