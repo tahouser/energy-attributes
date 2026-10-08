@@ -1,6 +1,7 @@
 """Config flow for EnergyIQ."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
@@ -30,7 +31,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import CONF_MONITORED_ENTITIES, CONF_POWER_ENTITY, DOMAIN, TRAINING_SESSION
-from .meter_detector import discover_meters
+from .meter_detector import _probe_entities, discover_meters
 from .persistence import build_entry_data, get_store, has_saved_data, migrate_snapshot
 
 _LOGGER = logging.getLogger(__name__)
@@ -376,6 +377,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._saved_snapshot: dict[str, Any] | None = None
         self._detected_meters: list[dict[str, Any]] = []
         self._selected_meter: dict[str, Any] | None = None
+        self._meter_interrogation_task: asyncio.Task | None = None
+        self._meter_probe_results: dict[str, dict[str, Any]] = {}
 
     def _create_commissioned_entry(self, power_entity: str, deferred: bool):
         self._power_entity = power_entity
@@ -462,16 +465,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("restore_existing", default=True): bool,
             }))
 
-        # Meter Detector is the installation/commissioning step.
-        self._refresh_detected_meters()
-        if self._detected_meters:
-            class_a = [c for c in self._detected_meters if c.get("meter_class") == "A"]
-            self._detected_meters = class_a or self._detected_meters
-            return await self.async_step_meter_select()
-        return await self.async_step_manual_meter()
+        # Meter Detector is the installation/commissioning step. Discovery
+        # and Class A interrogation happen before the user is asked to choose.
+        return await self.async_step_meter_discovery()
 
     async def async_step_meter_select(self, user_input=None):
-        """Meter Detector selection: choose the physical source for EnergyIQ."""
+        """Present discovery/interrogation results and let the user choose the meter."""
         if not self._detected_meters:
             self._refresh_detected_meters()
         if user_input is not None:
@@ -482,22 +481,45 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if power:
                     return await self._finish_commissioning(power, selected)
             return await self.async_step_manual_meter()
+
         has_class_a = any(c.get("meter_class") == "A" for c in self._detected_meters)
+        options = sorted(
+            self._detected_meters,
+            key=lambda candidate: (
+                0 if candidate.get("meter_class") == "A" else 1,
+                str(candidate.get("name", "")).casefold(),
+            ),
+        )
+        probe_lines = []
+        for candidate in options:
+            if candidate.get("meter_class") != "A":
+                continue
+            result = self._meter_probe_results.get(
+                str(candidate.get("group_id") or candidate.get("device_id"))
+            )
+            if result is None:
+                continue
+            probe_lines.append(
+                f"{candidate.get('name', 'Class A meter')}: "
+                f"{result.get('active_channel_count', 0)} active / "
+                f"{result.get('channel_count_observed', 0)} channels observed"
+            )
+
+        summary = (
+            "Discovery complete. Every Class A source was automatically interrogated "
+            "for 30 seconds before this selection page. "
+            + ("; ".join(probe_lines) if probe_lines else "No Class A source required interrogation.")
+        )
+
         return self.async_show_form(
             step_id="meter_select",
             description_placeholders={
-                "description": (
-                    "EnergyIQ found a whole-home Class A source. Select the grouped "
-                    "physical meter you want EnergyIQ to use, then continue."
-                    if has_class_a else
-                    "EnergyIQ could not identify a Class A whole-home meter. Select "
-                    "the most useful electrical source it found, or choose a meter manually."
-                ),
+                "description": summary,
             },
             data_schema=vol.Schema({
                 vol.Required("meter"): SelectSelector(
                     SelectSelectorConfig(
-                        options=_commissioning_options(self._detected_meters),
+                        options=_commissioning_options(options),
                         mode=SelectSelectorMode.LIST,
                     )
                 ),
@@ -647,12 +669,85 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reconfigure(self, user_input=None):
         """Re-run the Meter Detector for an existing EnergyIQ entry."""
+        return await self.async_step_meter_discovery()
+
+    async def _interrogate_class_a_meters(self) -> None:
+        """Discover, group, classify, and automatically interrogate every Class A source."""
         self._refresh_detected_meters()
-        class_a = [c for c in self._detected_meters if c.get("meter_class") == "A"]
-        self._detected_meters = class_a or self._detected_meters
-        if self._detected_meters:
-            return await self.async_step_meter_select()
-        return await self.async_step_manual_meter()
+        class_a = [
+            candidate
+            for candidate in self._detected_meters
+            if str(candidate.get("meter_class", "")).upper() == "A"
+        ]
+
+        async def probe(candidate: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+            rows = await _probe_entities(self.hass, candidate.get("entities", []))
+            by_channel: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                channel = row.get("channel") or "unlabeled"
+                item = by_channel.setdefault(
+                    channel,
+                    {
+                        "channel": channel,
+                        "entities": [],
+                        "active": False,
+                        "reporting": False,
+                    },
+                )
+                item["entities"].append(row)
+                item["reporting"] = item["reporting"] or row.get("numeric_samples", 0) > 0
+                item["active"] = item["active"] or row.get("status") == "active signal"
+
+            channels = list(by_channel.values())
+            for item in channels:
+                item["assessment"] = (
+                    "likely populated / carrying measurable signal"
+                    if item["active"]
+                    else (
+                        "reporting, but zero during the probe — cannot prove CT is absent"
+                        if item["reporting"]
+                        else "not reporting during the probe"
+                    )
+                )
+
+            active_channels = sum(1 for item in channels if item["active"])
+            result = {
+                "device_id": candidate.get("device_id"),
+                "group_id": candidate.get("group_id"),
+                "device_name": candidate.get("name"),
+                "model": candidate.get("model"),
+                "probe_seconds": 30,
+                "sample_interval_seconds": 2,
+                "channels": channels,
+                "active_channel_count": active_channels,
+                "channel_count_observed": len(channels),
+            }
+            return str(candidate.get("group_id") or candidate.get("device_id")), result
+
+        if class_a:
+            results = await asyncio.gather(*(probe(candidate) for candidate in class_a))
+            self._meter_probe_results = dict(results)
+        else:
+            self._meter_probe_results = {}
+
+    async def async_step_meter_discovery(self, user_input=None):
+        """Run the Meter Detector before presenting a meter-selection form."""
+        if self._meter_interrogation_task is None:
+            self._meter_interrogation_task = self.hass.async_create_task(
+                self._interrogate_class_a_meters()
+            )
+
+        if not self._meter_interrogation_task.done():
+            return self.async_show_progress(
+                progress_action="meter_discovery",
+                progress_task=self._meter_interrogation_task,
+            )
+
+        self._refresh_detected_meters()
+        if not self._detected_meters:
+            return await self.async_step_manual_meter()
+
+        return self.async_show_progress_done(next_step_id="meter_select")
 
 
 
