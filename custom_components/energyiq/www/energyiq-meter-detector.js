@@ -157,7 +157,7 @@
       const candidates = Array.isArray(d.candidates) ? d.candidates : [];
       return `
         <section class="summary-grid">
-          <div class="selection-bar"><div><span class="eyebrow">EnergyIQ source selection</span><strong><span id="selected-count">0</span> selected</strong><small>Select the electrical sources EnergyIQ should work with. Class D devices are informational only.</small></div><button id="clear-selection" class="secondary" disabled>Clear</button></div>
+          <div class="selection-bar"><div><span class="eyebrow">EnergyIQ source selection</span><strong><span id="selected-count">${this.selected.size}</span> selected</strong><small>Select the electrical sources EnergyIQ should work with. Class D devices are informational only.</small></div><button id="clear-selection" class="secondary" ${this.selected.size ? "" : "disabled"}>Clear</button></div>
           <div class="metric"><span>Likely meters</span><strong>${d.candidate_count}</strong><small>Ranked from HA metadata</small></div>
           <div class="metric"><span>Detection depth</span><strong>Device + entity</strong><small>Registry, metadata & live state</small></div>
           <div class="metric"><span>Saved</span><strong>Nothing</strong><small>Diagnostic only</small></div>
