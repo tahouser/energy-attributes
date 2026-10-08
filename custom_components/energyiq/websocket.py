@@ -303,7 +303,6 @@ async def ws_set_power_source(hass, connection, msg):
         raise ValueError("Choose at least one active power sensor.")
     mode = str(msg.get("mode") or "single_channel")
     registry = er.async_get(hass)
-    devices = set()
     rows = []
     for entity_id in entity_ids:
         entity = registry.async_get(entity_id)
@@ -322,7 +321,6 @@ async def ws_set_power_source(hass, connection, msg):
         if numeric != numeric or numeric in (float("inf"), float("-inf")):
             raise ValueError("Every selected meter channel must currently report a usable value.")
         role = _power_role(str(attrs.get("friendly_name") or entity.name or entity_id), entity_id)
-        devices.add(entity.device_id)
         rows.append((entity_id, entity, state, role))
     if len(entity_ids) > 1:
         # The detector has already established these channels as one logical
