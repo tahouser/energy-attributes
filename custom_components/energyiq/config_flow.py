@@ -8,6 +8,7 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import SOURCE_RECONFIGURE
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
@@ -415,7 +416,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         candidate: dict[str, Any] | None,
     ):
         """Create a new entry or update an existing entry with the selected meter."""
-        if self.source == config_entries.SOURCE_RECONFIGURE:
+        if self.source == SOURCE_RECONFIGURE:
             update_data = self._commissioning_update_data(power_entity, candidate)
             return self.async_update_reload_and_abort(
                 self._get_reconfigure_entry(),
