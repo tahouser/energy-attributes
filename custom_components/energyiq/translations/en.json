@@ -73,6 +73,9 @@
         }
       }
     },
+    "progress": {
+      "meter_discovery": "Discovering and interrogating EnergyIQ meter sources…"
+    },
     "abort": {}
   },
   "options": {
