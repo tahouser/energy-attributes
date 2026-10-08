@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v339";
-  const VERSION = "43300";
-  const UI_VERSION = "3.1.433";
+  const VERSION = "43700";
+  const UI_VERSION = "3.1.437";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon@2x.png?v=43300";
+      this.brandUrl = "/energyiq-brand/icon@2x.png?v=43700";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -248,45 +248,233 @@ hasPendingChanges() {
 
     toggleConfiguration(section) {
       this.configurationSection = this.configurationSection === section ? null : section;
+      this.configurationNotice = "";
       this.render();
     }
+
     closeConfiguration() {
       this.configurationSection = null;
       this.configurationOpen = false;
+      this.configurationNotice = "";
       this.render();
     }
-    openHaConfiguration() {
-      window.location.href = "/config/integrations/integration/energyiq";
-    }
+
     openMeterDetector() {
       window.location.href = "/energyiq-meter-detector";
     }
+
+    _configPeriod(section, period) {
+      const source = this.workspace?.[section] || {};
+      return source?.[period] || {yellow: 1, red: 2};
+    }
+
+    _configDays(window) {
+      return Array.isArray(window?.days) ? window.days.map(Number) : [1,2,3,4,5];
+    }
+
+    renderDayChecks(name, selected) {
+      const days = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+      const set = new Set((selected || []).map(Number));
+      return '<div class="config-days">' + days.map((day,index) =>
+        '<label><input type="checkbox" name="' + name + '" value="' + index + '"' + (set.has(index) ? ' checked' : '') + '><span>' + day + '</span></label>'
+      ).join("") + '</div>';
+    }
+
+    renderPeakPeriod(label, prefix, window, optional) {
+      const value = window || {start: "15:00:00", end: "19:00:00", days: [1,2,3,4,5]};
+      return '<div class="config-subsection">' +
+        '<div class="config-subhead"><strong>' + label + '</strong>' + (optional ? '<label class="config-inline-check"><input id="peak-period-2-enabled" type="checkbox" ' + (window ? 'checked' : '') + '> Use a second Peak period</label>' : '') + '</div>' +
+        '<div class="config-grid two"><label>Start<input id="' + prefix + '-start" type="time" value="' + this.escape(String(value.start).slice(0,5)) + '"></label><label>End<input id="' + prefix + '-end" type="time" value="' + this.escape(String(value.end).slice(0,5)) + '"></label></div>' +
+        '<span class="config-label">Days</span>' + this.renderDayChecks(prefix + '-day', value.days) +
+        '</div>';
+    }
+
+    renderUtilityCosts(costs) {
+      const rows = Array.isArray(costs) ? costs : [];
+      const bases = [
+        ["monthly","Monthly"],
+        ["daily","Daily"],
+        ["per_kwh","Per kWh"],
+        ["percentage","Percentage"]
+      ];
+      return '<div class="config-subsection"><div class="config-subhead"><strong>Additional utility costs</strong><small>Optional · up to four</small></div>' +
+        [0,1,2,3].map(i => {
+          const item = rows[i] || {};
+          return '<div class="utility-cost-row">' +
+            '<input id="utility-cost-' + i + '-name" type="text" placeholder="Cost name" value="' + this.escape(item.name || '') + '">' +
+            '<select id="utility-cost-' + i + '-basis">' + bases.map(([value,label]) => '<option value="' + value + '"' + (item.basis === value ? ' selected' : '') + '>' + label + '</option>').join('') + '</select>' +
+            '<input id="utility-cost-' + i + '-amount" type="number" min="0" step="0.001" placeholder="Amount" value="' + (item.amount ?? '') + '">' +
+          '</div>';
+        }).join("") + '</div>';
+    }
+
     renderConfigurationDialog() {
       if (!this.configurationOpen) return "";
       const sections = [
-        ["meter_properties", "Meter Properties", "The whole-home meter EnergyIQ uses for its calculations."],
-        ["general", "General", "Currency and Home Assistant time zone."],
-        ["consumption_limits", "Consumption Limits", "Consumption thresholds used by EnergyIQ."],
-        ["cost_limits", "Cost Limits", "Cost thresholds used by EnergyIQ."],
-        ["peak_time_window", "Peak Time Window", "When Peak rates and Peak consumption settings apply."],
-        ["utility_search", "Utility Search", "Find utility rates by ZIP code, with manual entry available."]
+        ["meter_properties", "Meter Properties", "Choose the whole-home power source EnergyIQ uses."],
+        ["general", "General", "Simple global settings used throughout EnergyIQ."],
+        ["consumption_limits", "Consumption Limits", "Set the levels EnergyIQ uses for normal, elevated, and high usage."],
+        ["cost_limits", "Cost Limits", "Set the levels EnergyIQ uses for normal, elevated, and high spending."],
+        ["peak_time_window", "Peak Time Window", "Set when Peak rates and Peak consumption settings apply."],
+        ["utility_search", "Utility Search", "Find your utility by ZIP code and confirm or edit the rate information."]
       ];
-      const active = sections.find(item => item[0] === this.configurationSection);
-      let body = "";
-      if (active?.[0] === "meter_properties") {
-        const entityId = this.workspace?.power_entity || "";
-        const state = entityId ? this.hass?.states?.[entityId] : null;
-        const meterName = state?.attributes?.friendly_name || entityId || "No whole-home meter selected";
-        body = '<div class="config-detail"><strong>Whole-home meter</strong><p>EnergyIQ is currently using <b>' + this.escape(meterName) + '</b> as its whole-home power source.</p><p>This meter provides the electrical data used for consumption and cost calculations.</p><div class="config-detail-actions"><button type="button" id="open-meter-detector">Change or discover a different meter</button></div></div>';
-      } else if (active?.[0] === "general") {
-        const currency = String(this.workspace?.currency || this.workspace?.options?.currency || "USD");
+      const active = this.configurationSection;
+      const entityId = this.workspace?.power_entity || "";
+      const state = entityId ? this.hass?.states?.[entityId] : null;
+      const meterName = state?.attributes?.friendly_name || entityId || "No whole-home meter selected";
+      const currentWatts = state && Number.isFinite(Number(state.state)) ? Number(state.state) : null;
+      const utility = this.utilityLookup || this.workspace?.utility || {};
+      const consumption = this.workspace?.consumption_limits || {};
+      const costs = this.workspace?.cost_limits || {};
+      const windows = Array.isArray(this.workspace?.peak_time_windows) ? this.workspace.peak_time_windows : [];
+      let body = '<div class="config-detail">';
+
+      if (active === "meter_properties") {
+        body += '<strong>Whole-home meter</strong><p>EnergyIQ is using <b>' + this.escape(meterName) + '</b>' +
+          (currentWatts != null ? ' and currently sees <b>' + currentWatts.toFixed(0) + ' W</b>.' : '.</p>') +
+          '<p>This is the electrical source used for EnergyIQ calculations. Choose the actual total active-power entity, not an individual phase.</p>' +
+          '<div class="config-detail-actions"><button type="button" id="open-meter-detector" class="primary">Change or discover meter</button></div>';
+      } else if (active === "general") {
+        const currency = String(this.workspace?.currency || "USD");
         const timeZone = this.hass?.config?.timeZone || "Home Assistant time zone";
-        body = '<div class="config-detail"><strong>General settings</strong><p>Currency: <b>' + this.escape(currency) + '</b></p><p>Time zone: <b>' + this.escape(timeZone) + '</b> (from Home Assistant)</p><div class="config-detail-actions"><button type="button" id="open-ha-config">Change General settings</button></div></div>';
-      } else {
-        body = '<div class="config-detail"><p>Configuration settings for this area will appear here.</p></div>';
+        body += '<strong>General settings</strong><div class="config-grid single"><label>Currency<input id="config-currency" maxlength="3" value="' + this.escape(currency) + '"></label></div>' +
+          '<p>Time zone is taken from Home Assistant: <b>' + this.escape(timeZone) + '</b>.</p>' +
+          '<div class="config-detail-actions"><button type="button" id="save-config" class="primary">Save General</button></div>';
+      } else if (active === "consumption_limits") {
+        const peak = consumption.peak || {yellow: 1, red: 2};
+        const off = consumption.off_peak || {yellow: 1, red: 2};
+        body += '<strong>Consumption levels</strong><p>Set the usage thresholds EnergyIQ uses to color consumption as green, yellow, or red.</p>' +
+          '<div class="config-subsection"><div class="config-subhead"><strong>Peak</strong><span>kWh</span></div><div class="config-grid two"><label>Green → Yellow<input id="cons-peak-yellow" type="number" min="0" step="0.1" value="' + (peak.yellow ?? 1) + '"></label><label>Yellow → Red<input id="cons-peak-red" type="number" min="0" step="0.1" value="' + (peak.red ?? 2) + '"></label></div></div>' +
+          '<div class="config-subsection"><div class="config-subhead"><strong>Off-Peak</strong><span>kWh</span></div><div class="config-grid two"><label>Green → Yellow<input id="cons-off-yellow" type="number" min="0" step="0.1" value="' + (off.yellow ?? 1) + '"></label><label>Yellow → Red<input id="cons-off-red" type="number" min="0" step="0.1" value="' + (off.red ?? 2) + '"></label></div></div>' +
+          '<div class="config-detail-actions"><button type="button" id="save-config" class="primary">Save Consumption Limits</button></div>';
+      } else if (active === "cost_limits") {
+        const peak = costs.peak || {yellow: 0.25, red: 0.50};
+        const off = costs.off_peak || {yellow: 0.15, red: 0.30};
+        body += '<strong>Cost levels</strong><p>Set the spending thresholds EnergyIQ uses to color costs as green, yellow, or red.</p>' +
+          '<div class="config-subsection"><div class="config-subhead"><strong>Peak</strong><span>$</span></div><div class="config-grid two"><label>Green → Yellow<input id="cost-peak-yellow" type="number" min="0" step="0.01" value="' + (peak.yellow ?? 0.25) + '"></label><label>Yellow → Red<input id="cost-peak-red" type="number" min="0" step="0.01" value="' + (peak.red ?? 0.50) + '"></label></div></div>' +
+          '<div class="config-subsection"><div class="config-subhead"><strong>Off-Peak</strong><span>$</span></div><div class="config-grid two"><label>Green → Yellow<input id="cost-off-yellow" type="number" min="0" step="0.01" value="' + (off.yellow ?? 0.15) + '"></label><label>Yellow → Red<input id="cost-off-red" type="number" min="0" step="0.01" value="' + (off.red ?? 0.30) + '"></label></div></div>' +
+          '<div class="config-detail-actions"><button type="button" id="save-config" class="primary">Save Cost Limits</button></div>';
+      } else if (active === "peak_time_window") {
+        body += '<strong>Peak schedule</strong><p>Peak Time Window controls when Peak and Off-Peak apply. You can define up to two Peak periods per day.</p>' +
+          this.renderPeakPeriod("Peak period 1", "peak-1", windows[0], false) +
+          this.renderPeakPeriod("Peak period 2", "peak-2", windows[1], true) +
+          '<div class="config-detail-actions"><button type="button" id="save-config" class="primary">Save Peak Time Window</button></div>';
+      } else if (active === "utility_search") {
+        const lookup = this.utilityLookup;
+        body += '<strong>Utility and rates</strong><p>Enter your ZIP code to identify the utility. The lookup provides an average residential rate when available; Peak and Off-Peak rates can be edited below.</p>' +
+          '<div class="config-grid utility-lookup"><label>ZIP code<input id="utility-zip" inputmode="numeric" maxlength="5" value="' + this.escape(lookup?.zip_code || utility.zip_code || '') + '"></label><div class="config-detail-actions"><button type="button" id="lookup-utility" class="primary">Look up utility</button></div></div>';
+        if (lookup?.found || utility.name) {
+          body += '<div class="config-subsection"><div class="config-subhead"><strong>' + this.escape(lookup?.utility_name || utility.name || 'Utility') + '</strong><small>' + this.escape(lookup?.source || utility.lookup_source || 'Saved information') + '</small></div>' +
+            '<div class="config-grid two"><label>Utility name<input id="utility-name" value="' + this.escape(lookup?.utility_name || utility.name || '') + '"></label><label>Rate plan<input id="utility-rate-plan" value="' + this.escape(lookup?.rate_plan || utility.rate_plan || '') + '"></label></div>' +
+            '<div class="config-grid three"><label>Average residential ($/kWh)<input id="utility-average" type="number" min="0" step="0.0001" value="' + (lookup?.average_rate ?? utility.average_rate ?? '') + '"></label><label>Peak ($/kWh)<input id="utility-peak" type="number" min="0" step="0.0001" value="' + (lookup?.peak_rate ?? utility.peak_rate ?? '') + '"></label><label>Off-Peak ($/kWh)<input id="utility-off" type="number" min="0" step="0.0001" value="' + (lookup?.off_peak_rate ?? utility.off_peak_rate ?? '') + '"></label></div>' +
+            this.renderUtilityCosts(lookup?.costs || utility.costs || []) +
+            '<div class="config-detail-actions"><button type="button" id="save-config" class="primary">Save Utility Settings</button></div></div>';
+        } else {
+          body += '<div class="config-note">No utility information is saved yet. Enter a ZIP code and use Look up utility.</div>';
+        }
       }
-      return '<div class="config-backdrop"><div class="config-dialog" role="dialog" aria-modal="true" aria-label="EnergyIQ Configuration"><div class="config-head"><div><span class="eyebrow">ENERGYIQ</span><h2>Configuration</h2></div><button id="close-config" type="button" aria-label="Close">×</button></div><div class="config-list">' + sections.map(item => '<button type="button" class="config-row ' + (this.configurationSection === item[0] ? "expanded" : "") + '" data-config-section="' + item[0] + '"><span class="config-chevron">' + (this.configurationSection === item[0] ? "▾" : "▸") + '</span><span><strong>' + item[1] + '</strong><small>' + item[2] + '</small></span></button>' + (this.configurationSection === item[0] ? body : "")).join("") + "</div></div></div>";
+
+      body += '</div>';
+      const notice = this.configurationNotice ? '<div class="config-notice">' + this.escape(this.configurationNotice) + '</div>' : '';
+      return '<div class="config-backdrop"><div class="config-dialog" role="dialog" aria-modal="true" aria-label="EnergyIQ Configuration">' +
+        '<div class="config-head"><div><span class="eyebrow">ENERGYIQ</span><h2>Configuration</h2></div><button id="close-config" type="button" aria-label="Close">×</button></div>' +
+        notice +
+        '<div class="config-list">' +
+        sections.map(item => '<button type="button" class="config-row ' + (this.configurationSection === item[0] ? "expanded" : "") + '" data-config-section="' + item[0] + '"><span class="config-chevron">' + (this.configurationSection === item[0] ? "▾" : "▸") + '</span><span><strong>' + item[1] + '</strong><small>' + item[2] + '</small></span></button>' + (this.configurationSection === item[0] ? body : "")).join("") +
+        '</div></div></div>';
     }
+
+    async saveConfigurationSection() {
+      const section = this.configurationSection;
+      if (!section) return;
+      try {
+        let updates = {};
+        if (section === "general") {
+          updates.currency = this.querySelector("#config-currency")?.value?.trim()?.toUpperCase();
+        } else if (section === "consumption_limits") {
+          updates.consumption_limits = {
+            peak: {yellow: Number(this.querySelector("#cons-peak-yellow")?.value), red: Number(this.querySelector("#cons-peak-red")?.value)},
+            off_peak: {yellow: Number(this.querySelector("#cons-off-yellow")?.value), red: Number(this.querySelector("#cons-off-red")?.value)}
+          };
+        } else if (section === "cost_limits") {
+          updates.cost_limits = {
+            peak: {yellow: Number(this.querySelector("#cost-peak-yellow")?.value), red: Number(this.querySelector("#cost-peak-red")?.value)},
+            off_peak: {yellow: Number(this.querySelector("#cost-off-yellow")?.value), red: Number(this.querySelector("#cost-off-red")?.value)}
+          };
+        } else if (section === "peak_time_window") {
+          const readPeriod = (prefix, enabled=true) => {
+            if (!enabled) return null;
+            const start = this.querySelector("#" + prefix + "-start")?.value;
+            const end = this.querySelector("#" + prefix + "-end")?.value;
+            const days = [...this.querySelectorAll('input[name="' + prefix + '-day"]:checked')].map(x => Number(x.value));
+            if (!start || !end || start === end || !days.length) throw new Error("Each Peak period needs different times and at least one day.");
+            return {start: start + ":00", end: end + ":00", days};
+          };
+          const first = readPeriod("peak-1");
+          const secondEnabled = !!this.querySelector("#peak-period-2-enabled")?.checked;
+          const second = readPeriod("peak-2", secondEnabled);
+          updates.peak_time_windows = second ? [first, second] : [first];
+        } else if (section === "utility_search") {
+          const name = this.querySelector("#utility-name")?.value?.trim() || "";
+          const ratePlan = this.querySelector("#utility-rate-plan")?.value?.trim() || "";
+          const zip = this.querySelector("#utility-zip")?.value?.trim() || "";
+          const avg = this.querySelector("#utility-average")?.value;
+          const peak = this.querySelector("#utility-peak")?.value;
+          const off = this.querySelector("#utility-off")?.value;
+          if (!name) throw new Error("Look up your utility first, or enter a utility name.");
+          const utilityCosts = [];
+          for (let i=0;i<4;i++) {
+            const n=this.querySelector("#utility-cost-"+i+"-name")?.value?.trim() || "";
+            const a=this.querySelector("#utility-cost-"+i+"-amount")?.value;
+            const b=this.querySelector("#utility-cost-"+i+"-basis")?.value || "monthly";
+            if (n || a) {
+              if (!n || a === "") throw new Error("Complete each additional utility cost row or leave it blank.");
+              utilityCosts.push({name:n, basis:b, amount:Number(a)});
+            }
+          }
+          updates = {
+            utility_zip_code: zip,
+            utility_name: name,
+            utility_rate_plan: ratePlan,
+            utility_average_rate: avg === "" ? null : Number(avg),
+            utility_peak_rate: peak === "" ? null : Number(peak),
+            utility_off_peak_rate: off === "" ? null : Number(off),
+            utility_lookup_year: this.utilityLookup?.year ?? this.workspace?.utility?.lookup_year ?? null,
+            utility_lookup_source: this.utilityLookup?.source || this.workspace?.utility?.lookup_source || "manual",
+            utility_costs: utilityCosts
+          };
+        } else {
+          return;
+        }
+
+        await this.ws({type:"energy_attribution/update_configuration", entry_id:this.entryId, updates});
+        this.configurationNotice = "Saved.";
+        this.utilityLookup = null;
+        await this.refresh(true);
+      } catch (error) {
+        this.configurationNotice = error?.message || String(error);
+        this.render();
+      }
+    }
+
+    async lookupUtility() {
+      const zip = this.querySelector("#utility-zip")?.value?.trim() || "";
+      try {
+        const result = await this.ws({type:"energy_attribution/utility_lookup", entry_id:this.entryId, zip_code:zip});
+        if (!result.found) {
+          this.configurationNotice = "No utility match was found. You can enter the utility and rates manually.";
+          this.utilityLookup = {zip_code: zip, found: false};
+        } else {
+          this.configurationNotice = "Utility found. Review the information below, then save it.";
+          this.utilityLookup = result;
+        }
+        this.render();
+      } catch (error) {
+        this.configurationNotice = error?.message || String(error);
+        this.render();
+      }
+    }
+
     renderLoading() { this.innerHTML = `<ha-card class="loading"><h2>EnergyIQ</h2><p>Loading workspace…</p></ha-card>`; }
     renderError(error) { this.innerHTML = `<ha-card class="error"><h2>EnergyIQ</h2><p>${this.escape(error?.message || error)}</p></ha-card>`; }
 
@@ -473,7 +661,8 @@ ${selected ? `<div class="selection-bar"><div class="selection-count"><span clas
       this.querySelector(".config-backdrop")?.addEventListener("click",event=>{if(event.target.classList.contains("config-backdrop"))this.closeConfiguration();});
       this.querySelectorAll("[data-config-section]").forEach(button=>button.addEventListener("click",()=>this.toggleConfiguration(button.dataset.configSection)));
       this.querySelector("#open-meter-detector")?.addEventListener("click",()=>this.openMeterDetector());
-      this.querySelector("#open-ha-config")?.addEventListener("click",()=>this.openHaConfiguration());
+      this.querySelector("#save-config")?.addEventListener("click",()=>this.saveConfigurationSection());
+      this.querySelector("#lookup-utility")?.addEventListener("click",()=>this.lookupUtility());
       this.querySelector("#save")?.addEventListener("click",()=>this.saveChanges());
       this.querySelector("#data-management")?.addEventListener("click",()=>this.openDataManagement());
       this.bindSummaryActions();
@@ -678,7 +867,7 @@ this.querySelector("#begin-training")?.addEventListener("click",()=>this.beginSe
       :host{display:block;min-height:100vh;color:var(--primary-text-color)}.header-guard{position:fixed;top:0;left:0;right:0;height:var(--safe-area-inset-top,0px);z-index:2147483646;background:var(--primary-background-color,#111)}.shell{min-height:100vh;box-sizing:border-box;padding:180px 24px 22px;max-width:1680px;margin:auto;display:block;overflow:visible;overscroll-behavior:none}
       header{position:fixed;top:var(--safe-area-inset-top,0px);left:var(--app-drawer-width,0px);right:var(--safe-area-content-inset-right,0px);z-index:2147483647;isolation:isolate;overflow:hidden;margin:0;padding:22px 28px 28px;background:#06121d;border-bottom:1px solid rgba(42,194,255,.35);box-shadow:0 10px 30px rgba(0,0,0,.38);box-sizing:border-box}header:after{content:"";position:absolute;left:38%;right:-4%;bottom:-30px;height:92px;background:linear-gradient(180deg,transparent 0 28%,rgba(20,242,184,.04) 29%,rgba(20,242,184,.18) 31%,transparent 34%),linear-gradient(168deg,transparent 0 45%,rgba(20,242,184,.05) 46%,rgba(20,242,184,.65) 48%,rgba(28,205,255,.9) 50%,rgba(28,205,255,.18) 52%,transparent 54%);filter:blur(.2px);transform:skewX(-10deg);pointer-events:none}header:before{content:"";position:absolute;left:46%;right:-3%;bottom:-18px;height:76px;border-top:2px solid rgba(20,242,184,.7);border-radius:55% 45% 0 0;transform:rotate(-11deg);box-shadow:0 -4px 16px rgba(20,242,184,.22),0 -1px 5px rgba(30,210,255,.5);pointer-events:none}.title-row{position:relative;z-index:2;display:flex;align-items:center;gap:15px;max-width:1624px;margin:auto}.brand-logo{flex:none}.back-button{width:40px;height:40px;display:grid;place-items:center;padding:0;border:0;border-radius:50%;background:transparent;color:var(--primary-text-color);margin-left:-4px;flex:none;cursor:pointer}.back-button ha-icon{--mdc-icon-size:28px;color:var(--primary-text-color)}.back-button:hover{background:var(--secondary-background-color)}
       .config-button{width:40px;height:40px;display:grid;place-items:center;padding:0;border:1px solid var(--divider-color);border-radius:50%;background:rgba(255,255,255,.04);color:var(--secondary-text-color);margin-left:auto;flex:none;cursor:pointer}.config-button ha-icon{--mdc-icon-size:24px}.config-button:hover{color:var(--primary-text-color);border-color:#36c8ff;background:rgba(54,200,255,.08)}
-      .config-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;padding:16px}.config-dialog{width:min(620px,100%);max-height:88vh;overflow:auto;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:16px;box-shadow:var(--ha-card-box-shadow);padding:18px}.config-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px}.config-head h2{margin:0;font-size:1.35rem}.config-head button{width:38px;height:38px;padding:0;border:0;border-radius:50%;font-size:1.6rem;background:var(--secondary-background-color)}.config-list{display:flex;flex-direction:column;gap:7px}.config-row{display:grid;grid-template-columns:28px 1fr;align-items:center;text-align:left;width:100%;padding:12px 13px;border:1px solid var(--divider-color);border-radius:10px;background:var(--secondary-background-color);color:var(--primary-text-color)}.config-row:hover{transform:none;border-color:#36c8ff}.config-row.expanded{border-color:#36c8ff;border-bottom-left-radius:0;border-bottom-right-radius:0}.config-row strong{display:block;font-size:15px}.config-row small{display:block;margin-top:3px;color:var(--secondary-text-color);font-size:11px;line-height:1.35}.config-chevron{font-size:21px;color:#36c8ff}.config-detail{margin:-7px 0 0;padding:12px 14px 14px 41px;border:1px solid #36c8ff;border-top:0;border-radius:0 0 10px 10px;background:rgba(54,200,255,.05)}.config-detail strong{font-size:13px}.config-detail p{margin:5px 0 0;font-size:11px;color:var(--secondary-text-color)}.config-detail-actions{display:flex;gap:8px;margin-top:10px}.config-detail-actions button{font-size:12px;padding:7px 10px}
+      .config-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;padding:16px}.config-dialog{width:min(620px,100%);max-height:88vh;overflow:auto;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:16px;box-shadow:var(--ha-card-box-shadow);padding:18px}.config-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:10px}.config-head h2{margin:0;font-size:1.35rem}.config-head button{width:38px;height:38px;padding:0;border:0;border-radius:50%;font-size:1.6rem;background:var(--secondary-background-color)}.config-list{display:flex;flex-direction:column;gap:7px}.config-row{display:grid;grid-template-columns:28px 1fr;align-items:center;text-align:left;width:100%;padding:12px 13px;border:1px solid var(--divider-color);border-radius:10px;background:var(--secondary-background-color);color:var(--primary-text-color)}.config-row:hover{transform:none;border-color:#36c8ff}.config-row.expanded{border-color:#36c8ff;border-bottom-left-radius:0;border-bottom-right-radius:0}.config-row strong{display:block;font-size:15px}.config-row small{display:block;margin-top:3px;color:var(--secondary-text-color);font-size:11px;line-height:1.35}.config-chevron{font-size:21px;color:#36c8ff}.config-detail{margin:-7px 0 0;padding:12px 14px 14px 41px;border:1px solid #36c8ff;border-top:0;border-radius:0 0 10px 10px;background:rgba(54,200,255,.05)}.config-detail strong{font-size:13px}.config-detail p{margin:5px 0 0;font-size:11px;color:var(--secondary-text-color)}.config-detail-actions{display:flex;gap:8px;margin-top:10px}.config-detail-actions button{font-size:12px;padding:7px 10px}.config-grid{display:grid;gap:9px;margin-top:10px}.config-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.config-grid.three{grid-template-columns:repeat(3,minmax(0,1fr))}.config-grid.single{grid-template-columns:minmax(0,220px)}.config-grid label,.config-subsection label{display:flex;flex-direction:column;gap:5px;font-size:11px;color:var(--secondary-text-color)}.config-grid input,.config-grid select,.utility-cost-row input,.utility-cost-row select{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid var(--divider-color);border-radius:8px;background:var(--primary-background-color);color:var(--primary-text-color);font:inherit}.config-subsection{margin-top:12px;padding-top:10px;border-top:1px solid var(--divider-color)}.config-subhead{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:7px}.config-subhead strong{font-size:12px}.config-subhead span,.config-subhead small{color:var(--secondary-text-color);font-size:10px}.config-label{display:block;margin:10px 0 5px;font-size:11px;color:var(--secondary-text-color)}.config-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px}.config-days label{display:block;text-align:center}.config-days input{position:absolute;opacity:0}.config-days span{display:block;padding:6px 2px;border:1px solid var(--divider-color);border-radius:7px;font-size:10px}.config-days input:checked+span{border-color:#36c8ff;background:rgba(54,200,255,.12);color:#36c8ff}.config-inline-check{display:flex;align-items:center;gap:5px;font-size:10px;color:var(--secondary-text-color)}.config-inline-check input{width:auto}.utility-cost-row{display:grid;grid-template-columns:1.4fr 1fr .8fr;gap:7px;margin-top:7px}.config-note,.config-notice{margin:9px 0;padding:9px 10px;border:1px solid var(--divider-color);border-radius:8px;background:rgba(54,200,255,.05);font-size:11px;color:var(--secondary-text-color)}.config-notice{border-color:rgba(20,242,184,.4);color:var(--primary-text-color)}
       .brand-logo{width:60px;height:60px;flex:none;display:grid;place-items:center}.brand-logo-image{width:60px;height:60px;display:block;object-fit:contain}.brand-copy{min-width:0}.brand-name-row{display:flex;align-items:baseline;gap:18px;flex-wrap:wrap}.tagline{font-size:20px;font-weight:600;font-style:italic;color:#36c8ff;white-space:nowrap}h1{margin:0 0 4px;font-size:31px;letter-spacing:.01em}p{margin:0;color:var(--secondary-text-color)}
       .meter-section{margin:0 0 16px;padding:14px 0 2px}.section-heading{display:flex;justify-content:space-between;align-items:flex-end;gap:14px;margin:0 2px 9px}.section-heading h2{font-size:17px;margin:0 0 2px}.section-heading p{font-size:11px}.meter-count{font-size:11px;color:var(--secondary-text-color);border:1px solid var(--divider-color);border-radius:999px;padding:5px 9px;white-space:nowrap}.meter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(245px,1fr));gap:10px}.meter-card{border:1px solid var(--divider-color);border-radius:12px;padding:13px;background:linear-gradient(145deg,rgba(15,27,40,.94),rgba(9,20,31,.9));box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}.meter-card.active-meter{border-color:rgba(20,242,184,.4);box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 0 18px rgba(20,242,184,.05)}.meter-card-head{display:flex;align-items:center;gap:9px}.meter-card-head>div:nth-child(2){min-width:0;flex:1}.meter-icon{width:31px;height:31px;border-radius:9px;display:grid;place-items:center;background:rgba(28,205,255,.1);color:#36c8ff;font-size:22px;font-weight:800}.meter-card-head strong{display:block;font-size:14px}.meter-card-head small{display:block;color:var(--secondary-text-color);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meter-status{font-size:9px;font-weight:800;letter-spacing:.07em;padding:4px 7px;border-radius:999px}.meter-status.on{background:rgba(20,242,184,.14);color:#35e7b0;border:1px solid rgba(20,242,184,.35)}.meter-status.idle{background:rgba(255,255,255,.06);color:var(--secondary-text-color);border:1px solid var(--divider-color)}.meter-power{display:flex;align-items:baseline;gap:8px;margin:11px 0 9px}.meter-power strong{font-size:26px;font-variant-numeric:tabular-nums}.meter-power span{font-size:10px;color:var(--secondary-text-color)}.meter-details{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}.meter-details>div{padding:8px;border-radius:8px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.045)}.meter-details span{display:block;font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--secondary-text-color)}.meter-details strong{display:block;margin-top:3px;font-size:12px;font-variant-numeric:tabular-nums}.meter-source{margin-top:9px;font-size:9px;color:var(--secondary-text-color);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
       .upper-config-toggle-wrap{display:none}.upper-config.collapsed{display:none}.upper-config-toggle{display:inline-flex;align-items:center;gap:7px;padding:4px 8px;border:0;background:transparent;color:var(--secondary-text-color);font-size:11px;letter-spacing:.04em;text-transform:uppercase}.upper-config-toggle:hover{background:transparent;color:var(--primary-text-color);transform:none}.upper-config-chevron{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;font-size:21px;color:#36c8ff}.summary{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px;margin:0 0 16px}.metric-button{appearance:none;text-align:left;font:inherit;color:inherit;cursor:pointer}.metric-button:hover{border-color:var(--primary-color)}.active-consumer-backdrop{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.58);display:flex;align-items:center;justify-content:center;padding:16px}.active-consumer-dialog{width:min(460px,100%);max-height:82vh;overflow:auto;background:var(--card-background-color);border:1px solid var(--divider-color);border-radius:14px;box-shadow:var(--ha-card-box-shadow);padding:16px;box-sizing:border-box}.active-consumer-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.active-consumer-head h2{margin:2px 0 2px;font-size:1.3rem}.active-consumer-head p{margin:0;color:var(--secondary-text-color);font-size:.8rem}.active-consumer-head button{width:38px;height:38px;padding:0;border:0;border-radius:50%;background:var(--secondary-background-color);color:var(--primary-text-color);font-size:1.5rem}.active-consumer-row{display:flex;justify-content:space-between;gap:12px;padding:10px 2px;border-bottom:1px solid var(--divider-color)}.active-consumer-row span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.active-consumer-row strong{white-space:nowrap;font-variant-numeric:tabular-nums}.active-consumer-empty{text-align:center;padding:24px;color:var(--secondary-text-color)}.metric{padding:13px 14px;border:1px solid var(--divider-color);border-radius:12px;background:linear-gradient(145deg,var(--card-background-color),rgba(20,31,44,.65));display:flex;flex-direction:column;gap:3px;min-width:0}.metric span{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--secondary-text-color)}.metric strong{font-size:22px;font-variant-numeric:tabular-nums}.metric small{font-size:10px;color:var(--secondary-text-color)}.metric.mystery{border-color:rgba(54,200,255,.35)}
