@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "41300";
+  const VERSION = "41400";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
