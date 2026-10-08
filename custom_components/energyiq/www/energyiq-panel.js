@@ -549,7 +549,6 @@ hasPendingChanges() {
         <div class="upper-config-toggle-wrap"><button id="toggle-upper-sections-gear" class="workspace-gear-toggle" type="button" title="Expand or collapse Workspace Overview" aria-label="Expand or collapse Workspace Overview" aria-expanded="${this.upperSectionsCollapsed ? "false" : "true"}" aria-controls="upper-config"><ha-icon icon="mdi:cog-outline"></ha-icon></button><button id="toggle-upper-sections" class="upper-config-toggle" type="button" title="Expand or collapse Workspace Overview" aria-label="Expand or collapse Workspace Overview" aria-expanded="${this.upperSectionsCollapsed ? "false" : "true"}" aria-controls="upper-config"><span class="upper-config-chevron" aria-hidden="true">${this.upperSectionsCollapsed ? "▸" : "▾"}</span><span>Workspace overview</span></button></div>
         <div id="upper-config" class="upper-config ${this.upperSectionsCollapsed ? "collapsed" : ""}">
           <div id="summary-area">${this.renderSummary()}</div>
-          ${this.renderMeters()}
           <div class="workspace-config-row"><button id="open-config" type="button" class="workspace-config-button"><ha-icon icon="mdi:cog-outline"></ha-icon><span>EnergyIQ Configuration</span></button></div>
         </div>
         ${this.trainingWorkspaceOpen?`<div id="training-area">${this.renderTrainingWorkspace()}</div>`:""}
