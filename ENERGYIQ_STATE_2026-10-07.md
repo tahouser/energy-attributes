@@ -6,7 +6,7 @@ This is the current handoff/state document for the EnergyIQ project. It records 
 
 **Repository:** `tahouser/energy-attributes`  
 **Integration:** EnergyIQ  
-**Current version:** **3.1.424**  
+**Current version:** **3.1.425**  
 **Current focus:** Meter Detector / electrical-source discovery and commissioning  
 **Consumption page:** COMPLETE / LOCKED  
 **Cost page:** 3.1.404 behavior remains the baseline; do not disturb while Meter Detector work is underway unless explicitly requested.
@@ -355,7 +355,7 @@ Important sequence:
 
 **Meter Detector safe point: 3.1.418.**
 
-**Current commissioning revision: 3.1.424.**
+**Current commissioning revision: 3.1.425.**
 
 No GitHub release/tag should be assumed to exist merely because the version number exists. The repository has been updated directly through commits.
 
