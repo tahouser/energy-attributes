@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "43700";
+  const VERSION = "43800";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -16,6 +16,8 @@
       this.entryId = null;
       this.currentPowerEntity = null;
       this.notice = "";
+      this.openMeterIds = new Set();
+      this.openEntityIds = new Set();
       this.timer = null;
       this.refreshing = false;
       this.brandUrl = "/energyiq-brand/icon@2x.png?v=" + VERSION;
@@ -155,7 +157,17 @@
       return Number.isFinite(n) ? n : null;
     }
 
+    captureDetailsState() {
+      this.openMeterIds = new Set(
+        [...this.querySelectorAll("details.meter-item[open][data-device-id]")].map(el => el.dataset.deviceId)
+      );
+      this.openEntityIds = new Set(
+        [...this.querySelectorAll("details.subdetails[open][data-device-id]")].map(el => el.dataset.deviceId)
+      );
+    }
+
     render() {
+      if (this.isConnected && this.innerHTML) this.captureDetailsState();
       const d = this.data;
       this.innerHTML = `<style>${this.styles()}</style>
         <div class="guard"></div>
@@ -208,7 +220,7 @@
       const voltage = c.entities.filter(e => e.kind === "voltage").length;
       const current = c.entities.filter(e => e.kind === "current").length;
       return `
-        <details class="meter-item tier-${tier}" ${top ? "open" : ""}>
+        <details class="meter-item tier-${tier}" data-device-id="${this.escape(c.device_id)}" ${(top || this.openMeterIds.has(c.device_id)) ? "open" : ""}>
           <summary class="meter-summary">
             <div class="meter-name"><span class="meter-select-placeholder" title="Choose a power entity below">↳</span>
               <span class="tier-badge">${this.escape(tier.toUpperCase())}</span>
@@ -221,7 +233,7 @@
           <div class="meter-detail">
             ${tier === "d" ? `<div class="unsupported-note">Not an EnergyIQ measurement source.</div>` : ""}
             ${this.probeResults.get(c.device_id) ? this.renderProbe(this.probeResults.get(c.device_id)) : this.probingIds.has(c.device_id) ? `<div class="probe"><span class="eyebrow">Automatic interrogation</span><strong>Analyzing channels for 30 seconds…</strong><small>This Class A source is being observed automatically.</small></div>` : ""}
-            <details class="subdetails"><summary>Show Home Assistant entities (${c.entities.length})</summary>
+            <details class="subdetails" data-device-id="${this.escape(c.device_id)}" ${this.openEntityIds.has(c.device_id) ? "open" : ""}><summary>Show Home Assistant entities (${c.entities.length})</summary>
               <div class="entity-table">
                 <div class="entity-row entity-head"><span>Type</span><span>Name</span><span>Value</span><span>Unit</span><span>Action</span></div>
                 ${c.entities.map(e=>this.renderEntityRow(e)).join("")}
