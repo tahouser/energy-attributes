@@ -1,6 +1,8 @@
 """Config flow for EnergyIQ."""
 from __future__ import annotations
 
+import csv
+import io
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +18,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.core import callback
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import BooleanSelector
 from homeassistant.helpers.selector import (
     NumberSelector,
@@ -65,6 +68,49 @@ _PEAK_SCHEDULE_DEFAULTS = {
     "end": "19:00:00",
     "days": [1, 2, 3, 4, 5],
 }
+
+_UTILITY_ZIP_SOURCES = (
+    "https://data.openei.org/files/8563/iou_zipcodes_2024.csv",
+    "https://data.openei.org/files/8563/non_iou_zipcodes_2024.csv",
+)
+_UTILITY_LOOKUP_YEAR = 2024
+_UTILITY_CHARGE_BASES = {"monthly": "Monthly", "daily": "Daily", "per_kwh": "Per kWh", "percent": "Percentage"}
+
+def _normalized_csv_key(value: str) -> str:
+    return "".join(ch for ch in value.casefold() if ch.isalnum())
+
+def _csv_value(row: dict[str, str], *names: str) -> str:
+    normalized = {_normalized_csv_key(str(k)): str(v or "").strip() for k, v in row.items()}
+    for name in names:
+        value = normalized.get(_normalized_csv_key(name), "")
+        if value:
+            return value
+    return ""
+
+async def _lookup_utility_by_zip(hass, zip_code: str) -> dict[str, str] | None:
+    session = async_get_clientsession(hass)
+    for source in _UTILITY_ZIP_SOURCES:
+        try:
+            async with session.get(source, timeout=20) as response:
+                if response.status != 200:
+                    continue
+                text = await response.text()
+        except Exception as err:
+            _LOGGER.warning("EnergyIQ utility ZIP lookup failed for %s: %s", zip_code, err)
+            continue
+        try:
+            reader = csv.DictReader(io.StringIO(text))
+            for row in reader:
+                row_zip = _csv_value(row, "zip", "zipcode", "zip_code", "postal_code")
+                if row_zip.strip().zfill(5) != zip_code:
+                    continue
+                utility = _csv_value(row, "utility_name", "utility", "company_name", "name")
+                rate = _csv_value(row, "residential_rate", "residential", "residential_rate_per_kwh", "res_rate")
+                if utility:
+                    return {"utility_name": utility, "average_rate": rate, "source": source, "year": str(_UTILITY_LOOKUP_YEAR)}
+        except Exception as err:
+            _LOGGER.warning("EnergyIQ utility ZIP data could not be read: %s", err)
+    return None
 
 
 def _state_class(hass, entity_id: str) -> str | None:
