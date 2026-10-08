@@ -725,6 +725,55 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    async def async_step_existing_keep(self, user_input=None):
+        """Keep the currently configured meter unchanged."""
+        if self.source == SOURCE_RECONFIGURE:
+            return self.async_update_reload_and_abort(
+                self._get_reconfigure_entry(),
+                data_updates={},
+                reload_even_if_entry_is_unchanged=False,
+            )
+
+        snapshot = self._saved_snapshot or {}
+        data = build_entry_data(snapshot)
+        data["_restore_persistent_data"] = True
+        options = dict(snapshot.get("options") or {})
+        options.update({
+            CONF_MONITORED_ENTITIES: data[CONF_MONITORED_ENTITIES],
+            "candidate_devices": data["candidate_devices"],
+            "device_classifications": data["device_classifications"],
+            "commissioned_devices": data["commissioned_devices"],
+        })
+        return self.async_create_entry(title="EnergyIQ", data=data, options=options)
+
+    async def async_step_existing_new(self, user_input=None):
+        """Start fresh meter discovery."""
+        return await self.async_step_meter_discovery()
+
+    async def async_step_existing_restore(self, user_input=None):
+        """Restore the previously persisted meter configuration."""
+        snapshot = self._saved_snapshot or {}
+        saved_power = snapshot.get("power_entity")
+        if not saved_power:
+            return self.async_abort(reason="no_saved_meter")
+
+        if self.source == SOURCE_RECONFIGURE:
+            return self.async_update_reload_and_abort(
+                self._get_reconfigure_entry(),
+                data_updates={CONF_POWER_ENTITY: saved_power},
+            )
+
+        data = build_entry_data(snapshot)
+        data["_restore_persistent_data"] = True
+        options = dict(snapshot.get("options") or {})
+        options.update({
+            CONF_MONITORED_ENTITIES: data[CONF_MONITORED_ENTITIES],
+            "candidate_devices": data["candidate_devices"],
+            "device_classifications": data["device_classifications"],
+            "commissioned_devices": data["commissioned_devices"],
+        })
+        return self.async_create_entry(title="EnergyIQ", data=data, options=options)
+
     async def async_step_reconfigure(self, user_input=None):
         """Offer to keep the current meter or run fresh discovery."""
         return await self.async_step_existing_meter(user_input)
