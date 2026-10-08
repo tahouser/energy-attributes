@@ -198,7 +198,7 @@
       },
       "meter_properties": {
         "title": "Meter Properties",
-        "description": "EnergyIQ uses the selected whole-home power sensor for consumption and cost calculations. Use Meter Detector to discover another meter."
+        "description": "EnergyIQ is currently using {meter} as its whole-home power source. This meter provides the electrical data used for consumption and cost calculations. Use Meter Detector to change or discover a different meter."
       }
     }
   },
