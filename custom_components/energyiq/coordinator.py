@@ -33,6 +33,14 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         self.hass=hass
         self.entry=entry
         self.power_entity=entry.data[CONF_POWER_ENTITY]
+        configured_power_entities = entry.options.get("power_entities", entry.data.get("power_entities"))
+        if isinstance(configured_power_entities, list):
+            self.power_entities = [str(x) for x in configured_power_entities if str(x).strip()]
+        else:
+            self.power_entities = [self.power_entity]
+        if not self.power_entities:
+            self.power_entities = [self.power_entity]
+        self.power_source_mode = str(entry.options.get("power_source_mode", entry.data.get("power_source_mode", "single_channel")))
         self.monitored_entities=entry.options.get(CONF_MONITORED_ENTITIES, entry.data.get(CONF_MONITORED_ENTITIES, []))
         self.device_classifications=entry.options.get("device_classifications", entry.data.get("device_classifications", {}))
         self.commissioned_devices=entry.options.get("commissioned_devices", entry.data.get("commissioned_devices", {}))
@@ -71,17 +79,13 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
         data remains based on the configured Home Assistant whole-home entity.
         """
         power_entity = self._fast_power_entity()
-        state = self.hass.states.get(power_entity)
-        watts = None
-        if state is not None:
-            try:
-                watts = float(state.state)
-            except (TypeError, ValueError):
-                watts = None
+        watts = self._whole_home_power_watts()
         await self._async_update_consumption_accounting()
         return {
             "whole_home_power": watts,
             "power_entity": power_entity,
+            "power_entities": list(self.power_entities),
+            "power_source_mode": self.power_source_mode,
             "training_state": self.training_state,
             "consumption_accounting": self.consumption_accounting,
         }
@@ -657,6 +661,29 @@ class EnergyAttributionCoordinator(DataUpdateCoordinator[dict]):
             await self._persist(force=True)
             self._training_task=self.hass.async_create_task(self._training_loop(device_id,method))
             return state
+
+    def _whole_home_power_watts(self) -> float | None:
+        """Return the current logical whole-home power from the configured source."""
+        total = 0.0
+        found = False
+        for entity_id in self.power_entities:
+            state = self.hass.states.get(entity_id)
+            if state is None:
+                continue
+            try:
+                value = float(state.state)
+            except (TypeError, ValueError):
+                continue
+            if value != value or value in (float("inf"), float("-inf")):
+                continue
+            unit = str(state.attributes.get("unit_of_measurement") or "").casefold()
+            if unit == "kw":
+                value *= 1000
+            elif unit not in {"w", ""}:
+                continue
+            total += value
+            found = True
+        return total if found else None
 
     def _fast_power_entity(self) -> str:
         """Return the fastest available live whole-home power sensor.
