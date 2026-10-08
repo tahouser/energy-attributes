@@ -6,7 +6,7 @@ This is the current handoff/state document for the EnergyIQ project. It records 
 
 **Repository:** `tahouser/energy-attributes`  
 **Integration:** EnergyIQ  
-**Current version:** **3.1.418**  
+**Current version:** **3.1.420**  
 **Current focus:** Meter Detector / electrical-source discovery and commissioning  
 **Consumption page:** COMPLETE / LOCKED  
 **Cost page:** 3.1.404 behavior remains the baseline; do not disturb while Meter Detector work is underway unless explicitly requested.
@@ -353,12 +353,42 @@ Important sequence:
 - **3.1.417** — completed the automatic Class A interrogation UI and removed the intended manual workflow.
 - **3.1.418** — compacted the UI and removed redundant diagnostic content.
 
-**Current known-good version: 3.1.418.**
+**Meter Detector safe point: 3.1.418.**
+
+**Current commissioning revision: 3.1.420.**
 
 No GitHub release/tag should be assumed to exist merely because the version number exists. The repository has been updated directly through commits.
 
 ---
 
+
+# 13A. Commissioning integration — 3.1.420
+
+The detector is now connected to a user-decision commissioning layer without changing the detector itself.
+
+The intended flow is:
+
+1. EnergyIQ scans Home Assistant.
+2. If one Class A source is found, EnergyIQ presents it explicitly as the proposed whole-home meter.
+3. The user gets three clear choices:
+   - **YES — USE THIS METER**
+   - **NO — CHOOSE A DIFFERENT METER**
+   - **ADD MY METER MANUALLY**
+4. Choosing a different meter shows all useful detected electrical sources with usable power entities, including Class A/B/C.
+5. Manual commissioning allows selection of any Home Assistant power sensor.
+6. If no Class A source is found, EnergyIQ does not treat that as a commissioning failure. It offers:
+   - **CHOOSE A DEVICE ENERGYIQ FOUND**
+   - **ADD MY METER MANUALLY**
+7. Selecting a meter completes basic commissioning; advanced EnergyIQ configuration remains separate.
+8. Existing installations can enter the same meter-selection process through Home Assistant reconfiguration. Reconfiguration updates only the commissioning-owned meter fields and preserves existing EnergyIQ settings/training data.
+
+Important correction from 3.1.419:
+
+3.1.419 technically added commissioning discovery, but the UI used a dropdown for the accept/defer decision and did not expose a proper way to reject the proposed meter or reach the alternate/manual paths. It also did not address the fact that an existing config entry does not automatically rerun the initial setup flow.
+
+3.1.420 fixes the commissioning layer with explicit menu choices and a proper reconfigure flow.
+
+The Meter Detector internals remain unchanged.
 # 14. Current backend/frontend components
 
 Meter Detector backend:
