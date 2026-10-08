@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "43900";
+  const VERSION = "44000";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -15,6 +15,7 @@
       this.selected = new Set();
       this.entryId = null;
       this.currentPowerEntity = null;
+      this.currentPowerEntities = new Set();
       this.notice = "";
       this.openMeterIds = new Set();
       this.openEntityIds = new Set();
@@ -61,6 +62,7 @@
         if (!this.entryId) throw new Error("EnergyIQ is not configured.");
         const workspace = await this.ws({type:"energy_attribution/workspace", entry_id:this.entryId});
         this.currentPowerEntity = workspace?.power_entity || null;
+        this.currentPowerEntities = new Set(workspace?.power_entities || (this.currentPowerEntity ? [this.currentPowerEntity] : []));
         this.data = await this.ws({type:"energy_attribution/meter_detector"});
         this.render();
         this.startAutomaticInterrogation();
@@ -79,7 +81,10 @@
       this.refreshing = true;
       try {
         const workspace = this.entryId ? await this.ws({type:"energy_attribution/workspace", entry_id:this.entryId}) : null;
-        if (workspace) this.currentPowerEntity = workspace.power_entity || null;
+        if (workspace) {
+          this.currentPowerEntity = workspace.power_entity || null;
+          this.currentPowerEntities = new Set(workspace.power_entities || (this.currentPowerEntity ? [this.currentPowerEntity] : []));
+        }
         this.data = await this.ws({type:"energy_attribution/meter_detector"});
         this.error = null;
         this.render();
@@ -142,7 +147,8 @@
                 ${(ch.entities||[]).map(e=>`<div class="probe-row"><span>${this.escape(e.kind)}</span><strong>${e.max == null ? "—" : this.escape(Number(e.max).toFixed(2))} ${this.escape(e.unit||"")}</strong><small>range ${e.range == null ? "—" : this.escape(Number(e.range).toFixed(2))}</small></div>`).join("")}
               </div>`).join("")}
           </div>
-          <div class="probe-note">${(p.limitations||[]).map(x=>`<div>• ${this.escape(x)}</div>`).join("")}</div>
+          
+          <div class="probe-note"></div>
         </div>`;
     }
 
@@ -187,7 +193,7 @@
               <div>
                 <span class="eyebrow">Commissioning research</span>
                 <h2>Whole-home meter discovery</h2>
-                <p>Choose the whole-home active-power entity EnergyIQ should use. Nothing is changed until you select an entity below.</p>
+                <p>EnergyIQ interrogates related channels and builds one logical whole-home meter. Nothing is changed until you select a detected source.</p>
               </div>
               <button id="refresh" class="primary" ${this.loading ? "disabled" : ""}>${this.loading ? "Scanning…" : "Scan again"}</button>
             </section>
@@ -202,7 +208,7 @@
     renderResults(d) {
       const candidates = Array.isArray(d.candidates) ? d.candidates : [];
       return `
-        <div class="selection-bar"><div><strong>${d.candidate_count} sources detected</strong><small>Choose <b>Total Active Power</b> (whole home). L1/L2/L3 readings are individual phases and cannot be used as the EnergyIQ meter.</small></div></div>
+        <div class="selection-bar"><div><strong>${d.candidate_count} sources detected</strong><small>EnergyIQ looks at the related power, voltage, current, and energy channels and determines whether they form one whole-home meter.</small></div></div>
         ${candidates.length ? candidates.map((c,i)=>this.renderCandidate(c,i===0)).join("") : `
           <section class="panel"><span class="eyebrow">No strong candidates</span><h2>No whole-home meter candidate found</h2><p>EnergyIQ can still fall back to a manual entity selector later. This test intentionally does not modify configuration.</p></section>`}
         <section class="panel">
@@ -246,19 +252,19 @@
 
     renderEntityRow(e) {
       const value = e.value == null ? e.state : (Number.isFinite(Number(e.value)) ? Number(e.value).toFixed(2) : e.state);
-      const usablePower = e.kind === "power" && ["w","kw"].includes(String(e.unit || "").toLowerCase()) && e.role !== "phase";
-      const current = usablePower && e.entity_id === this.currentPowerEntity;
+      const usablePower = e.kind === "power" && ["w","kw"].includes(String(e.unit || "").toLowerCase());
+      const current = usablePower && this.currentPowerEntities.has(e.entity_id);
       const role = e.role === "whole_home"
         ? '<span class="role whole-home">WHOLE HOME</span>'
         : e.role === "phase"
-          ? '<span class="role phase-role">PHASE ONLY</span>'
+          ? '<span class="role phase-role">CHANNEL</span>'
           : "";
-      const action = usablePower
+      const action = usablePower && e.role !== "phase"
         ? (current
           ? '<button type="button" class="meter-use current" disabled>Current EnergyIQ meter</button>'
           : '<button type="button" class="meter-use primary" data-use-meter="' + this.escape(e.entity_id) + '">Use as EnergyIQ meter</button>')
         : (e.role === "phase"
-          ? '<span class="phase-note">Not a whole-home source</span>'
+          ? '<span class="phase-note">Used through detected meter group</span>'
           : "");
       return '<div class="entity-row"><span class="type ' + this.escape(e.kind) + '">' + this.escape(e.kind) + '</span><span><strong>' + this.escape(e.name) + '</strong><small>' + role + ' ' + this.escape(e.entity_id) + '</small></span><span>' + this.escape(value) + '</span><span>' + this.escape(e.unit || "—") + '</span><span>' + action + '</span></div>';
     }
@@ -275,19 +281,34 @@
         ev.preventDefault();
         ev.stopPropagation();
         this.useAsMeter(button.dataset.useMeter);
-      }));
+      }))
+      this.querySelectorAll("[data-use-source]").forEach(button => button.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.usePowerSource(button.dataset.useSource, button.dataset.sourceMode);
+      }));;
     }
 
     async useAsMeter(entityId) {
-      if (!this.entryId || !entityId) return;
+      return this.usePowerSource(entityId, "single_channel");
+    }
+
+    async usePowerSource(entityIds, mode) {
+      if (!this.entryId || !entityIds) return;
+      const ids = String(entityIds).split(",").map(x => x.trim()).filter(Boolean);
+      if (!ids.length) return;
       try {
         const result = await this.ws({
-          type:"energy_attribution/set_power_entity",
+          type:"energy_attribution/set_power_source",
           entry_id:this.entryId,
-          entity_id:entityId,
+          entity_ids:ids,
+          mode:mode || (ids.length > 1 ? "combined_channels" : "single_channel"),
         });
-        this.currentPowerEntity = result.entity_id;
-        this.notice = "EnergyIQ meter saved. You can stay here and verify the selected whole-home reading.";
+        this.currentPowerEntity = result.entity_id || ids[0];
+        this.currentPowerEntities = new Set(result.entity_ids || ids);
+        this.notice = ids.length > 1
+          ? "Combined whole-home meter saved. EnergyIQ will use the channels together as one source."
+          : "Whole-home meter saved. You can stay here and verify the selected reading.";
         this.render();
       } catch (e) {
         this.notice = this.formatError(e);
