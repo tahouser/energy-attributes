@@ -288,6 +288,207 @@ async def ws_list_entries(hass, connection, msg):
 
 
 @websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/set_power_entity",
+    vol.Required("entry_id"): str,
+    vol.Required("entity_id"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_set_power_entity(hass, connection, msg):
+    """Set the whole-home active-power entity used by EnergyIQ."""
+    coordinator = _coordinator(hass, msg["entry_id"])
+    entity_id = str(msg["entity_id"]).strip()
+    registry = er.async_get(hass)
+    entity = registry.async_get(entity_id)
+    state = hass.states.get(entity_id)
+    if entity is None or entity.disabled_by is not None or entity.domain != "sensor" or state is None:
+        raise ValueError("Choose an enabled Home Assistant power sensor.")
+    attrs = state.attributes
+    device_class = str(attrs.get("device_class") or "").casefold()
+    unit = str(attrs.get("unit_of_measurement") or "").casefold()
+    if device_class != "power" and unit not in {"w", "kw"}:
+        raise ValueError("Choose an active power sensor measured in W or kW.")
+    try:
+        numeric = float(state.state)
+    except (TypeError, ValueError):
+        raise ValueError("The selected power sensor is not currently reporting a numeric value.") from None
+    if numeric != numeric or numeric in (float("inf"), float("-inf")):
+        raise ValueError("The selected power sensor is not currently reporting a usable value.")
+
+    data = dict(coordinator.entry.data)
+    data["power_entity"] = entity_id
+    hass.config_entries.async_update_entry(coordinator.entry, data=data)
+    coordinator.power_entity = entity_id
+    await coordinator.async_persist_owned_state()
+    connection.send_result(msg["id"], {
+        "saved": True,
+        "entity_id": entity_id,
+        "name": str(attrs.get("friendly_name") or entity.name or entity_id),
+        "state": state.state,
+        "unit": attrs.get("unit_of_measurement"),
+    })
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/update_configuration",
+    vol.Required("entry_id"): str,
+    vol.Required("updates"): dict,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_update_configuration(hass, connection, msg):
+    """Save the consumer-facing EnergyIQ configuration sections."""
+    coordinator = _coordinator(hass, msg["entry_id"])
+    updates = msg["updates"]
+    allowed = {
+        "currency",
+        "consumption_limits",
+        "cost_limits",
+        "peak_time_windows",
+        "consumption_peak_schedule",
+        "utility_zip_code",
+        "utility_name",
+        "utility_rate_plan",
+        "utility_average_rate",
+        "utility_peak_rate",
+        "utility_off_peak_rate",
+        "utility_lookup_year",
+        "utility_lookup_source",
+        "utility_costs",
+    }
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError("Unsupported EnergyIQ configuration setting.")
+
+    clean = {}
+    if "currency" in updates:
+        currency = str(updates["currency"]).strip().upper()
+        if len(currency) != 3 or not currency.isalpha():
+            raise ValueError("Currency must be a three-letter code such as USD.")
+        clean["currency"] = currency
+
+    for key in ("consumption_limits", "cost_limits"):
+        if key not in updates:
+            continue
+        value = updates[key]
+        if not isinstance(value, dict):
+            raise ValueError(f"{key} must be an object.")
+        normalized = {}
+        for period in ("peak", "off_peak"):
+            item = value.get(period, {})
+            if not isinstance(item, dict):
+                raise ValueError(f"{key} contains an invalid period.")
+            try:
+                yellow = float(item["yellow"])
+                red = float(item["red"])
+            except (KeyError, TypeError, ValueError):
+                raise ValueError(f"{key} requires yellow and red values for both periods.") from None
+            if yellow < 0 or red < yellow:
+                raise ValueError(f"{key} red threshold must be at least the yellow threshold.")
+            normalized[period] = {"yellow": yellow, "red": red}
+        clean[key] = normalized
+
+    if "peak_time_windows" in updates:
+        windows = updates["peak_time_windows"]
+        if not isinstance(windows, list) or not 1 <= len(windows) <= 2:
+            raise ValueError("Peak Time Window must contain one or two periods.")
+        normalized_windows = []
+        for window in windows:
+            if not isinstance(window, dict):
+                raise ValueError("Invalid peak period.")
+            start = str(window.get("start", ""))[:8]
+            end = str(window.get("end", ""))[:8]
+            days = []
+            for day in window.get("days", []):
+                try:
+                    day_int = int(day)
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= day_int <= 6 and day_int not in days:
+                    days.append(day_int)
+            if start == end or not days:
+                raise ValueError("Each peak period needs different start/end times and at least one day.")
+            normalized_windows.append({"start": start, "end": end, "days": sorted(days)})
+        clean["peak_time_windows"] = normalized_windows
+        clean["consumption_peak_schedule"] = dict(normalized_windows[0])
+
+    if "consumption_peak_schedule" in updates and "peak_time_windows" not in clean:
+        schedule = updates["consumption_peak_schedule"]
+        if not isinstance(schedule, dict):
+            raise ValueError("Invalid Peak Time Window.")
+        start = str(schedule.get("start", ""))[:8]
+        end = str(schedule.get("end", ""))[:8]
+        days = sorted({int(day) for day in schedule.get("days", []) if str(day).isdigit() and 0 <= int(day) <= 6})
+        if start == end or not days:
+            raise ValueError("Peak Time Window needs different start/end times and at least one day.")
+        clean["consumption_peak_schedule"] = {"start": start, "end": end, "days": days}
+
+    utility_numeric = ("utility_average_rate", "utility_peak_rate", "utility_off_peak_rate")
+    for key in utility_numeric:
+        if key in updates:
+            value = updates[key]
+            if value in (None, ""):
+                clean[key] = None
+            else:
+                try:
+                    number = float(value)
+                except (TypeError, ValueError):
+                    raise ValueError(f"{key} must be numeric.") from None
+                if number < 0:
+                    raise ValueError(f"{key} cannot be negative.")
+                clean[key] = number
+
+    for key in ("utility_zip_code", "utility_name", "utility_rate_plan", "utility_lookup_source"):
+        if key in updates:
+            clean[key] = str(updates[key]).strip()
+    if "utility_lookup_year" in updates:
+        value = updates["utility_lookup_year"]
+        clean["utility_lookup_year"] = int(value) if value not in (None, "") else None
+    if "utility_costs" in updates:
+        costs = updates["utility_costs"]
+        if not isinstance(costs, list) or len(costs) > 4:
+            raise ValueError("You can add up to four additional utility costs.")
+        normalized_costs = []
+        for cost in costs:
+            if not isinstance(cost, dict):
+                continue
+            name = str(cost.get("name", "")).strip()
+            basis = str(cost.get("basis", "")).strip().lower()
+            try:
+                amount = float(cost.get("amount"))
+            except (TypeError, ValueError):
+                raise ValueError("Each additional utility cost needs a numeric amount.") from None
+            if not name or basis not in {"monthly", "daily", "per_kwh", "percentage"} or amount < 0:
+                raise ValueError("Each additional utility cost needs a name, valid basis, and non-negative amount.")
+            normalized_costs.append({"name": name, "basis": basis, "amount": amount})
+        clean["utility_costs"] = normalized_costs
+
+    if clean:
+        _save_options(coordinator, **clean)
+    connection.send_result(msg["id"], {"saved": True, "updates": clean})
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "energy_attribution/utility_lookup",
+    vol.Required("entry_id"): str,
+    vol.Required("zip_code"): str,
+})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_utility_lookup(hass, connection, msg):
+    """Look up a utility by ZIP without leaving the EnergyIQ panel."""
+    zip_code = str(msg["zip_code"]).strip()
+    if len(zip_code) != 5 or not zip_code.isdigit():
+        raise ValueError("Enter a five-digit ZIP code.")
+    from .config_flow import _lookup_utility_by_zip
+    result = await _lookup_utility_by_zip(hass, zip_code)
+    if not result:
+        connection.send_result(msg["id"], {"found": False, "zip_code": zip_code})
+        return
+    connection.send_result(msg["id"], {"found": True, "zip_code": zip_code, **result})
+
+
+@websocket_api.websocket_command({
     vol.Required("type"): "energy_attribution/workspace",
     vol.Required("entry_id"): str,
 })
@@ -327,6 +528,20 @@ async def ws_workspace(hass, connection, msg):
         "devices": rows,
         "last_training_device_id": getattr(coordinator, "last_training_device_id", None),
         "consumption_thresholds": coordinator.entry.options.get("consumption_thresholds", {}),
+        "consumption_limits": coordinator.entry.options.get("consumption_limits", {}),
+        "cost_limits": coordinator.entry.options.get("cost_limits", {}),
+        "peak_time_windows": coordinator.entry.options.get("peak_time_windows", []),
+        "utility": {
+            "zip_code": coordinator.entry.options.get("utility_zip_code", ""),
+            "name": coordinator.entry.options.get("utility_name", ""),
+            "rate_plan": coordinator.entry.options.get("utility_rate_plan", ""),
+            "average_rate": coordinator.entry.options.get("utility_average_rate"),
+            "peak_rate": coordinator.entry.options.get("utility_peak_rate"),
+            "off_peak_rate": coordinator.entry.options.get("utility_off_peak_rate"),
+            "lookup_year": coordinator.entry.options.get("utility_lookup_year"),
+            "lookup_source": coordinator.entry.options.get("utility_lookup_source", ""),
+            "costs": coordinator.entry.options.get("utility_costs", []),
+        },
         "consumption_peak_schedule": coordinator.entry.options.get(
             "consumption_peak_schedule",
             {"start": "15:00:00", "end": "19:00:00", "days": [1, 2, 3, 4, 5]},
@@ -689,5 +904,5 @@ async def ws_stop_training(hass, connection, msg):
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
-    for handler in (ws_list_entries, ws_workspace, ws_export_data, ws_import_data, ws_delete_data, ws_set_monitoring, ws_remove_devices, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_stop_training, ws_meter_detector, ws_meter_detector_probe):
+    for handler in (ws_list_entries, ws_workspace, ws_export_data, ws_import_data, ws_delete_data, ws_set_monitoring, ws_remove_devices, ws_add_manual_device, ws_list_available_entities, ws_add_entity, ws_set_power_entity, ws_update_configuration, ws_utility_lookup, ws_start_training, ws_bulk_auto_training, ws_bulk_training_state, ws_confirm_long_cycle, ws_end_long_cycle, ws_stop_training, ws_meter_detector, ws_meter_detector_probe):
         websocket_api.async_register_command(hass, handler)
