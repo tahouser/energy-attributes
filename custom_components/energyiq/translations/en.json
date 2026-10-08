@@ -182,23 +182,112 @@
       },
       "consumption_limits": {
         "title": "Consumption Limits",
-        "description": "The consumption-limit configuration section will be built here."
+        "description": "Set the consumption levels EnergyIQ uses to identify normal, elevated, and high usage.",
+        "sections": {
+          "peak": {
+            "name": "Peak",
+            "description": "Set the green-to-yellow and yellow-to-red consumption limits for Peak hours.",
+            "data": {
+              "green_yellow": "Green → Yellow (kWh)",
+              "yellow_red": "Yellow → Red (kWh)"
+            }
+          },
+          "off_peak": {
+            "name": "Off-Peak",
+            "description": "Set the green-to-yellow and yellow-to-red consumption limits for Off-Peak hours.",
+            "data": {
+              "green_yellow": "Green → Yellow (kWh)",
+              "yellow_red": "Yellow → Red (kWh)"
+            }
+          }
+        },
+        "data": {
+          "peak_green_yellow": "Peak — Green → Yellow (kWh)",
+          "peak_yellow_red": "Peak — Yellow → Red (kWh)",
+          "off_peak_green_yellow": "Off-Peak — Green → Yellow (kWh)",
+          "off_peak_yellow_red": "Off-Peak — Yellow → Red (kWh)"
+        }
       },
       "cost_limits": {
         "title": "Cost Limits",
-        "description": "The cost-limit configuration section will be built here."
+        "description": "Set the spending levels EnergyIQ uses to identify normal, elevated, and high cost.",
+        "data": {
+          "peak_green_yellow": "Peak — Green → Yellow ($)",
+          "peak_yellow_red": "Peak — Yellow → Red ($)",
+          "off_peak_green_yellow": "Off-Peak — Green → Yellow ($)",
+          "off_peak_yellow_red": "Off-Peak — Yellow → Red ($)"
+        }
       },
       "peak_time_window": {
         "title": "Peak Time Window",
-        "description": "The Peak time-window configuration section will be built here."
+        "description": "Set when your utility considers electricity to be Peak. Add a second period when needed.",
+        "data": {
+          "period1_start": "Peak period 1 — Start",
+          "period1_end": "Peak period 1 — End",
+          "period1_days": "Peak period 1 — Days",
+          "period2_enabled": "Add a second Peak period",
+          "period2_start": "Peak period 2 — Start",
+          "period2_end": "Peak period 2 — End",
+          "period2_days": "Peak period 2 — Days"
+        }
       },
       "utility_search": {
         "title": "Utility Search",
-        "description": "Search for utility rates by ZIP code, with manual entry available."
+        "description": "Enter your ZIP code to find your utility and available rate information.",
+        "data": {
+          "zip_code": "ZIP code"
+        }
       },
       "meter_properties": {
         "title": "Meter Properties",
         "description": "EnergyIQ is currently using {meter} as its whole-home power source. This meter provides the electrical data used for consumption and cost calculations. Use Meter Detector to change or discover a different meter."
+      },
+      "utility_result": {
+        "title": "Utility Found",
+        "description": "Review the utility information found for your ZIP code. The lookup provides an average residential rate; detailed Peak and Off-Peak rates can be entered below.",
+        "data": {
+          "zip_code": "ZIP code",
+          "utility_name": "Utility company",
+          "rate_plan": "Rate plan",
+          "average_rate": "Average residential rate ($/kWh)",
+          "peak_rate": "Peak rate ($/kWh)",
+          "off_peak_rate": "Off-Peak rate ($/kWh)",
+          "charge1_name": "Additional cost 1 — name",
+          "charge1_amount": "Additional cost 1 — amount",
+          "charge1_basis": "Additional cost 1 — applied",
+          "charge2_name": "Additional cost 2 — name",
+          "charge2_amount": "Additional cost 2 — amount",
+          "charge2_basis": "Additional cost 2 — applied",
+          "charge3_name": "Additional cost 3 — name",
+          "charge3_amount": "Additional cost 3 — amount",
+          "charge3_basis": "Additional cost 3 — applied",
+          "charge4_name": "Additional cost 4 — name",
+          "charge4_amount": "Additional cost 4 — amount",
+          "charge4_basis": "Additional cost 4 — applied"
+        }
+      },
+      "utility_manual": {
+        "title": "Enter Utility Costs",
+        "description": "Automatic lookup was not available. Enter your utility and rate information manually. Additional charges are optional.",
+        "data": {
+          "zip_code": "ZIP code",
+          "utility_name": "Utility company",
+          "rate_plan": "Rate plan",
+          "peak_rate": "Peak rate ($/kWh)",
+          "off_peak_rate": "Off-Peak rate ($/kWh)",
+          "charge1_name": "Additional cost 1 — name",
+          "charge1_amount": "Additional cost 1 — amount",
+          "charge1_basis": "Additional cost 1 — applied",
+          "charge2_name": "Additional cost 2 — name",
+          "charge2_amount": "Additional cost 2 — amount",
+          "charge2_basis": "Additional cost 2 — applied",
+          "charge3_name": "Additional cost 3 — name",
+          "charge3_amount": "Additional cost 3 — amount",
+          "charge3_basis": "Additional cost 3 — applied",
+          "charge4_name": "Additional cost 4 — name",
+          "charge4_amount": "Additional cost 4 — amount",
+          "charge4_basis": "Additional cost 4 — applied"
+        }
       }
     }
   },
@@ -206,7 +295,8 @@
     "times_must_increase": "Times must be in increasing order.",
     "red_must_be_at_least_yellow": "Red threshold must be at least the yellow threshold.",
     "peak_days_required": "Select at least one Peak day.",
-    "peak_start_end_must_differ": "Peak start and end times must be different."
+    "peak_start_end_must_differ": "Peak start and end times must be different.",
+    "invalid_zip": "Enter a valid 5-digit ZIP code."
   },
   "abort": {
     "no_candidates": "No electrical-load candidates were found after filtering.",
