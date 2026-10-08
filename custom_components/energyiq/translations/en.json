@@ -28,7 +28,7 @@
       },
       "general": {
         "title": "General",
-        "description": "Currency, time zone, and other general EnergyIQ settings."
+        "description": "Set the currency used by EnergyIQ. Time zone follows Home Assistant: {time_zone}."
       },
       "consumption_limits": {
         "title": "Consumption Limits",
@@ -198,7 +198,7 @@
       },
       "meter_properties": {
         "title": "Meter Properties",
-        "description": "Select and manage the electrical loads and meter-related properties currently used by EnergyIQ."
+        "description": "EnergyIQ uses the selected whole-home power sensor for consumption and cost calculations. Use Meter Detector to discover another meter."
       }
     }
   },
