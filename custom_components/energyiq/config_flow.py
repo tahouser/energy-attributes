@@ -1044,7 +1044,14 @@ def _commissioning_power_entity(candidate: dict[str, Any]) -> str | None:
     if not entities:
         return None
     def score(entity: dict[str, Any]) -> int:
-        tokens = _tokens(f"{entity.get('name', '')} {entity.get('entity_id', '')}")
+        # Keep the selector self-contained. Config-flow code can survive a
+        # stale HA module cache without depending on a helper added elsewhere.
+        text = f"{entity.get('name', '')} {entity.get('entity_id', '')}".casefold()
+        tokens = {
+            token
+            for token in re.split(r"[^a-z0-9]+", text)
+            if token
+        }
         value = 0
         if tokens & {"total", "aggregate", "whole", "home", "house", "mains", "main", "grid", "service"}:
             value += 100
