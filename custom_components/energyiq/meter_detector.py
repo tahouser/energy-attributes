@@ -238,6 +238,55 @@ async def _probe_entities(hass: HomeAssistant, entities: list[dict]) -> list[dic
             status = "active signal" if peak > threshold or span > threshold else "reporting zero"
         results.append({"entity_id": entity["entity_id"], "name": entity["name"], "kind": entity["kind"], "unit": entity["unit"], "channel": _channel_label(entity), "samples": len(series), "numeric_samples": len(numeric), "min": min(numeric) if numeric else None, "max": max(numeric) if numeric else None, "range": (max(numeric)-min(numeric)) if numeric else None, "status": status})
     return results
+_DEVICE_EXCLUDE_WORDS = (
+    "plug", "smart plug", "outlet", "switch", "dishwasher", "refrigerator",
+    "fridge", "washer", "dryer", "oven", "range", "microwave", "television",
+    "tv", "lamp", "light", "fan", "thermostat", "climate",
+)
+
+def _is_meter_candidate(device, entities: list[dict], config_entries: list[dict], score: int) -> bool:
+    """Require meter-like evidence; ordinary loads are not meter candidates."""
+    text = " ".join([
+        str(device.name or ""),
+        str(device.name_by_user or ""),
+        str(device.manufacturer or ""),
+        str(device.model or ""),
+        " ".join(e["name"] for e in entities),
+        " ".join(e["entity_id"] for e in entities),
+        " ".join(f"{c['domain']} {c['title']}" for c in config_entries),
+    ]).casefold()
+    tokens = _tokens(text)
+    explicit_meter = bool(tokens & set(_HOME_WORDS)) or bool(tokens & set(_METER_BRANDS))
+    excluded_load = any(word in text for word in _DEVICE_EXCLUDE_WORDS)
+
+    kinds = {e["kind"] for e in entities}
+    power_count = sum(1 for e in entities if e["kind"] == "power")
+    energy_count = sum(1 for e in entities if e["kind"] == "energy")
+    voltage_count = sum(1 for e in entities if e["kind"] == "voltage")
+    current_count = sum(1 for e in entities if e["kind"] == "current")
+
+    meter_domain = any(
+        c["domain"].casefold() in {"shelly", "emporia", "sense", "homewizard", "iotawatt", "smappee"}
+        for c in config_entries
+    )
+    meter_model = "3em" in text or "energy meter" in text or "power meter" in text
+
+    strong_measurement_set = (
+        ("power" in kinds and energy_count > 0)
+        or voltage_count > 0
+        or current_count > 0
+        or power_count >= 3
+    )
+
+    if meter_model and ("power" in kinds or "energy" in kinds):
+        return True
+    if meter_domain and strong_measurement_set and not (excluded_load and power_count < 2):
+        return True
+    if explicit_meter and strong_measurement_set and not excluded_load:
+        return True
+    return False
+
+
 def discover_meters(hass: HomeAssistant) -> dict:
     registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
@@ -289,7 +338,7 @@ def discover_meters(hass: HomeAssistant) -> dict:
                     config_entries.append(info)
 
         score, evidence = _score_device(device, entities, config_entries)
-        if score < 5:
+        if not _is_meter_candidate(device, entities, config_entries, score):
             continue
 
         candidates.append({
