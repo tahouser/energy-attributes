@@ -424,6 +424,61 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema(schema_fields)
         return self.async_show_form(step_id="user", data_schema=schema)
 
+    async def async_step_reconfigure(self, user_input=None):
+        """Show the EnergyIQ configuration framework for an existing entry."""
+        return await self.async_step_configuration_menu(user_input)
+
+    async def async_step_configuration_menu(self, user_input=None):
+        """Present the top-level EnergyIQ configuration categories."""
+        return self.async_show_menu(
+            step_id="configuration_menu",
+            menu_options=[
+                "meter_properties",
+                "general",
+                "consumption_limits",
+                "cost_limits",
+                "peak_time_window",
+                "utility_search",
+            ],
+        )
+
+    async def _configuration_placeholder(self, step_id: str):
+        """Show a configuration section without changing stored values yet."""
+        return self.async_show_form(
+            step_id=step_id,
+            data_schema=vol.Schema({}),
+        )
+
+    async def async_step_meter_properties(self, user_input=None):
+        if user_input is not None:
+            return await self.async_step_configuration_menu()
+        return await self._configuration_placeholder("meter_properties")
+
+    async def async_step_general(self, user_input=None):
+        if user_input is not None:
+            return await self.async_step_configuration_menu()
+        return await self._configuration_placeholder("general")
+
+    async def async_step_consumption_limits(self, user_input=None):
+        if user_input is not None:
+            return await self.async_step_configuration_menu()
+        return await self._configuration_placeholder("consumption_limits")
+
+    async def async_step_cost_limits(self, user_input=None):
+        if user_input is not None:
+            return await self.async_step_configuration_menu()
+        return await self._configuration_placeholder("cost_limits")
+
+    async def async_step_peak_time_window(self, user_input=None):
+        if user_input is not None:
+            return await self.async_step_configuration_menu()
+        return await self._configuration_placeholder("peak_time_window")
+
+    async def async_step_utility_search(self, user_input=None):
+        if user_input is not None:
+            return await self.async_step_configuration_menu()
+        return await self._configuration_placeholder("utility_search")
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
