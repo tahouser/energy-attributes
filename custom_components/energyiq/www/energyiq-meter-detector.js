@@ -53,7 +53,6 @@
         this.data = await this.ws({type:"energy_attribution/meter_detector"});
         this.render();
         this.startAutomaticInterrogation();
-        this.startAutomaticInterrogation();
         if (this.timer) clearInterval(this.timer);
         this.timer = setInterval(() => this.refresh(), 3000);
       } catch (e) {
@@ -205,8 +204,8 @@
           </summary>
           <div class="meter-detail">
             <div class="meter-detail-head"><div><span class="eyebrow">${this.escape(label)}</span><strong>${c.member_device_ids?.length > 1 ? `Grouped physical source · ${c.member_device_ids.length} HA records` : this.escape(inf.inference || "Electrical measurement source")}</strong></div><span class="score-mini">${c.score} match</span></div>
-            <div class="meter-actions">${tier === "d" ? `<div class="unsupported-note">This device is retained for discovery, but it is not a usable EnergyIQ electrical source.</div>` : ""}<button class="secondary probe-button" data-probe="${this.escape(c.device_id)}" ${this.probing ? "disabled" : ""}>${this.probing ? "Interrogating…" : "Interrogate channels (30 sec)"}</button></div>
-            ${this.probeResult && this.probeResult.device_id===c.device_id ? this.renderProbe(this.probeResult) : ""}
+            <div class="meter-actions">${tier === "d" ? `<div class="unsupported-note">This device is retained for discovery, but it is not a usable EnergyIQ electrical source.</div>` : ""}</div>
+            ${this.probeResults.get(c.device_id) ? this.renderProbe(this.probeResults.get(c.device_id)) : this.probingIds.has(c.device_id) ? `<div class="probe"><span class="eyebrow">Automatic interrogation</span><strong>Analyzing channels for 30 seconds…</strong><small>This Class A source is being observed automatically.</small></div>` : ""}
             <div class="evidence compact-evidence">${(c.evidence||[]).slice(0,4).map(x=>`<span>${this.escape(x)}</span>`).join("")}</div>
             <details class="subdetails"><summary>Show Home Assistant entities (${c.entities.length})</summary>
               <div class="entity-table">
