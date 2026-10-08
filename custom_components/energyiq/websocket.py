@@ -325,8 +325,10 @@ async def ws_set_power_source(hass, connection, msg):
         devices.add(entity.device_id)
         rows.append((entity_id, entity, state, role))
     if len(entity_ids) > 1:
-        if None in devices or len(devices) != 1:
-            raise ValueError("Combined meter channels must belong to the same Home Assistant device.")
+        # The detector has already established these channels as one logical
+        # meter source. Do not require Home Assistant's entity registry to
+        # assign identical device_ids; integrations can expose related
+        # channels under different registry device records.
         mode = "combined_channels"
     if len(entity_ids) == 1 and rows[0][3] == "phase":
         raise ValueError("A phase-only reading cannot be used as the whole-home meter by itself.")
