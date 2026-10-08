@@ -1,6 +1,6 @@
 (() => {
   const TAG = "energyiq-meter-detector";
-  const VERSION = "41500";
+  const VERSION = "41600";
   if (customElements.get(TAG)) return;
 
   class EnergyIQMeterDetector extends HTMLElement {
@@ -10,8 +10,8 @@
       this.data = null;
       this.loading = false;
       this.error = null;
-      this.probeResult = null;
-      this.probing = false;
+      this.probeResults = new Map();
+      this.probingIds = new Set();
       this.selected = new Set();
       this.timer = null;
       this.brandUrl = "/energyiq-brand/icon@2x.png?v=" + VERSION;
@@ -52,6 +52,8 @@
       try {
         this.data = await this.ws({type:"energy_attribution/meter_detector"});
         this.render();
+        this.startAutomaticInterrogation();
+        this.startAutomaticInterrogation();
         if (this.timer) clearInterval(this.timer);
         this.timer = setInterval(() => this.refresh(), 3000);
       } catch (e) {
@@ -73,23 +75,32 @@
     }
 
 
-    async runProbe(deviceId) {
-      if (this.probing) return;
-      this.probing = true;
-      this.probeResult = null;
-      this.error = null;
-      this.render();
-      try {
-        this.probeResult = await this.ws({type:"energy_attribution/meter_detector_probe", device_id:deviceId});
-        this.render();
-      } catch (e) {
-        this.error = this.formatError(e);
-        this.render();
-      } finally {
-        this.probing = false;
+    startAutomaticInterrogation() {
+      const candidates = Array.isArray(this.data?.candidates) ? this.data.candidates : [];
+      for (const candidate of candidates) {
+        if (String(candidate.meter_class || "").toUpperCase() !== "A") continue;
+        const id = candidate.device_id;
+        if (!id || this.probingIds.has(id) || this.probeResults.has(id)) continue;
+        this.probingIds.add(id);
+        this.runAutomaticProbe(id);
       }
     }
 
+    async runAutomaticProbe(deviceId) {
+      try {
+        const result = await this.ws({
+          type: "energy_attribution/meter_detector_probe",
+          device_id: deviceId,
+        });
+        this.probeResults.set(deviceId, result);
+        this.render();
+      } catch (e) {
+        this.probeResults.set(deviceId, { device_id: deviceId, error: this.formatError(e) });
+        this.render();
+      } finally {
+        this.probingIds.delete(deviceId);
+      }
+    }
     renderProbe(p) {
       if (!p) return "";
       return `
@@ -224,7 +235,7 @@
       this.querySelector("#refresh")?.addEventListener("click", () => this.load());
       this.querySelector("#clear-selection")?.addEventListener("click", () => { this.selected.clear(); this.render(); });
       this.querySelectorAll("[data-select]").forEach(cb => cb.addEventListener("click", (ev) => { ev.stopPropagation(); const id = cb.dataset.select; if (cb.checked) this.selected.add(id); else this.selected.delete(id); this.render(); }));
-      this.querySelectorAll("[data-probe]").forEach(btn => btn.addEventListener("click", () => this.runProbe(btn.dataset.probe)));
+
     }
 
     styles() { return `
