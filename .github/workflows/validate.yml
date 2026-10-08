@@ -24,7 +24,9 @@ jobs:
       - name: Validate frontend JavaScript syntax
         run: |
           node --check custom_components/energyiq/www/energyiq-panel.js
-          node --check custom_components/energyiq/www/energyiq-card.js
+          node --check custom_components/energyiq/www/energyiq-meter-detector.js
+          CARD_VERSION=$(python -c 'import json; print(json.load(open("custom_components/energyiq/manifest.json"))["version"])')
+          node --check "custom_components/energyiq/www/energyiq-card-${CARD_VERSION}.js"
 
       - name: Validate release structure and panel loading
         shell: bash
