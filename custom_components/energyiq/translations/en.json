@@ -51,7 +51,12 @@
   "options": {
     "step": {
       "init": {
-        "title": "EnergyIQ — Configuration",
+        "title": "EnergyIQ",
+        "description": "Opening EnergyIQ configuration."
+      },
+      "configuration_menu": {
+        "title": "EnergyIQ Configuration",
+        "description": "Choose a configuration area.",
         "menu_options": {
           "meter_properties": "Meter Properties",
           "general": "General",
