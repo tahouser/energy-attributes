@@ -30,7 +30,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
 
 URL_BASE = "/energyiq-static"
-FRONTEND_VERSION = "41800"
+FRONTEND_VERSION = "42300"
 
 _MANIFEST_PATH = Path(__file__).with_name("manifest.json")
 INTEGRATION_VERSION = json.loads(_MANIFEST_PATH.read_text(encoding="utf-8"))["version"]
@@ -105,15 +105,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             module_url=f"{URL_BASE}/energyiq-panel.js?v={FRONTEND_VERSION}",
             sidebar_title=f"EnergyIQ • v{INTEGRATION_VERSION}",
             sidebar_icon="mdi:home-lightning-bolt-outline",
-            require_admin=False,
-        )
-        await panel_custom.async_register_panel(
-            hass=hass,
-            frontend_url_path="energyiq-meter-detector",
-            webcomponent_name="energyiq-meter-detector",
-            module_url=f"{URL_BASE}/energyiq-meter-detector.js?v={FRONTEND_VERSION}",
-            sidebar_title="EnergyIQ Meter Detector",
-            sidebar_icon="mdi:meter-electric-outline",
             require_admin=False,
         )
         data["_panel_registered"] = True
