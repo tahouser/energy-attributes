@@ -250,7 +250,7 @@
             <details class="subdetails" data-device-id="${this.escape(c.device_id)}" ${this.openEntityIds.has(c.device_id) ? "open" : ""}><summary>Show Home Assistant entities (${c.entities.length})</summary>
               <div class="entity-table">
                 <div class="entity-row entity-head"><span>Type</span><span>Name</span><span>Value</span><span>Unit</span><span>Action</span></div>
-                ${c.entities.map(e=>this.renderEntityRow(e)).join("")}
+                ${c.entities.map(e=>this.renderEntityRow(e, this.probeResults.get(c.device_id)?.meter_source?.mode === "combined_channels")).join("")}
               </div>
             </details>
           </div>
@@ -258,7 +258,7 @@
       `;
     }
 
-    renderEntityRow(e) {
+    renderEntityRow(e, groupedMeter = false) {
       const value = e.value == null ? e.state : (Number.isFinite(Number(e.value)) ? Number(e.value).toFixed(2) : e.state);
       const usablePower = e.kind === "power" && ["w","kw"].includes(String(e.unit || "").toLowerCase());
       const current = usablePower && this.currentPowerEntities.has(e.entity_id);
@@ -267,13 +267,15 @@
         : e.role === "phase"
           ? '<span class="role phase-role">CHANNEL</span>'
           : "";
-      const action = usablePower && e.role !== "phase"
-        ? (current
-          ? '<button type="button" class="meter-use current" disabled>Current EnergyIQ meter</button>'
-          : '<button type="button" class="meter-use primary" data-use-meter="' + this.escape(e.entity_id) + '">Use as EnergyIQ meter</button>')
-        : (e.role === "phase"
-          ? '<span class="phase-note">Used through detected meter group</span>'
-          : "");
+      const action = groupedMeter && usablePower
+        ? '<span class="phase-note">Part of detected meter group</span>'
+        : usablePower && e.role !== "phase"
+          ? (current
+            ? '<button type="button" class="meter-use current" disabled>Current EnergyIQ meter</button>'
+            : '<button type="button" class="meter-use primary" data-use-meter="' + this.escape(e.entity_id) + '">Use as EnergyIQ meter</button>')
+          : (e.role === "phase"
+            ? '<span class="phase-note">Used through detected meter group</span>'
+            : "");
       return '<div class="entity-row"><span class="type ' + this.escape(e.kind) + '">' + this.escape(e.kind) + '</span><span><strong>' + this.escape(e.name) + '</strong><small>' + role + ' ' + this.escape(e.entity_id) + '</small></span><span>' + this.escape(value) + '</span><span>' + this.escape(e.unit || "—") + '</span><span>' + action + '</span></div>';
     }
     renderEntity(e) {
