@@ -408,6 +408,10 @@ def discover_meters(hass: HomeAssistant) -> dict:
                 "name": str(attrs.get("friendly_name") or entity.name or entity.entity_id),
                 "domain": entity.domain,
                 "kind": kind,
+                "role": _power_role(
+                    str(attrs.get("friendly_name") or entity.name or entity.entity_id),
+                    entity.entity_id,
+                ) if kind == "power" else "",
                 "device_class": attrs.get("device_class"),
                 "unit": attrs.get("unit_of_measurement"),
                 "state_class": attrs.get("state_class"),
