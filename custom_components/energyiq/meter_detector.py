@@ -290,6 +290,14 @@ def _is_meter_candidate(device, entities: list[dict], config_entries: list[dict]
 def _meter_class(device, entities: list[dict], config_entries: list[dict]) -> str:
     """Classify the quality/depth of an electrical measurement source."""
     kinds = {e["kind"] for e in entities}
+    text = " ".join([
+        str(device.name or ""), str(device.name_by_user or ""),
+        str(device.manufacturer or ""), str(device.model or ""),
+        " ".join(e["name"] for e in entities),
+        " ".join(f"{x['domain']} {x['title']}" for x in config_entries),
+    ]).casefold()
+    if any(word in text for word in ("battery", "smoke detector", "smoke alarm")) and not (kinds & {"power", "energy", "voltage", "current"}):
+        return "D"
     power_count = sum(1 for e in entities if e["kind"] == "power")
     energy_count = sum(1 for e in entities if e["kind"] == "energy")
     voltage_count = sum(1 for e in entities if e["kind"] == "voltage")
