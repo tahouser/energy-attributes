@@ -502,14 +502,20 @@ hasPendingChanges() {
       const trained=devices.filter(d=>included.has(d.device_id)&&d.training?.status==="complete").length;
       const active=this.getActiveConsumerDevices().length;
       const home=Number(this.workspace?.whole_home_power), trainedWatts=Number(this.workspace?.trained_live_power_w||0);
-      const mystery=Number.isFinite(home)?Math.max(0,home-trainedWatts):null;\n      const meters=Array.isArray(this.workspace?.meters)?this.workspace.meters:[];\n      const voltageValues=meters.map(m=>Number(m?.voltage)).filter(Number.isFinite);\n      const currentValues=meters.map(m=>Number(m?.current)).filter(Number.isFinite);\n      const voltage=voltageValues.length ? voltageValues.reduce((a,b)=>a+b,0)/voltageValues.length : null;\n      const amps=currentValues.length ? currentValues.reduce((a,b)=>a+b,0) : (Number.isFinite(home)&&Number.isFinite(voltage)&&voltage>0 ? home/voltage : null);
+      const mystery=Number.isFinite(home)?Math.max(0,home-trainedWatts):null;
+      const meters=Array.isArray(this.workspace?.meters)?this.workspace.meters:[];
+      const voltageValues=meters.map(m=>Number(m?.voltage)).filter(Number.isFinite);
+      const currentValues=meters.map(m=>Number(m?.current)).filter(Number.isFinite);
+      const voltage=voltageValues.length ? voltageValues.reduce((a,b)=>a+b,0)/voltageValues.length : null;
+      const amps=currentValues.length ? currentValues.reduce((a,b)=>a+b,0) : (Number.isFinite(home)&&Number.isFinite(voltage)&&voltage>0 ? home/voltage : null);
       const fmt=v=>Number.isFinite(v)?`${v.toFixed(0)} W`:"—", progress=included.size?`${trained} / ${included.size}`:"0 / 0";
       return `<div class="summary">
         <div class="metric hero-metric"><span>Total Power</span><strong>${fmt(home)}</strong><small>Whole home</small></div>
         <button class="metric metric-button" id="active-consumers" type="button"><span>Active Consumers</span><strong>${active}</strong><small>Tap to view active loads</small></button>
         <div class="metric mystery"><span>Mystery Watts</span><strong>${fmt(mystery)}</strong><small>Not yet attributed</small></div>
         <div class="metric"><span>Trained Power</span><strong>${fmt(trainedWatts)}</strong><small>Currently attributed</small></div>
-        <div class="metric"><span>Training Progress</span><strong>${progress}</strong><small>Completed / included</small></div>\n        <div class="metric electrical-metric"><span>Electrical Load</span><strong>${Number.isFinite(voltage)?voltage.toFixed(1)+" V":"—"}</strong><small>${Number.isFinite(amps)?amps.toFixed(1)+" A amp draw":"—"}</small></div>
+        <div class="metric"><span>Training Progress</span><strong>${progress}</strong><small>Completed / included</small></div>
+        <div class="metric electrical-metric"><span>Electrical Load</span><strong>${Number.isFinite(voltage)?voltage.toFixed(1)+" V":"—"}</strong><small>${Number.isFinite(amps)?amps.toFixed(1)+" A amp draw":"—"}</small></div>
       </div>`;
     }
 
@@ -555,12 +561,21 @@ hasPendingChanges() {
         ${this.trainingWorkspaceOpen?`<div id="training-area">${this.renderTrainingWorkspace()}</div>`:""}
         <div class="toolbar"><div class="views"><button id="all" class="${this.view==="all"?"selected":""}">All <span>${devices.length}</span></button><button id="trained" class="${this.view==="trained"?"selected":""}">Trained <span>${trainedCount}</span></button><button id="excluded" class="${this.view==="excluded"?"selected":""}">Excluded <span>${excludedCount}</span></button></div><div class="toolbar-actions"><button id="data-management">Data</button>${this.view === "excluded" ? `<button id="empty-excluded" class="action-exclude" ${excludedCount ? "" : "disabled"}>Empty Excluded</button>` : ""}<button id="add">＋ Add Device / Entity</button><button id="save" class="primary" ${dirty?"":"disabled"}>Save Changes</button></div></div>
         <div class="list-tools"><label class="search-box"><span>⌕</span><input id="device-search" type="search" value="${this.escape(this.searchTerm)}" placeholder="Search devices, areas, entities…" autocomplete="off"></label></div>
-${selected ? `<div class="selection-bar"><div class="selection-count"><span class="selection-box">☐</span><strong>${selected}</strong> selected</div><div class="selection-actions">${selected ? `<button id="begin-training" class="action-training" ${canTrain?"":"disabled"}>Begin Training</button>` : ""}<button id="include" class="action-include" ${selected?"":"disabled"}>Include</button>${this.view === "excluded" ? `<button id="remove-excluded" class="action-exclude" ${selected?"":"disabled"}>Remove Selected</button>` : `<button id="exclude" class="action-exclude" ${selected?"":"disabled"}>Exclude</button>`}<button id="clear-selection" ${selected?"":"disabled"}>Clear Selection</button></div></div>` : ""}\n        <div class="table-scroll"><table><thead><tr><th class="select-col">☐</th>${this.sortHeader("name","Device")}${this.sortHeader("area","Area")}${this.sortHeader("source","Source")}${this.sortHeader("live","Live Watts")}${this.sortHeader("trained","Trained Watts")}${this.sortHeader("state","State")}${this.sortHeader("training","Training")}${this.sortHeader("sensor","Sensor")}</tr></thead><tbody>${rows.length?rows.map(d=>this.row(d)).join(""):`<tr><td colspan="9" class="empty">No devices match this view.</td></tr>`}</tbody></table></div>
+${selected ? `<div class="selection-bar"><div class="selection-count"><span class="selection-box">☐</span><strong>${selected}</strong> selected</div><div class="selection-actions">${selected ? `<button id="begin-training" class="action-training" ${canTrain?"":"disabled"}>Begin Training</button>` : ""}<button id="include" class="action-include" ${selected?"":"disabled"}>Include</button>${this.view === "excluded" ? `<button id="remove-excluded" class="action-exclude" ${selected?"":"disabled"}>Remove Selected</button>` : `<button id="exclude" class="action-exclude" ${selected?"":"disabled"}>Exclude</button>`}<button id="clear-selection" ${selected?"":"disabled"}>Clear Selection</button></div></div>` : ""}
+        <div class="table-scroll"><table><thead><tr><th class="select-col">☐</th>${this.sortHeader("name","Device")}${this.sortHeader("area","Area")}${this.sortHeader("source","Source")}${this.sortHeader("live","Live Watts")}${this.sortHeader("trained","Trained Watts")}${this.sortHeader("state","State")}${this.sortHeader("training","Training")}${this.sortHeader("sensor","Sensor")}</tr></thead><tbody>${rows.length?rows.map(d=>this.row(d)).join(""):`<tr><td colspan="9" class="empty">No devices match this view.</td></tr>`}</tbody></table></div>
       </div>${this.renderConfigurationDialog()}`;
       this.bind();
     }
 
-    sensorAvailable(device) {\n      const measurements = Array.isArray(device?.measurements) ? device.measurements : [];\n      return measurements.some(item => {\n        const kind = String(item?.kind || "").toLowerCase();\n        const unit = String(item?.unit || "").toLowerCase();\n        return kind === "power" && ["w", "kw"].includes(unit) && !!item?.entity_id;\n      });\n    }\n    row(device) {
+    sensorAvailable(device) {
+      const measurements = Array.isArray(device?.measurements) ? device.measurements : [];
+      return measurements.some(item => {
+        const kind = String(item?.kind || "").toLowerCase();
+        const unit = String(item?.unit || "").toLowerCase();
+        return kind === "power" && ["w", "kw"].includes(unit) && !!item?.entity_id;
+      });
+    }
+    row(device) {
       const selected=this.selectedIds.has(device.device_id), training=device.training||{}, name=this.escape(device.name||device.device_id);
       const live=this.livePower(device), learned=Number(training.learned_signature?.load_w); return `<tr data-device-id="${this.attr(device.device_id)}"><td class="select-col"><input class="select-device" type="checkbox" data-select="${this.attr(device.device_id)}" ${selected?"checked":""} aria-label="Select ${name}"></td><td class="device-name-cell"><button type="button" class="entity-history-link" data-history-device="${this.attr(device.device_id)}" title="Show Home Assistant history"><strong>${name}</strong></button><small>${this.escape(device.category||device.model||"")}</small></td><td>${this.escape(device.area||"")}</td><td>${String(device.source||"").toLowerCase()==="manual"?"Manual":"HA"}</td><td class="power-cell">${Number.isFinite(live)?`${live.toFixed(0)} W`:"—"}</td><td class="trained-power-cell">${Number.isFinite(learned)?`${learned.toFixed(0)} W`:"—"}</td><td class="state-cell">${this.renderState(device)}</td><td class="training-status">${this.renderTrainingStatus(device)}</td><td class="sensor-cell"><span class="sensor-box ${this.sensorAvailable(device)?"yes":"no"}">${this.sensorAvailable(device)?"YES":"NO"}</span></td></tr>`;
     }
