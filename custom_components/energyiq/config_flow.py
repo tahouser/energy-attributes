@@ -386,7 +386,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_MONITORED_ENTITIES: [],
             "device_classifications": {},
             "commissioned_devices": {},
-            "commissioning_status": "deferred" if deferred else "complete",
+            "commissioning_status": "needs_configuration" if not deferred else "deferred",
             "commissioning_source": self._selected_meter.get("group_id") if self._selected_meter else "manual",
             "commissioning_source_class": self._selected_meter.get("meter_class") if self._selected_meter else "manual",
             "_restore_persistent_data": False,
@@ -462,31 +462,47 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional("restore_existing", default=True): bool,
             }))
 
+        # Meter Detector is the installation/commissioning step.
         self._refresh_detected_meters()
-        class_a = [c for c in self._detected_meters if c.get("meter_class") == "A"]
-        if len(class_a) == 1:
-            self._selected_meter = class_a[0]
-            return await self.async_step_commission()
-        if class_a:
-            self._detected_meters = class_a
+        if self._detected_meters:
+            class_a = [c for c in self._detected_meters if c.get("meter_class") == "A"]
+            self._detected_meters = class_a or self._detected_meters
             return await self.async_step_meter_select()
         return await self.async_step_manual_meter()
 
     async def async_step_meter_select(self, user_input=None):
-        """Choose among multiple Class A sources before the confirmation screen."""
+        """Meter Detector selection: choose the physical source for EnergyIQ."""
+        if not self._detected_meters:
+            self._refresh_detected_meters()
         if user_input is not None:
             selected = self._commissioning_candidate_map().get(user_input["meter"])
             if selected:
                 self._selected_meter = selected
-                return await self.async_step_commission()
-        return self.async_show_form(step_id="meter_select", data_schema=vol.Schema({
-            vol.Required("meter"): SelectSelector(
-                SelectSelectorConfig(
-                    options=_commissioning_options(self._detected_meters),
-                    mode=SelectSelectorMode.DROPDOWN,
-                )
-            )
-        }))
+                power = _commissioning_power_entity(selected)
+                if power:
+                    return await self._finish_commissioning(power, selected)
+            return await self.async_step_manual_meter()
+        has_class_a = any(c.get("meter_class") == "A" for c in self._detected_meters)
+        return self.async_show_form(
+            step_id="meter_select",
+            description_placeholders={
+                "description": (
+                    "EnergyIQ found a whole-home Class A source. Select the grouped "
+                    "physical meter you want EnergyIQ to use, then continue."
+                    if has_class_a else
+                    "EnergyIQ could not identify a Class A whole-home meter. Select "
+                    "the most useful electrical source it found, or choose a meter manually."
+                ),
+            },
+            data_schema=vol.Schema({
+                vol.Required("meter"): SelectSelector(
+                    SelectSelectorConfig(
+                        options=_commissioning_options(self._detected_meters),
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+            }),
+        )
 
     async def async_step_commission(self, user_input=None):
         """Give the user an explicit accept / choose-different / manual choice."""
@@ -630,14 +646,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
     async def async_step_reconfigure(self, user_input=None):
-        """Re-select the EnergyIQ whole-home meter for an existing entry."""
+        """Re-run the Meter Detector for an existing EnergyIQ entry."""
         self._refresh_detected_meters()
         class_a = [c for c in self._detected_meters if c.get("meter_class") == "A"]
-        if len(class_a) == 1:
-            self._selected_meter = class_a[0]
-            return await self.async_step_commission()
-        if class_a:
-            self._detected_meters = class_a
+        self._detected_meters = class_a or self._detected_meters
+        if self._detected_meters:
             return await self.async_step_meter_select()
         return await self.async_step_manual_meter()
 
