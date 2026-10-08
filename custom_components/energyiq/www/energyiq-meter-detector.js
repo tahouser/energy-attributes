@@ -139,24 +139,24 @@
       return `
         <div class="probe">
           <div class="probe-head">
-            <div><span class="eyebrow">Live interrogation</span><strong>30-second channel test</strong><small>\${this.escape(p.conclusion)}</small></div>
-            <span class="probe-count">\${p.active_channel_count} active / \${p.channel_count_observed} observed</span>
+            <div><span class="eyebrow">Live interrogation</span><strong>30-second channel test</strong><small>${this.escape(p.conclusion)}</small></div>
+            <span class="probe-count">${p.active_channel_count} active / ${p.channel_count_observed} observed</span>
           </div>
           <div class="channel-grid">
-            \${(p.channels||[]).map(ch => `
-              <div class="channel-card \${ch.active ? "active" : ""}">
-                <div class="channel-top"><strong>\${this.escape(ch.channel)}</strong><span>\${ch.active ? "SIGNAL" : "QUIET"}</span></div>
-                <div class="channel-assessment">\${this.escape(ch.assessment)}</div>
-                \${(ch.entities||[]).map(e=>`<div class="probe-row"><span>\${this.escape(e.kind)}</span><strong>\${e.max == null ? "—" : this.escape(Number(e.max).toFixed(2))} \${this.escape(e.unit||"")}</strong><small>range \${e.range == null ? "—" : this.escape(Number(e.range).toFixed(2))}</small></div>`).join("")}
+            ${(p.channels||[]).map(ch => `
+              <div class="channel-card ${ch.active ? "active" : ""}">
+                <div class="channel-top"><strong>${this.escape(ch.channel)}</strong><span>${ch.active ? "SIGNAL" : "QUIET"}</span></div>
+                <div class="channel-assessment">${this.escape(ch.assessment)}</div>
+                ${(ch.entities||[]).map(e=>`<div class="probe-row"><span>${this.escape(e.kind)}</span><strong>${e.max == null ? "—" : this.escape(Number(e.max).toFixed(2))} ${this.escape(e.unit||"")}</strong><small>range ${e.range == null ? "—" : this.escape(Number(e.range).toFixed(2))}</small></div>`).join("")}
               </div>`).join("")}
           </div>
-          \${source && source.mode !== "insufficient" ? `
+          ${source && source.mode !== "insufficient" ? `
             <div class="source-result">
-              <div><span class="eyebrow">EnergyIQ interpretation</span><strong>\${this.escape(source.label)}</strong>
-              <small>\${this.escape(ids.map(x => x.split(".").pop()).join(" + "))}\${source.current_w == null ? "" : ` · \${this.escape(Number(source.current_w).toFixed(0))} W observed`}</small></div>
-              \${ids.length ? `<button type="button" class="meter-use primary" data-use-source="\${this.escape(ids.join(","))}" data-source-mode="\${this.escape(source.mode)}">\${selected ? "Current EnergyIQ meter" : "Use this meter"}</button>` : ""}
+              <div><span class="eyebrow">EnergyIQ interpretation</span><strong>${this.escape(source.label)}</strong>
+              <small>${this.escape(ids.map(x => x.split(".").pop()).join(" + "))}${source.current_w == null ? "" : ` · ${this.escape(Number(source.current_w).toFixed(0))} W observed`}</small></div>
+              ${ids.length ? `<button type="button" class="meter-use primary" data-use-source="${this.escape(ids.join(","))}" data-source-mode="${this.escape(source.mode)}">${selected ? "Current EnergyIQ meter" : "Use this meter"}</button>` : ""}
             </div>` : ""}
-          <div class="probe-note">\${(p.limitations||[]).map(x=>`<div>• \${this.escape(x)}</div>`).join("")}</div>
+          <div class="probe-note">${(p.limitations||[]).map(x=>`<div>• ${this.escape(x)}</div>`).join("")}</div>
         </div>`;
     }
 
