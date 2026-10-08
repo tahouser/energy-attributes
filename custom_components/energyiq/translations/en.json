@@ -9,6 +9,44 @@
           "power_entity": "Whole-home power sensor",
           "restore_existing": "Restore existing EnergyIQ data"
         }
+      },
+      "configuration_menu": {
+        "title": "EnergyIQ Configuration",
+        "description": "Choose a configuration area. Settings are grouped so each area can expand independently as the configuration framework grows."
+      },
+      "meter_properties": {
+        "title": "Meter Properties",
+        "description": "Whole-home meter and electrical-source properties."
+      },
+      "general": {
+        "title": "General",
+        "description": "Currency, time zone, and other general EnergyIQ settings."
+      },
+      "consumption_limits": {
+        "title": "Consumption Limits",
+        "description": "Set the consumption thresholds used by EnergyIQ."
+      },
+      "cost_limits": {
+        "title": "Cost Limits",
+        "description": "Set the cost thresholds used by EnergyIQ."
+      },
+      "peak_time_window": {
+        "title": "Peak Time Window",
+        "description": "Define when Peak rates and Peak consumption settings apply."
+      },
+      "utility_search": {
+        "title": "Utility Search",
+        "description": "Find utility rates by ZIP code, or enter utility rate information manually."
+      }
+    },
+    "menu_options": {
+      "configuration_menu": {
+        "meter_properties": "Meter Properties",
+        "general": "General",
+        "consumption_limits": "Consumption Limits",
+        "cost_limits": "Cost Limits",
+        "peak_time_window": "Peak Time Window",
+        "utility_search": "Utility Search"
       }
     }
   },
