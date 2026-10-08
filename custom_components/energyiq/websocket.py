@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
 from .persistence import get_store, validate_import_snapshot
-from .meter_detector import discover_meters, ws_meter_detector, ws_meter_detector_probe
+from .meter_detector import discover_meters, ws_meter_detector, ws_meter_detector_probe, _power_role
 
 _MANIFEST_VERSION = json.loads((Path(__file__).with_name("manifest.json")).read_text(encoding="utf-8"))["version"]
 
@@ -306,8 +306,16 @@ async def ws_set_power_entity(hass, connection, msg):
     attrs = state.attributes
     device_class = str(attrs.get("device_class") or "").casefold()
     unit = str(attrs.get("unit_of_measurement") or "").casefold()
+    if device_class == "apparent_power":
+        raise ValueError("Choose active power, not apparent power.")
     if device_class != "power" and unit not in {"w", "kw"}:
         raise ValueError("Choose an active power sensor measured in W or kW.")
+    role = _power_role(
+        str(attrs.get("friendly_name") or entity.name or entity_id),
+        entity_id,
+    )
+    if role == "phase":
+        raise ValueError("L1/L2/L3 are individual phases. Choose the meter's Total Active Power entity.")
     try:
         numeric = float(state.state)
     except (TypeError, ValueError):
