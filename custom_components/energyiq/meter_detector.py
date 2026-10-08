@@ -388,7 +388,7 @@ def discover_meters(hass: HomeAssistant) -> dict:
             "inference": _infer_electrical_system(device, entities),
         })
 
-    def _physical_group_key(candidate: dict) -> tuple[str, str, str]:
+def _physical_group_key(candidate: dict) -> tuple[str, str, str]:
     """Build a conservative logical-source key for HA device records.
 
     HA can expose one physical meter as several device records. Prefer an
@@ -408,16 +408,17 @@ def discover_meters(hass: HomeAssistant) -> dict:
         return (manufacturer, model, shelly_3em.group(1))
 
     normalized = re.sub(r"[._-]+", " ", name)
-    normalized = re.sub(r"\\b(?:phase|channel|ch|l)\\s*[123]\\b", "", normalized)
-    normalized = re.sub(r"\\b[abc]\\b$", "", normalized)
-    normalized = re.sub(r"\\s+", " ", normalized).strip()
+    normalized = re.sub(r"\b(?:phase|channel|ch|l)\s*[123]\b", "", normalized)
+    normalized = re.sub(r"\b[abc]\b$", "", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
     return (manufacturer, model, normalized)
 
-    # Group HA device records that represent the same physical electrical source.
-    # A physical meter can appear as multiple HA device records for channels.
-    grouped: dict[tuple[str, str, str], list[dict]] = {}
-    for candidate in candidates:
-        grouped.setdefault(_physical_group_key(candidate), []).append(candidate)
+
+# Group HA device records that represent the same physical electrical source.
+# A physical meter can appear as multiple HA device records for channels.
+grouped: dict[tuple[str, str, str], list[dict]] = {}
+for candidate in candidates:
+    grouped.setdefault(_physical_group_key(candidate), []).append(candidate)
 
     merged_candidates = []
     for members in grouped.values():
