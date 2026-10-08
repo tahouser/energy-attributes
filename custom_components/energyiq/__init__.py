@@ -22,10 +22,10 @@ PLATFORMS = ["sensor"]
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate the commissioning schema without changing existing user data."""
-    if config_entry.version == 4:
-        # 3.1.420 introduced commissioning flow metadata, but existing entries
-        # do not need any data transformation. Advance only the schema version.
-        hass.config_entries.async_update_entry(config_entry, version=5)
+    if config_entry.version == 4 and config_entry.minor_version < 1:
+        # Commissioning changed the flow, not the stored data schema. Keep the
+        # existing major version and advance only the minor version.
+        hass.config_entries.async_update_entry(config_entry, version=4, minor_version=1)
     return True
 
 
