@@ -7,8 +7,8 @@
  */
 (() => {
   const TAG = "energyiq-panel-v447";
-  const VERSION = "46000";
-  const UI_VERSION = "3.1.460";
+  const VERSION = "46600";
+  const UI_VERSION = "3.1.466";
 
   if (customElements.get(TAG)) return;
 
@@ -19,7 +19,7 @@
       this.entryId = null;
       this.workspace = null;
       this.bulk = null;
-      this.brandUrl = "/energyiq-brand/icon@2x.png?v=46000";
+      this.brandUrl = "/energyiq-brand/icon@2x.png?v=46600";
       this.view = "all";
       this.pendingIncluded = null;
       this.selectedIds = new Set();
@@ -34,6 +34,7 @@
       this.bulkTimer = null;
       this.bulkStarting = false;
       this.trainingSessionStarted = new Set();
+      this.trainingSessionObservedActive = new Set();
       this.upperSectionsCollapsed = false;      this.sortColumn = "name";
       this.sortDirection = "asc";
       this.configurationSection = null;
@@ -737,18 +738,28 @@ this.querySelector("#begin-training")?.addEventListener("click",()=>this.beginSe
       const valid = deviceIds.filter(id => this.getDevice(id) && this.getPersistedIds().has(id));
       if (!valid.length) return;
       this.trainingSessionStarted.clear();
+      this.trainingSessionObservedActive.clear();
       this.trainingQueue = [...new Set(valid)]; this.activeTrainingId = this.trainingQueue[0] || null; this.trainingWorkspaceOpen = true;
       this.render();
       requestAnimationFrame(() => this.querySelector("#training-area")?.scrollIntoView({ behavior: "smooth", block: "start" }));
     }
-    closeTrainingWorkspace() { this.trainingWorkspaceOpen = false; this.trainingQueue = []; this.activeTrainingId = null; this.trainingSessionStarted.clear(); this.render(); requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" })); }
+    closeTrainingWorkspace() { this.trainingWorkspaceOpen = false; this.trainingQueue = []; this.activeTrainingId = null; this.trainingSessionStarted.clear(); this.trainingSessionObservedActive.clear(); this.render(); requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: "smooth" })); }
     trainingQueueSlots() { const ids = this.trainingQueue.slice(0, 3); return [ids[0] || null, ids[1] || null, ids[2] || null]; }
     activeTrainingDevice() { return this.activeTrainingId ? this.getDevice(this.activeTrainingId) : null; }
     trainingComplete(deviceId) { return this.getDevice(deviceId)?.training?.status === "complete"; }
     handleTrainingCompletion() {
       if (!this.trainingWorkspaceOpen || !this.activeTrainingId) return false;
-      if (!this.trainingSessionStarted.has(this.activeTrainingId) || !this.trainingComplete(this.activeTrainingId)) return false;
+      if (!this.trainingSessionStarted.has(this.activeTrainingId)) return false;
+      const currentTraining = this.getDevice(this.activeTrainingId)?.training || {};
+      // A previously trained device still reports "complete" while the start request
+      // is in flight. Do not treat that stale result as completion of the new session.
+      if (currentTraining.status === "active") {
+        this.trainingSessionObservedActive.add(this.activeTrainingId);
+        return false;
+      }
+      if (!this.trainingComplete(this.activeTrainingId) || !this.trainingSessionObservedActive.has(this.activeTrainingId)) return false;
       this.trainingSessionStarted.delete(this.activeTrainingId);
+      this.trainingSessionObservedActive.delete(this.activeTrainingId);
       if (this.trainingQueue[0] === this.activeTrainingId) {
         this.trainingQueue.shift();
       } else {
