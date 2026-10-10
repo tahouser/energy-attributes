@@ -1,7 +1,7 @@
 # EnergyIQ Project State
 
 **Architecture:** Clean rebuild based on `ENERGYIQ_DESIGN.md`.
-**Latest verified release:** v3.1.467. **Next candidate:** v3.1.468, limited to release-validation safeguards and handoff-state corrections. Do not call v3.1.468 released until its exact tag, published release, manifest, and successful validation run are verified.
+**Latest verified release:** v3.1.468 (published 2026-10-10 and confirmed installed by the project owner). No next version is planned. The release is limited to release-validation safeguards and handoff-state corrections; no runtime behavior or persisted-data format change was intended.
 **Working repository:** `tahouser/energy-attributes`
 
 ## Handoff direction
@@ -75,11 +75,14 @@ Only then is the build ready for Home Assistant validation.
 - Confirmed the existing public release is v3.1.466.
 - Added the MIT License and documented the project's as-is status and lack of an ongoing support commitment.
 - Reframed the old feature roadmap as historical context rather than a current promise of future work.
-- Verified that v3.1.467 is published, non-draft, and non-prerelease; tag `v3.1.467` points to commit `d6a0b0dca6ce9940f30cc748494e5515094edee0`, whose validation workflow completed successfully.
+- Verified that v3.1.467 was published, non-draft, and non-prerelease; tag `v3.1.467` pointed to commit `d6a0b0dca6ce9940f30cc748494e5515094edee0`, whose validation workflow completed successfully.
 - Audited the registered Lovelace card path. Runtime registration uses `energyiq-card-3.1.464.js` (SHA `31ee0074937adfe145f4211c1f2ae24f4adee71e`); the similarly named `energyiq-card.js` is an older, different file (SHA `41b292ad72ad819a93abe7e123beb07e2692b1d1`). The registered versioned file is the active card entry point; do not replace it with the older generic file.
 - Corrected validation to syntax-check and require the actual card file named by `CARD_PATH`, rather than syntax-checking the unrelated generic card file.
 - Corrected release automation so it runs only after the `Validate EnergyIQ` workflow succeeds on a main-branch push, checks out that exact validated commit, and creates the release targeting that SHA. This closes the prior race where a manifest-triggered release could be published before validation completed.
-- v3.1.468 is intended to contain only these validation/release safeguards and corrected handoff state; no runtime behavior or persisted data format change is intended. Its validation and release status must be verified before recommending HACS update.
+- v3.1.468 contained the validation/release safeguards described above; no runtime behavior or persisted data format change was intended. Its exact tag, published release, manifest version, and successful validation were verified before the HACS update was recommended.
+- Published v3.1.468 after validation workflow success. The release tag points to the exact validated commit `97130a1ae9155d6e43842506f559c783d923d75c`; the manifest at that tag reports `3.1.468`. Validation run: https://github.com/tahouser/energy-attributes/actions/runs/38059139335. Release workflow run: https://github.com/tahouser/energy-attributes/actions/runs/38059158252. Published release: https://github.com/tahouser/energy-attributes/releases/tag/v3.1.468.
+- The project owner installed v3.1.468 through HACS and reported that it looks good in Home Assistant. This is a practical user validation of the release; no additional runtime changes are requested.
+- Handoff remains the priority: keep the working code stable, avoid new features and redesigns, and prepare clear documentation for a willing successor. The owner is not committing to ongoing maintenance or support.
 
 ## Previous session record — 2026-10-08
 
