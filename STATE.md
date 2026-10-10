@@ -83,6 +83,7 @@ Only then is the build ready for Home Assistant validation.
 - Published v3.1.468 after validation workflow success. The release tag points to the exact validated commit `97130a1ae9155d6e43842506f559c783d923d75c`; the manifest at that tag reports `3.1.468`. Validation run: https://github.com/tahouser/energy-attributes/actions/runs/38059139335. Release workflow run: https://github.com/tahouser/energy-attributes/actions/runs/38059158252. Published release: https://github.com/tahouser/energy-attributes/releases/tag/v3.1.468.
 - The project owner installed v3.1.468 through HACS and reported that it looks good in Home Assistant. This is a practical user validation of the release; no additional runtime changes are requested.
 - Handoff remains the priority: keep the working code stable, avoid new features and redesigns, and prepare clear documentation for a willing successor. The owner is not committing to ongoing maintenance or support.
+- Completed the handoff documentation: added [`docs/HANDOFF.md`](docs/HANDOFF.md) with successor onboarding, data-safety rules, release process, maintenance boundaries, and scope; updated `README.md` to link the handoff guide and identify the actual runtime-registered card file; updated `docs/ARCHITECTURE.md` to label old planned architecture work as historical notes rather than an active roadmap. These were documentation-only changes after v3.1.468 and do not change the released runtime.
 
 ## Previous session record — 2026-10-08
 
