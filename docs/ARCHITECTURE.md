@@ -1,6 +1,6 @@
 # EnergyIQ Architecture
 
-This document defines the architectural direction for EnergyIQ. It is intentionally separate from the user-facing README.
+This document records conceptual component boundaries and safety principles for the existing EnergyIQ implementation. It is not an active refactoring plan or a commitment to future work. The current release is v3.1.468; see [HANDOFF.md](HANDOFF.md) for successor guidance and [STATE.md](../STATE.md) for verified project status.
 
 ## Core principles
 
@@ -34,7 +34,7 @@ ConfigEntry -> ConfigEntry.runtime_data -> EnergyIQ coordinator
 
 Runtime-only objects should not be persisted in ConfigEntry data or options.
 
-The migration from hass.data to entry.runtime_data is planned as a focused revision and must not alter training behavior.
+The distinction between configuration, options, runtime objects, and durable application state is useful when reviewing changes. Do not undertake an architectural migration merely because it appears in historical design notes; any migration needs a concrete defect or requirement and explicit data-safety validation.
 
 ## Persistence
 
@@ -88,13 +88,14 @@ Each revision must be:
 
 Known rollback point: EnergyIQ 3.1.36.
 
-## Planned architecture sequence
+## Historical architecture ideas — not a roadmap
 
-1. Runtime data migration
-2. Entity architecture
-3. HA device/entity identity and metadata reconciliation
-4. Candidate inventory persistence/reconciliation
-5. WebSocket/API cleanup
-6. Automated test infrastructure
-7. Frontend/card architecture cleanup
-8. Feature/UI work
+The items below appeared in earlier architecture planning. They are not current commitments, priorities, or instructions to begin work. Given the project's handoff status, do not start these tasks without a willing maintainer identifying a concrete need and independently accepting responsibility for the work:
+
+- Runtime data migration
+- Entity architecture and metadata reconciliation
+- Candidate inventory persistence/reconciliation
+- WebSocket/API cleanup
+- Expanded automated test infrastructure
+- Frontend/card architecture cleanup
+- Feature or UI work
