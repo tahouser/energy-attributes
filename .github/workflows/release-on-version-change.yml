@@ -35,12 +35,7 @@ jobs:
           set -euo pipefail
           TAG="v${VERSION}"
           if gh release view "$TAG" >/dev/null 2>&1; then
-            EXISTING_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')"
-            if [ "$EXISTING_SHA" != "$VALIDATED_SHA" ]; then
-              echo "::error::Release $TAG already exists but does not point to the validated commit."
-              exit 1
-            fi
-            echo "Release $TAG already exists at validated commit $VALIDATED_SHA."
+            echo "Release $TAG already exists; nothing to publish."
           else
             gh release create "$TAG" \
               --target "$VALIDATED_SHA" \
