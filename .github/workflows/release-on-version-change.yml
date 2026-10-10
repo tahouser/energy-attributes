@@ -1,52 +1,49 @@
-name: Release on version change
+name: Release after successful validation
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Validate EnergyIQ"]
+    types: [completed]
     branches: [main]
-    paths:
-      - 'custom_components/energyiq/manifest.json'
-      - '.github/workflows/release-on-version-change.yml'
-  workflow_dispatch:
 
 permissions:
-  # Release workflow is intentionally path-triggered for manifest updates.
   contents: write
 
 jobs:
   release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout the exact validated commit
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
 
-      - name: Read version
+      - name: Read version from validated commit
         id: version
         shell: bash
         run: echo "version=$(python -c 'import json; print(json.load(open("custom_components/energyiq/manifest.json"))["version"])')" >> "$GITHUB_OUTPUT"
 
-      - name: Check whether release already exists
-        id: existing
+      - name: Verify or create release for the validated commit
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
+          VALIDATED_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
-          if gh release view "v${VERSION}" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            EXISTING_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" --jq '.object.sha')"
+            if [ "$EXISTING_SHA" != "$VALIDATED_SHA" ]; then
+              echo "::error::Release $TAG already exists but does not point to the validated commit."
+              exit 1
+            fi
+            echo "Release $TAG already exists at validated commit $VALIDATED_SHA."
           else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
+            gh release create "$TAG" \
+              --target "$VALIDATED_SHA" \
+              --title "EnergyIQ $TAG" \
+              --generate-notes
           fi
-
-      - name: Create release
-        if: steps.existing.outputs.exists != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
-        shell: bash
-        run: |
-          gh release create "v${VERSION}" \
-            --target main \
-            --title "EnergyIQ v${VERSION}" \
-            --generate-notes
