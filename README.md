@@ -31,11 +31,11 @@ The workspace is a single Home Assistant panel application. The active runtime f
 
 - `custom_components/energyiq/www/energyiq-panel.js`
 - `custom_components/energyiq/www/energyiq-meter-detector.js`
-- `custom_components/energyiq/www/energyiq-card.js`
+- The dashboard card file registered at runtime by `CARD_PATH` in `custom_components/energyiq/__init__.py` (currently `energyiq-card-3.1.464.js`).
 
-Historical versioned card files remain in the repository history and runtime directory for compatibility with existing dashboards; the active card entry point is `energyiq-card.js`.
+Do not assume a similarly named generic or historical card file is active; inspect the registration before changing frontend files.
 
-The functional specification is documented in [`ENERGYIQ_DESIGN.md`](ENERGYIQ_DESIGN.md). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the system overview and [`CHANGE_PROCEDURE.md`](CHANGE_PROCEDURE.md) for the data-preservation and validation rules.
+The functional specification is documented in [`ENERGYIQ_DESIGN.md`](ENERGYIQ_DESIGN.md). See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for architectural context, [`CHANGE_PROCEDURE.md`](CHANGE_PROCEDURE.md) for data-preservation and release validation rules, and [`docs/HANDOFF.md`](docs/HANDOFF.md) for the successor handoff, scope boundaries, and maintenance guidance. [`STATE.md`](STATE.md) records the current verified release state.
 
 ## Maintenance and support
 
