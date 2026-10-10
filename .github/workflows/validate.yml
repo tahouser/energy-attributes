@@ -25,7 +25,18 @@ jobs:
         run: |
           node --check custom_components/energyiq/www/energyiq-panel.js
           node --check custom_components/energyiq/www/energyiq-meter-detector.js
-          node --check custom_components/energyiq/www/energyiq-card.js
+          CARD_FILE="$(python - <<'PY'
+          import re
+          from pathlib import Path
+          init = Path('custom_components/energyiq/__init__.py').read_text(encoding='utf-8')
+          match = re.search(r'CARD_PATH = f"\\{URL_BASE\\}/([^"]+)"', init)
+          if not match:
+              raise SystemExit('CARD_PATH is missing or cannot be resolved.')
+          print(Path('custom_components/energyiq/www') / match.group(1))
+          PY
+          )"
+          test -f "$CARD_FILE" || { echo "::error::Registered card file is missing: $CARD_FILE"; exit 1; }
+          node --check "$CARD_FILE"
 
       - name: Validate release structure and panel loading
         shell: bash
@@ -57,6 +68,11 @@ jobs:
           frontend_match = re.search(r'FRONTEND_VERSION = "([0-9]+)"', init)
           assert frontend_match, 'FRONTEND_VERSION is missing.'
           assert 'URL_BASE = "/energyiq-static"' in init
+          card_match = re.search(r'CARD_PATH = f"\\{URL_BASE\\}/([^"]+)"', init)
+          assert card_match, 'Registered card path is missing.'
+          card_file = Path('custom_components/energyiq/www') / card_match.group(1)
+          assert card_file.is_file(), f'Registered card file does not exist: {card_file}'
+          assert 'CARD_URL = f"{CARD_PATH}?v={FRONTEND_VERSION}"' in init
           assert f'const TAG = "{panel_id}";' in js
           assert 'customElements.define(TAG' in js
 
