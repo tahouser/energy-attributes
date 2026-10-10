@@ -1,7 +1,7 @@
 # EnergyIQ Project State
 
 **Architecture:** Clean rebuild based on `ENERGYIQ_DESIGN.md`.
-**Current release:** v3.1.467 (handoff/documentation release planned from v3.1.466; do not treat as published until the matching GitHub release is verified).
+**Latest verified release:** v3.1.467. **Next candidate:** v3.1.468, limited to release-validation safeguards and handoff-state corrections. Do not call v3.1.468 released until its exact tag, published release, manifest, and successful validation run are verified.
 **Working repository:** `tahouser/energy-attributes`
 
 ## Handoff direction
@@ -75,9 +75,11 @@ Only then is the build ready for Home Assistant validation.
 - Confirmed the existing public release is v3.1.466.
 - Added the MIT License and documented the project's as-is status and lack of an ongoing support commitment.
 - Reframed the old feature roadmap as historical context rather than a current promise of future work.
-- Fixed the validation workflow: it previously tried to syntax-check `energyiq-card-<manifest-version>.js`, although the active card entry point is `energyiq-card.js`. The workflow had failed on v3.1.466 because `energyiq-card-3.1.466.js` did not exist. The corrected workflow passed on commit `877f4b2c8bc0a942016c3edf5990816f58fa91ad`.
-- The v3.1.467 release is a documentation/licensing/validation-workflow handoff release; no intended EnergyIQ runtime behavior or persisted data format changes are part of it.
-- Do not call v3.1.467 released until its manifest version, exact release tag, published GitHub release, and validation result have all been verified.
+- Verified that v3.1.467 is published, non-draft, and non-prerelease; tag `v3.1.467` points to commit `d6a0b0dca6ce9940f30cc748494e5515094edee0`, whose validation workflow completed successfully.
+- Audited the registered Lovelace card path. Runtime registration uses `energyiq-card-3.1.464.js` (SHA `31ee0074937adfe145f4211c1f2ae24f4adee71e`); the similarly named `energyiq-card.js` is an older, different file (SHA `41b292ad72ad819a93abe7e123beb07e2692b1d1`). The registered versioned file is the active card entry point; do not replace it with the older generic file.
+- Corrected validation to syntax-check and require the actual card file named by `CARD_PATH`, rather than syntax-checking the unrelated generic card file.
+- Corrected release automation so it runs only after the `Validate EnergyIQ` workflow succeeds on a main-branch push, checks out that exact validated commit, and creates the release targeting that SHA. This closes the prior race where a manifest-triggered release could be published before validation completed.
+- v3.1.468 is intended to contain only these validation/release safeguards and corrected handoff state; no runtime behavior or persisted data format change is intended. Its validation and release status must be verified before recommending HACS update.
 
 ## Previous session record — 2026-10-08
 
